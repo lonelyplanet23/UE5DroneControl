@@ -11,3 +11,33 @@ Saved
 *.suo
 *.xcodeproj
 *.xcworkspace
+
+# Visual Studio / Jetbrains Rider 生成的文件
+.vs/
+.idea/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+
+# 虚幻引擎生成的临时文件夹 (绝对不要上传这些！)
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+Script/
+
+# 插件中的临时文件 (如果有项目内插件)
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# 操作系统生成的文件
+.DS_Store
+Thumbs.db
+
+# Cesium Cache Files (不要上传缓存)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+cesium-request-cache.sqlite
