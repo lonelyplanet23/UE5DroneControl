@@ -38,7 +38,7 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->SetUsingAbsoluteRotation(true);
-    CameraBoom->TargetArmLength = 1200.f; // 稍微拉远一点视角
+    CameraBoom->TargetArmLength = 3600.f; // 稍微拉远一点视角
     CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
     CameraBoom->bDoCollisionTest = false;
 
@@ -57,7 +57,7 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     LiftSpeed = 300.0f;
     InterpSpeed = 4.0f;
     MinHeight = 50.0f;
-    MaxHeight = 1000.0f;
+    MaxHeight = 3000.0f;
 
     // 初始化网络指针
     SenderSocket = nullptr;

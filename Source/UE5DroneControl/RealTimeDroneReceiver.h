@@ -1,14 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UE5DroneControlCharacter.h" // ¼Ì³ÐÄãµÄÖ÷½Ç»ùÀà
+#include "UE5DroneControlCharacter.h" // ï¿½Ì³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç»ï¿½ï¿½ï¿½
 #include "Networking.h"
 #include "Sockets.h"
 #include "RealTimeDroneReceiver.generated.h"
 
 /**
- * ÕæÊµ·É»ú½ÓÊÕ¶Ë (ARealTimeDroneReceiver)
- * ²ÉÓÃÖ÷Ïß³ÌÂÖÑ¯ (Polling) Ä£Ê½£¬½â¾ö¶àÏß³ÌÎ¯ÍÐÔÚÄ³Ð©»·¾³ÏÂ²»´¥·¢µÄÎÊÌâ¡£
+ * ï¿½ï¿½Êµï¿½É»ï¿½ï¿½ï¿½ï¿½Õ¶ï¿½ (ARealTimeDroneReceiver)
+ * ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ß³ï¿½ï¿½ï¿½Ñ¯ (Polling) Ä£Ê½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ß³ï¿½Î¯ï¿½ï¿½ï¿½ï¿½Ä³Ð©ï¿½ï¿½ï¿½ï¿½ï¿½Â²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½â¡£
  */
 UCLASS()
 class UE5DRONECONTROL_API ARealTimeDroneReceiver : public AUE5DroneControlCharacter
@@ -16,7 +16,7 @@ class UE5DRONECONTROL_API ARealTimeDroneReceiver : public AUE5DroneControlCharac
 	GENERATED_BODY()
 
 public:
-	// ¹¹Ôìº¯Êý
+	// ï¿½ï¿½ï¿½ìº¯ï¿½ï¿½
 	ARealTimeDroneReceiver();
 
 protected:
@@ -24,34 +24,34 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-	// ÖØÐ´ Tick Ã¿Ò»Ö¡Ö÷¶¯¼ì²éÊý¾Ý
+	// ï¿½ï¿½Ð´ Tick Ã¿Ò»Ö¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	virtual void Tick(float DeltaTime) override;
 
-	// --- ²ÎÊýÅäÖÃÇø ---
+	// --- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ---
 
-	// ¼àÌý¶Ë¿Ú
+	// ï¿½ï¿½ï¿½ï¿½ï¿½Ë¿ï¿½
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
 	int32 ListenPort = 8888;
 
-	// Æ½»¬ÒÆ¶¯ËÙ¶È
+	// Æ½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½Ù¶ï¿½
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
 	float SmoothSpeed = 5.0f;
 
-	// ×ø±êËõ·Å (1.0 = ²»Ëõ·Å)
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (1.0 = ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
 	float ScaleFactor = 1.0f;
 
-	// ×Ô¶¯×ªÏò
+	// ï¿½Ô¶ï¿½×ªï¿½ï¿½
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
 	bool bAutoFaceTarget = true;
 
 private:
-	// ÍøÂç Socket
+	// ï¿½ï¿½ï¿½ï¿½ Socket
 	FSocket* ListenSocket;
 
-	// Ä¿±êÎ»ÖÃ»º´æ
+	// Ä¿ï¿½ï¿½Î»ï¿½Ã»ï¿½ï¿½ï¿½
 	FVector TargetLocation;
 
-	// ´¦ÀíÊý¾Ý°üº¯Êý
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý°ï¿½ï¿½ï¿½ï¿½ï¿½
 	void ProcessPacket(const TArray<uint8>& Data);
 };
