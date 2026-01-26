@@ -108,6 +108,22 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 			{
 				if (Read > 0)
 				{
+					// 【诊断】每100个包打印一次接收到的原始UDP数据
+					static int32 RecvCounter = 0;
+					RecvCounter++;
+
+					if (RecvCounter % 100 == 0)
+					{
+						FDateTime Now = FDateTime::Now();
+						FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+							Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+
+						FString RawData = FString::FromBlob(ReceivedData.GetData(), FMath::Min(Read, 400));
+						UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [接收#%d] 来自: %s, 大小: %d 字节"),
+							*TimeStr, RecvCounter, *SenderAddr->ToString(true), Read);
+						UE_LOG(LogTemp, Warning, TEXT("[UDP原始数据]\n%s"), *RawData);
+					}
+
 					// 【新增】自动检测时标记收到数据
 					if (bAutoDetectPort && CurrentDetectedPort >= 0)
 					{
@@ -428,11 +444,78 @@ void ARealTimeDroneReceiver::ProcessPacket(const TArray<uint8>& Data)
 		return;
 	}
 
+	// 【诊断】打印原始NED数据（每50个包打印一次）
+	#if !UE_BUILD_SHIPPING
+	if (PacketCounter % 50 == 0)
+	{
+		// 获取当前时间
+		FDateTime Now = FDateTime::Now();
+		FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+			Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+
+		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [原始数据] NED Position: (%.6f, %.6f, %.6f) 米"),
+			*TimeStr, DroneData.Position.X, DroneData.Position.Y, DroneData.Position.Z);
+	}
+	#endif
+
+	// 【关键修复】第一次接收数据时，记录参考位置
+	if (!bHasReceivedFirstData)
+	{
+		ReferencePosition = DroneData.Position;
+		bHasReceivedFirstData = true;
+
+		// 获取当前时间
+		FDateTime Now = FDateTime::Now();
+		FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+			Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+
+		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [参考位置] 已记录参考位置: (%.6f, %.6f, %.6f) 米"),
+			*TimeStr, ReferencePosition.X, ReferencePosition.Y, ReferencePosition.Z);
+	}
+
+	// 【关键修复】计算相对偏移量（当前位置 - 参考位置）
+	FVector RelativeOffset = DroneData.Position - ReferencePosition;
+
+	// 【诊断】打印相对偏移量
+	#if !UE_BUILD_SHIPPING
+	if (PacketCounter % 50 == 0)
+	{
+		// 获取当前时间
+		FDateTime Now = FDateTime::Now();
+		FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+			Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+
+		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [相对偏移] Relative Offset: (%.6f, %.6f, %.6f) 米"),
+			*TimeStr, RelativeOffset.X, RelativeOffset.Y, RelativeOffset.Z);
+	}
+	#endif
+
 	// 坐标系和单位转换: NED (米) -> UE5 (厘米)
-	FVector NEDOffset = NEDToUE5(DroneData.Position);
+	FVector NEDOffset = NEDToUE5(RelativeOffset);
+
+	// 【诊断】打印转换后的偏移量
+	#if !UE_BUILD_SHIPPING
+	if (PacketCounter % 50 == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT(">>> [转换后] UE5 Offset: (%.2f, %.2f, %.2f) 厘米"),
+			NEDOffset.X, NEDOffset.Y, NEDOffset.Z);
+	}
+	#endif
 
 	// 【关键修改】以初始位置为原点，NEDOffset 是相对位移
 	FVector NewTarget = InitialLocation + NEDOffset;
+
+	// 【诊断】打印最终目标位置和初始位置
+	#if !UE_BUILD_SHIPPING
+	if (PacketCounter % 50 == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT(">>> [最终位置] Target: (%.2f, %.2f, %.2f) | Initial: (%.2f, %.2f, %.2f)"),
+			NewTarget.X, NewTarget.Y, NewTarget.Z,
+			InitialLocation.X, InitialLocation.Y, InitialLocation.Z);
+		UE_LOG(LogTemp, Warning, TEXT(">>> [距离差] 从Initial到Target的距离: %.2f 厘米"),
+			FVector::Dist(InitialLocation, NewTarget));
+	}
+	#endif
 
 	// 四元数转欧拉角
 	FRotator NewRotation = QuatToEuler(DroneData.Quaternion);
@@ -441,14 +524,19 @@ void ARealTimeDroneReceiver::ProcessPacket(const TArray<uint8>& Data)
 	TargetLocation = NewTarget;
 	TargetRotation = NewRotation;
 
-	// 【优化】屏幕调试信息降低刷新率
+	// 【诊断】屏幕调试信息 - 显示完整数据流
 	#if !UE_BUILD_SHIPPING
 	if (GEngine && PacketCounter % 10 == 0)
 	{
-		FString DebugMsg = FString::Printf(TEXT("Pos: (%.1f, %.1f, %.1f) | Rot: (%.1f, %.1f, %.1f)"),
+		FVector CurrentPos = GetActorLocation();
+		FString DebugMsg = FString::Printf(
+			TEXT("NED原始:(%.3f,%.3f,%.3f)m | UE5目标:(%.0f,%.0f,%.0f)cm | 当前:(%.0f,%.0f,%.0f)cm | 距离差:%.0fcm"),
+			DroneData.Position.X, DroneData.Position.Y, DroneData.Position.Z,
 			NewTarget.X, NewTarget.Y, NewTarget.Z,
-			NewRotation.Pitch, NewRotation.Yaw, NewRotation.Roll);
-		GEngine->AddOnScreenDebugMessage(123, 0.1f, FColor::Green, DebugMsg);
+			CurrentPos.X, CurrentPos.Y, CurrentPos.Z,
+			FVector::Dist(CurrentPos, NewTarget)
+		);
+		GEngine->AddOnScreenDebugMessage(123, 0.1f, FColor::Yellow, DebugMsg);
 	}
 	#endif
 }

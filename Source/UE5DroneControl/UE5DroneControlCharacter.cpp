@@ -38,7 +38,7 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->SetUsingAbsoluteRotation(true);
-    CameraBoom->TargetArmLength = 3600.f; // 稍微拉远一点视角
+    CameraBoom->TargetArmLength = 1800.f; // 稍微拉远一点视角
     CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
     CameraBoom->bDoCollisionTest = false;
 

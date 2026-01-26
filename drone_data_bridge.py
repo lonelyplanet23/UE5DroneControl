@@ -429,8 +429,22 @@ class ROS2DataReceiver:
     def send_data_to_ue(self, data: Dict[str, Any]) -> bool:
         """将数据以 YAML 格式发送到 UE5"""
         try:
-            yaml_data = yaml.dump(data, default_flow_style=False, sort_keys=True)
+            # 【关键修复】不使用sort_keys，保持字段顺序（position在前）
+            yaml_data = yaml.dump(data, default_flow_style=False, sort_keys=False)
             yaml_bytes = yaml_data.encode('utf-8')
+
+            # 【诊断】每100个包打印一次实际发送的YAML内容
+            if not hasattr(self, '_send_counter'):
+                self._send_counter = 0
+            self._send_counter += 1
+
+            if self._send_counter % 100 == 0:
+                timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                preview = yaml_data[:400] if len(yaml_data) > 400 else yaml_data
+                logger.info(f"[{timestamp}] [发送#{self._send_counter}] 目标: {self.ue_host}:{self.ue_port}")
+                logger.info(f"[YAML内容]\n{preview}")
+                logger.info(f"[数据大小] {len(yaml_bytes)} 字节")
+
             self.udp_socket.sendto(yaml_bytes, (self.ue_host, self.ue_port))
             return True
         except Exception as e:
@@ -598,11 +612,9 @@ class ROS2DataReceiver:
                                     line = line.rstrip('\n')
                                     line_count += 1
 
-                                    # 【优化】注释掉详细日志输出，减少内存和CPU占用
-                                    # if line_count <= 5:
-                                    #     logger.info(f"[行{line_count}] {line}")
-                                    # else:
-                                    #     logger.debug(f"[行{line_count}] {line}")
+                                    # 【诊断】恢复前5行的详细日志输出
+                                    if line_count <= 5:
+                                        logger.info(f"[行{line_count}] {line}")
 
                                     # 检查分隔符（ROS 2 使用 --- 分隔消息）
                                     if line.strip().startswith('---'):
@@ -615,10 +627,11 @@ class ROS2DataReceiver:
                                                 cleaned_data = self.process_odometry_data(data)
                                                 if cleaned_data:
                                                     self.send_data_to_ue(cleaned_data)
-                                                    # 【优化】大幅减少日志频率，每500条打印一次
-                                                    if separator_count % 500 == 0:
+                                                    # 【诊断】提高日志频率，每10条打印一次position数据（带时间戳）
+                                                    if separator_count % 10 == 0:
                                                         pos = cleaned_data.get('position', [0, 0, 0])
-                                                        logger.info(f"[OK] 已发送 {separator_count-1} 条数据 | 最新position=[{pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}]")
+                                                        timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]  # 精确到毫秒
+                                                        logger.info(f"[{timestamp}] [数据#{separator_count-1}] Position=[{pos[0]:.6f}, {pos[1]:.6f}, {pos[2]:.6f}]米")
                                         yaml_buffer = ""
                                         continue
                                     

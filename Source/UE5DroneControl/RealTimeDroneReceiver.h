@@ -119,6 +119,12 @@ private:
 	// 【新增】上一次的旋转（用于死区过滤）
 	FRotator LastRotation;
 
+	// 【关键修复】参考位置（第一次接收到的NED位置，用于计算相对偏移）
+	FVector ReferencePosition = FVector::ZeroVector;
+
+	// 【关键修复】是否已接收第一次数据
+	bool bHasReceivedFirstData = false;
+
 	// ���������Զ����ʱʹ�õ���ʱ�˿�
 	int32 CurrentDetectedPort = -1;
 
