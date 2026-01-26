@@ -57,7 +57,7 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     LiftSpeed = 300.0f;
     InterpSpeed = 4.0f;
     MinHeight = 50.0f;
-    MaxHeight = 3000.0f;
+    MaxHeight = 6000.0f;
 
     // 初始化网络指针
     SenderSocket = nullptr;
