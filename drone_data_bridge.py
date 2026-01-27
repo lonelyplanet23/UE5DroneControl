@@ -427,23 +427,20 @@ class ROS2DataReceiver:
             return False
 
     def send_data_to_ue(self, data: Dict[str, Any]) -> bool:
-        """将数据以 YAML 格式发送到 UE5"""
+        """将数据以 YAML 格式发送到 UE5（优化版本）"""
         try:
-            # 【关键修复】不使用sort_keys，保持字段顺序（position在前）
+            # 【优化】使用YAML但减少开销，保持字段顺序
             yaml_data = yaml.dump(data, default_flow_style=False, sort_keys=False)
             yaml_bytes = yaml_data.encode('utf-8')
 
-            # 【诊断】每100个包打印一次实际发送的YAML内容
+            # 【优化】减少日志频率：每500个包打印一次（原来是100）
             if not hasattr(self, '_send_counter'):
                 self._send_counter = 0
             self._send_counter += 1
 
-            if self._send_counter % 100 == 0:
+            if self._send_counter % 500 == 0:
                 timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-                preview = yaml_data[:400] if len(yaml_data) > 400 else yaml_data
-                logger.info(f"[{timestamp}] [发送#{self._send_counter}] 目标: {self.ue_host}:{self.ue_port}")
-                logger.info(f"[YAML内容]\n{preview}")
-                logger.info(f"[数据大小] {len(yaml_bytes)} 字节")
+                logger.info(f"[{timestamp}] [发送#{self._send_counter}] 目标: {self.ue_host}:{self.ue_port} | 大小: {len(yaml_bytes)}字节")
 
             self.udp_socket.sendto(yaml_bytes, (self.ue_host, self.ue_port))
             return True
@@ -534,8 +531,8 @@ class ROS2DataReceiver:
                 'quality': int(quality)
             }
 
-            # 【调试日志】打印实际解析的position值
-            logger.debug(f"[数据处理] Position: [{position_list[0]:.6f}, {position_list[1]:.6f}, {position_list[2]:.6f}]")
+            # 【优化】移除调试日志，减少I/O开销
+            # logger.debug(f"[数据处理] Position: [{position_list[0]:.6f}, {position_list[1]:.6f}, {position_list[2]:.6f}]")
 
             return cleaned_data
 
@@ -588,9 +585,9 @@ class ROS2DataReceiver:
                     if not self.running:
                         logger.info("监听已停止")
                         return
-                    
+
                     logger.info(f"[OK] 输出文件已创建，开始读取数据...")
-                    time.sleep(1)
+                    time.sleep(0.1)  # 【优化】从1秒减少到0.1秒
                     
                     # 读取文件内容
                     last_pos = 0
@@ -602,7 +599,7 @@ class ROS2DataReceiver:
                                 last_pos = f.tell()
                                 
                                 if not lines:
-                                    time.sleep(0.5)
+                                    time.sleep(0.01)  # 【优化】从0.5秒降低到0.01秒，减少100Hz延迟
                                     continue
                                 
                                 for line in lines:
@@ -612,9 +609,9 @@ class ROS2DataReceiver:
                                     line = line.rstrip('\n')
                                     line_count += 1
 
-                                    # 【诊断】恢复前5行的详细日志输出
-                                    if line_count <= 5:
-                                        logger.info(f"[行{line_count}] {line}")
+                                    # 【优化】移除前5行的详细日志，减少I/O开销
+                                    # if line_count <= 5:
+                                    #     logger.info(f"[行{line_count}] {line}")
 
                                     # 检查分隔符（ROS 2 使用 --- 分隔消息）
                                     if line.strip().startswith('---'):
@@ -627,11 +624,11 @@ class ROS2DataReceiver:
                                                 cleaned_data = self.process_odometry_data(data)
                                                 if cleaned_data:
                                                     self.send_data_to_ue(cleaned_data)
-                                                    # 【诊断】提高日志频率，每10条打印一次position数据（带时间戳）
-                                                    if separator_count % 10 == 0:
+                                                    # 【优化】减少日志频率：从每10条改为每100条
+                                                    if separator_count % 100 == 0:
                                                         pos = cleaned_data.get('position', [0, 0, 0])
-                                                        timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]  # 精确到毫秒
-                                                        logger.info(f"[{timestamp}] [数据#{separator_count-1}] Position=[{pos[0]:.6f}, {pos[1]:.6f}, {pos[2]:.6f}]米")
+                                                        timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                                                        logger.info(f"[{timestamp}] [数据#{separator_count-1}] Position=[{pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}]米")
                                         yaml_buffer = ""
                                         continue
                                     
@@ -640,7 +637,7 @@ class ROS2DataReceiver:
                                         yaml_buffer += line + "\n"
                         
                         except FileNotFoundError:
-                            time.sleep(0.5)
+                            time.sleep(0.1)  # 【优化】从0.5秒减少到0.1秒
                             continue
                     
                     logger.info(f"输出文件已关闭，共读取 {line_count} 行")

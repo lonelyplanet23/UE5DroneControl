@@ -67,6 +67,17 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Drone Flight")
     void Input_Lift(float Value);
 
+    // --- 【新增】相机切换函数 ---
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void ToggleCameraView();
+
+    // --- 【新增】视角切换函数（调用PlayerController的函数）---
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void SwitchToTopDownView();
+
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void SwitchToRealTimeView();
+
     // --- 【新增】网络发送函数 (暴露给蓝图) ---
     // Mode: 0=悬停, 1=移动
     UFUNCTION(BlueprintCallable, Category = "Drone Network")
@@ -93,6 +104,10 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Flight")
     float MaxHeight;
+
+    // --- 【新增】相机状态变量 ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    bool bIsTopDownView;
 
     // --- 【新增】网络相关变量 ---
     FSocket* SenderSocket;

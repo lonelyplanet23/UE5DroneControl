@@ -6,6 +6,7 @@
 #include "NiagaraSystem.h"
 #include "NiagaraFunctionLibrary.h"
 #include "UE5DroneControlCharacter.h"
+#include "RealTimeDroneReceiver.h"
 #include "Engine/World.h"
 #include "EnhancedInputComponent.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -13,6 +14,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "UE5DroneControl.h"
+#include "Kismet/GameplayStatics.h"
 
 AUE5DroneControlPlayerController::AUE5DroneControlPlayerController()
 {
@@ -27,6 +29,9 @@ AUE5DroneControlPlayerController::AUE5DroneControlPlayerController()
 	DefaultMouseCursor = EMouseCursor::Default;
 	CachedDestination = FVector::ZeroVector;
 	FollowTime = 0.f;
+
+	// Initialize camera switch reference
+	CachedRealTimeDrone = nullptr;
 }
 
 void AUE5DroneControlPlayerController::SetupInputComponent()
@@ -62,6 +67,10 @@ void AUE5DroneControlPlayerController::SetupInputComponent()
 		{
 			UE_LOG(LogUE5DroneControl, Error, TEXT("'%s' Failed to find an Enhanced Input Component! This template is built to use the Enhanced Input system. If you intend to use the legacy system, then you will need to update this C++ file."), *GetNameSafe(this));
 		}
+
+		// Bind camera switch keys (using legacy input for number keys)
+		InputComponent->BindAction("SwitchToTopDown", IE_Pressed, this, &AUE5DroneControlPlayerController::SwitchToTopDownCharacter);
+		InputComponent->BindAction("SwitchToRealTime", IE_Pressed, this, &AUE5DroneControlPlayerController::SwitchToRealTimeDrone);
 	}
 }
 
@@ -134,5 +143,44 @@ void AUE5DroneControlPlayerController::UpdateCachedDestination()
 	if (bHitSuccessful)
 	{
 		CachedDestination = Hit.Location;
+	}
+}
+
+// --- 【新增】切换到TopDown角色视角 (数字键0) ---
+void AUE5DroneControlPlayerController::SwitchToTopDownCharacter()
+{
+	// Get the controlled pawn (should be TopDownCharacter)
+	APawn* ControlledPawn = GetPawn();
+	if (ControlledPawn)
+	{
+		SetViewTargetWithBlend(ControlledPawn, 0.5f);
+		UE_LOG(LogTemp, Log, TEXT("Camera switched to TopDown Character"));
+	}
+}
+
+// --- 【新增】切换到RealTimeDrone视角 (数字键1) ---
+void AUE5DroneControlPlayerController::SwitchToRealTimeDrone()
+{
+	// Find RealTimeDrone if not cached
+	if (!CachedRealTimeDrone)
+	{
+		TArray<AActor*> FoundActors;
+		UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARealTimeDroneReceiver::StaticClass(), FoundActors);
+
+		if (FoundActors.Num() > 0)
+		{
+			CachedRealTimeDrone = Cast<ARealTimeDroneReceiver>(FoundActors[0]);
+		}
+	}
+
+	// Switch to RealTimeDrone camera
+	if (CachedRealTimeDrone)
+	{
+		SetViewTargetWithBlend(CachedRealTimeDrone, 0.5f);
+		UE_LOG(LogTemp, Log, TEXT("Camera switched to RealTime Drone"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RealTimeDrone not found in the level!"));
 	}
 }

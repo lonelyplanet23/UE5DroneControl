@@ -1,0 +1,16 @@
+# 无人机数据接收与转发脚本依赖
+
+# 必需的依赖
+PyYAML>=6.0                    # YAML 数据格式处理
+rclpy>=0.14.0                  # ROS 2 Python 客户端库
+
+# ROS 2 消息包
+nav-msgs>=0.4.0                # nav_msgs 包含 Odometry 消息类型
+
+# 可选的依赖
+python-networkmanager>=2.1.0   # Linux 网络管理（可选，脚本可不依赖）
+
+# 开发工具（可选）
+pytest>=7.0.0                  # 单元测试
+black>=22.0.0                  # 代码格式化
+pylint>=2.0.0                  # 代码检查

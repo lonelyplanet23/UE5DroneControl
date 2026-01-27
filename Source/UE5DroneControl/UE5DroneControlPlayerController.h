@@ -80,6 +80,18 @@ protected:
 
 	/** Helper function to get the move destination */
 	void UpdateCachedDestination();
+
+	// --- 【新增】视角切换函数 ---
+	/** Switch camera to TopDown character (key 0) */
+	void SwitchToTopDownCharacter();
+
+	/** Switch camera to RealTime drone (key 1) */
+	void SwitchToRealTimeDrone();
+
+private:
+	/** Reference to the RealTime drone actor */
+	UPROPERTY()
+	class ARealTimeDroneReceiver* CachedRealTimeDrone;
 };
 
 

@@ -1,0 +1,35 @@
+# 多无人机配置文件
+# 每个无人机需要配置：SSH连接信息 + UE5端口
+
+drones:
+  # 无人机 1
+  - name: "UAV1"
+    ssh_host: "192.168.10.1"
+    ssh_user: "jetson1"
+    ssh_password: "123456"
+    ros_topic: "/px4_1/fmu/out/vehicle_odometry"
+    ue_host: "127.0.0.1"
+    ue_port: 8888
+
+  # 无人机 2（未来扩展）
+  - name: "UAV2"
+    ssh_host: "192.168.10.2"
+    ssh_user: "jetson2"
+    ssh_password: "123456"
+    ros_topic: "/px4_2/fmu/out/vehicle_odometry"
+    ue_host: "127.0.0.1"
+    ue_port: 8889
+
+  # 无人机 3（未来扩展）
+  - name: "UAV3"
+    ssh_host: "192.168.10.3"
+    ssh_user: "jetson3"
+    ssh_password: "123456"
+    ros_topic: "/px4_3/fmu/out/vehicle_odometry"
+    ue_host: "127.0.0.1"
+    ue_port: 8890
+
+# 网络设置
+network:
+  skip_network_check: false  # 是否跳过网络连接检查
+  skip_ssh_check: false      # 是否跳过 SSH 连接检查

@@ -18,6 +18,10 @@
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h" // 【新增】使用 Builder 模式创建 UDP Socket，避开 LAN 报错
 
+// 【新增】用于视角切换
+#include "Kismet/GameplayStatics.h"
+#include "RealTimeDroneReceiver.h"
+
 AUE5DroneControlCharacter::AUE5DroneControlCharacter()
 {
     // Set size for player capsule
@@ -34,11 +38,15 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     GetCharacterMovement()->bConstrainToPlane = true;
     GetCharacterMovement()->bSnapToPlaneAtStart = true;
 
+    // Set to Flying mode to prevent falling
+    GetCharacterMovement()->SetMovementMode(MOVE_Flying);
+    GetCharacterMovement()->GravityScale = 0.0f;
+
     // Create the camera boom component
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->SetUsingAbsoluteRotation(true);
-    CameraBoom->TargetArmLength = 1800.f; // 稍微拉远一点视角
+    CameraBoom->TargetArmLength = 1200.f; // 稍微拉远一点视角
     CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
     CameraBoom->bDoCollisionTest = false;
 
@@ -58,6 +66,9 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     InterpSpeed = 4.0f;
     MinHeight = 50.0f;
     MaxHeight = 6000.0f;
+
+    // 初始化相机状态（默认为斜视角）
+    bIsTopDownView = false;
 
     // 初始化网络指针
     SenderSocket = nullptr;
@@ -129,6 +140,13 @@ void AUE5DroneControlCharacter::SetupPlayerInputComponent(UInputComponent* Playe
 
     // 绑定 "Lift" 轴
     PlayerInputComponent->BindAxis("Lift", this, &AUE5DroneControlCharacter::Input_Lift);
+
+    // 绑定空格键切换相机视角
+    PlayerInputComponent->BindAction("ToggleCamera", IE_Pressed, this, &AUE5DroneControlCharacter::ToggleCameraView);
+
+    // 绑定数字键0和1切换视角
+    PlayerInputComponent->BindAction("SwitchToTopDown", IE_Pressed, this, &AUE5DroneControlCharacter::SwitchToTopDownView);
+    PlayerInputComponent->BindAction("SwitchToRealTime", IE_Pressed, this, &AUE5DroneControlCharacter::SwitchToRealTimeView);
 }
 
 void AUE5DroneControlCharacter::Input_Lift(float Value)
@@ -143,6 +161,75 @@ void AUE5DroneControlCharacter::Input_Lift(float Value)
         // 这样手感更跟手
         FVector CurrentPos = GetMesh()->GetComponentLocation(); // 注意用 GetComponentLocation 拿真实的世界坐标
         SendUDPData(CurrentPos, 1); // Mode 1 = Moving
+    }
+}
+
+// --- 【新增】相机切换函数 ---
+void AUE5DroneControlCharacter::ToggleCameraView()
+{
+    // 获取PlayerController
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (!PC) return;
+
+    // 获取当前的ViewTarget（可能是自己，也可能是RealTimeDrone）
+    AActor* CurrentViewTarget = PC->GetViewTarget();
+    AUE5DroneControlCharacter* TargetCharacter = Cast<AUE5DroneControlCharacter>(CurrentViewTarget);
+
+    // 如果ViewTarget是Character类型（包括RealTimeDrone），就修改它的相机
+    if (TargetCharacter && TargetCharacter->GetCameraBoom())
+    {
+        USpringArmComponent* TargetCameraBoom = TargetCharacter->GetCameraBoom();
+
+        // 切换视角状态
+        TargetCharacter->bIsTopDownView = !TargetCharacter->bIsTopDownView;
+
+        // 根据状态设置相机角度
+        if (TargetCharacter->bIsTopDownView)
+        {
+            // 纯俯视视角（-90度）
+            TargetCameraBoom->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f));
+            UE_LOG(LogTemp, Log, TEXT("Camera switched to Top-Down view (-90 degrees) on %s"), *TargetCharacter->GetName());
+        }
+        else
+        {
+            // 斜视角（-60度）
+            TargetCameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
+            UE_LOG(LogTemp, Log, TEXT("Camera switched to Angled view (-60 degrees) on %s"), *TargetCharacter->GetName());
+        }
+    }
+}
+
+// --- 【新增】切换到TopDown角色视角（数字键0）---
+void AUE5DroneControlCharacter::SwitchToTopDownView()
+{
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (PC)
+    {
+        PC->SetViewTargetWithBlend(this, 0.5f);
+        UE_LOG(LogTemp, Log, TEXT("Switched to TopDown Character view"));
+    }
+}
+
+// --- 【新增】切换到RealTimeDrone视角（数字键1）---
+void AUE5DroneControlCharacter::SwitchToRealTimeView()
+{
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (PC)
+    {
+        // 查找场景中的RealTimeDrone
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ARealTimeDroneReceiver::StaticClass(), FoundActors);
+
+        if (FoundActors.Num() > 0)
+        {
+            AActor* RealTimeDrone = FoundActors[0];
+            PC->SetViewTargetWithBlend(RealTimeDrone, 0.5f);
+            UE_LOG(LogTemp, Log, TEXT("Switched to RealTimeDrone view"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("RealTimeDrone not found in level!"));
+        }
     }
 }
 

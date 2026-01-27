@@ -62,7 +62,7 @@ void ARealTimeDroneReceiver::BeginPlay()
 	// === 1. 如果启用自动检测，则开始扫描端口 ===
 	if (bAutoDetectPort)
 	{
-		UE_LOG(LogTemp, Warning, TEXT(">>> [RealTimeDrone] 启动自动端口检测，范围: %d - %d <<<"), PortScanStart, PortScanEnd);
+		// UE_LOG(LogTemp, Warning, TEXT(">>> [RealTimeDrone] 启动自动端口检测，范围: %d - %d <<<"), PortScanStart, PortScanEnd);
 		AutoDetectPort();
 		return;
 	}
@@ -108,27 +108,27 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 			{
 				if (Read > 0)
 				{
-					// 【诊断】每100个包打印一次接收到的原始UDP数据
-					static int32 RecvCounter = 0;
-					RecvCounter++;
+					// // 【诊断】每100个包打印一次接收到的原始UDP数据
+					// static int32 RecvCounter = 0;
+					// RecvCounter++;
 
-					if (RecvCounter % 100 == 0)
-					{
-						FDateTime Now = FDateTime::Now();
-						FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
-							Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+					// if (RecvCounter % 100 == 0)
+					// {
+					// 	FDateTime Now = FDateTime::Now();
+					// 	FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+					// 		Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
 
-						FString RawData = FString::FromBlob(ReceivedData.GetData(), FMath::Min(Read, 400));
-						UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [接收#%d] 来自: %s, 大小: %d 字节"),
-							*TimeStr, RecvCounter, *SenderAddr->ToString(true), Read);
-						UE_LOG(LogTemp, Warning, TEXT("[UDP原始数据]\n%s"), *RawData);
-					}
+					// 	FString RawData = FString::FromBlob(ReceivedData.GetData(), FMath::Min(Read, 400));
+					// 	UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [接收#%d] 来自: %s, 大小: %d 字节"),
+					// 		*TimeStr, RecvCounter, *SenderAddr->ToString(true), Read);
+					// 	UE_LOG(LogTemp, Warning, TEXT("[UDP原始数据]\n%s"), *RawData);
+					// }
 
 					// 【新增】自动检测时标记收到数据
 					if (bAutoDetectPort && CurrentDetectedPort >= 0)
 					{
 						bReceivedDataInAutoDetect = true;
-						UE_LOG(LogTemp, Warning, TEXT(">>> [AutoDetect] 在端口 %d 收到数据! 检测完成! <<<"), CurrentDetectedPort);
+						// UE_LOG(LogTemp, Warning, TEXT(">>> [AutoDetect] 在端口 %d 收到数据! 检测完成! <<<"), CurrentDetectedPort);
 					}
 
 					// 【修复】频率限制：位置限频，但姿态始终更新
@@ -179,13 +179,13 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 				CurrentDetectedPort++;
 			}
 
-			UE_LOG(LogTemp, Warning, TEXT(">>> [AutoDetect] 切换到端口 %d"), CurrentDetectedPort);
+			// UE_LOG(LogTemp, Warning, TEXT(">>> [AutoDetect] 切换到端口 %d"), CurrentDetectedPort);
 		}
 		else if (ElapsedTime > AutoDetectTimeout || CurrentDetectedPort >= PortScanEnd)
 		{
 			// 超时或扫描完毕，使用最后尝试的端口
 			bAutoDetectPort = false;
-			UE_LOG(LogTemp, Error, TEXT(">>> [AutoDetect] 端口检测超时! 使用端口 %d"), CurrentDetectedPort);
+			// UE_LOG(LogTemp, Error, TEXT(">>> [AutoDetect] 端口检测超时! 使用端口 %d"), CurrentDetectedPort);
 		}
 	}
 
@@ -201,8 +201,19 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 	if (bUseReceivedRotation)
 	{
 		FRotator CurrentRot = GetActorRotation();
-		FRotator NewRot = FMath::RInterpTo(CurrentRot, TargetRotation, DeltaTime, 10.0f);
-		SetActorRotation(NewRot);
+
+		// 【关键修复】添加旋转死区过滤，避免微小抖动
+		float RotationDiff = FMath::Abs(FRotator::NormalizeAxis(TargetRotation.Pitch - CurrentRot.Pitch)) +
+		                     FMath::Abs(FRotator::NormalizeAxis(TargetRotation.Yaw - CurrentRot.Yaw)) +
+		                     FMath::Abs(FRotator::NormalizeAxis(TargetRotation.Roll - CurrentRot.Roll));
+
+		// 只有旋转变化超过死区阈值时才更新
+		if (RotationDiff > RotationDeadZone)
+		{
+			// 【性能优化】降低旋转插值速度从30.0f到5.0f，避免抖动
+			FRotator NewRot = FMath::RInterpTo(CurrentRot, TargetRotation, DeltaTime, 5.0f);
+			SetActorRotation(NewRot);
+		}
 	}
 	// 【优先级2】否则，如果启用了"自动朝向"，则朝向移动方向
 	else if (bAutoFaceTarget)
@@ -211,7 +222,8 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 		if (Direction.SizeSquared() > 1.0f)
 		{
 			FRotator TargetRot = UKismetMathLibrary::MakeRotFromX(Direction);
-			FRotator NewRot = FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, 10.0f);
+			// 【性能优化】提高旋转插值速度从10.0f到30.0f，减少姿态延迟
+			FRotator NewRot = FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, 30.0f);
 			SetActorRotation(FRotator(0, NewRot.Yaw, 0));  // 只使用 Yaw，保持水平
 		}
 	}
@@ -230,6 +242,12 @@ bool ARealTimeDroneReceiver::ParseYAMLData(const FString& YAMLString, FDroneYAML
 	TArray<float> VelocityData;
 	TArray<float> AngularVelocityData;
 
+	// 【关键修复】使用标志跟踪当前所在的YAML section，避免解析错误
+	bool bInPositionSection = false;
+	bool bInQuatSection = false;
+	bool bInVelocitySection = false;
+	bool bInAngularVelocitySection = false;
+
 	for (const FString& Line : Lines)
 	{
 		TrimmedLine = Line.TrimStart().TrimEnd();
@@ -239,42 +257,64 @@ bool ARealTimeDroneReceiver::ParseYAMLData(const FString& YAMLString, FDroneYAML
 		{
 			FString ValueStr = TrimmedLine.RightChop(10).TrimStart();
 			OutData.Timestamp = FCString::Atoi64(*ValueStr);
+			continue;
 		}
 
-		// 解析 position (数组格式)
-		if (TrimmedLine.StartsWith(TEXT("- ")) && PositionData.Num() < 3)
+		// 【关键修复】检测section标记，切换当前section
+		if (TrimmedLine.Equals(TEXT("position:")))
+		{
+			bInPositionSection = true;
+			bInQuatSection = false;
+			bInVelocitySection = false;
+			bInAngularVelocitySection = false;
+			continue;
+		}
+		else if (TrimmedLine.Equals(TEXT("q:")))
+		{
+			bInPositionSection = false;
+			bInQuatSection = true;
+			bInVelocitySection = false;
+			bInAngularVelocitySection = false;
+			continue;
+		}
+		else if (TrimmedLine.Equals(TEXT("velocity:")))
+		{
+			bInPositionSection = false;
+			bInQuatSection = false;
+			bInVelocitySection = true;
+			bInAngularVelocitySection = false;
+			continue;
+		}
+		else if (TrimmedLine.Equals(TEXT("angular_velocity:")))
+		{
+			bInPositionSection = false;
+			bInQuatSection = false;
+			bInVelocitySection = false;
+			bInAngularVelocitySection = true;
+			continue;
+		}
+
+		// 【关键修复】只在对应的section中解析数组值
+		if (TrimmedLine.StartsWith(TEXT("- ")))
 		{
 			FString ValueStr = TrimmedLine.RightChop(2);
-			PositionData.Add(FCString::Atof(*ValueStr));
-		}
+			float Value = FCString::Atof(*ValueStr);
 
-		// 解析 q (四元数，数组格式)
-		if (TrimmedLine.Equals(TEXT("q:")) || (TrimmedLine.StartsWith(TEXT("- ")) && QuatData.Num() < 4 && PositionData.Num() == 3))
-		{
-			if (TrimmedLine.StartsWith(TEXT("- ")))
+			if (bInPositionSection && PositionData.Num() < 3)
 			{
-				FString ValueStr = TrimmedLine.RightChop(2);
-				QuatData.Add(FCString::Atof(*ValueStr));
+				PositionData.Add(Value);
 			}
-		}
-
-		// 解析 velocity
-		if (TrimmedLine.Equals(TEXT("velocity:")) || (TrimmedLine.StartsWith(TEXT("- ")) && VelocityData.Num() < 3 && PositionData.Num() == 3 && QuatData.Num() == 4))
-		{
-			if (TrimmedLine.StartsWith(TEXT("- ")))
+			else if (bInQuatSection && QuatData.Num() < 4)
 			{
-				FString ValueStr = TrimmedLine.RightChop(2);
-				VelocityData.Add(FCString::Atof(*ValueStr));
+				QuatData.Add(Value);
 			}
-		}
-
-		// 解析 angular_velocity
-		if (TrimmedLine.Equals(TEXT("angular_velocity:")) || (TrimmedLine.StartsWith(TEXT("- ")) && AngularVelocityData.Num() < 3 && PositionData.Num() == 3 && QuatData.Num() == 4 && VelocityData.Num() == 3))
-		{
-			if (TrimmedLine.StartsWith(TEXT("- ")))
+			else if (bInVelocitySection && VelocityData.Num() < 3)
 			{
-				FString ValueStr = TrimmedLine.RightChop(2);
-				AngularVelocityData.Add(FCString::Atof(*ValueStr));
+				VelocityData.Add(Value);
+			}
+			else if (bInAngularVelocitySection && AngularVelocityData.Num() < 3)
+			{
+				AngularVelocityData.Add(Value);
 			}
 		}
 	}
@@ -282,13 +322,16 @@ bool ARealTimeDroneReceiver::ParseYAMLData(const FString& YAMLString, FDroneYAML
 	// 验证必要数据是否存在
 	if (PositionData.Num() != 3 || QuatData.Num() != 4)
 	{
-		UE_LOG(LogTemp, Warning, TEXT(">>> [YAML Parse] 解析失败: Position数据=%d, Quat数据=%d"), PositionData.Num(), QuatData.Num());
+		// UE_LOG(LogTemp, Warning, TEXT(">>> [YAML Parse] 解析失败: Position数据=%d, Quat数据=%d"), PositionData.Num(), QuatData.Num());
 		return false;
 	}
 
 	// 填充解析结果
 	OutData.Position = FVector(PositionData[0], PositionData[1], PositionData[2]);
-	OutData.Quaternion = FQuat(QuatData[0], QuatData[1], QuatData[2], QuatData[3]);
+
+	// 【关键修复】PX4/ROS2的四元数格式是 [w, x, y, z]，但UE5的FQuat构造函数是 (x, y, z, w)
+	// 所以需要重新排列：QuatData[0]=w, QuatData[1]=x, QuatData[2]=y, QuatData[3]=z
+	OutData.Quaternion = FQuat(QuatData[1], QuatData[2], QuatData[3], QuatData[0]);
 
 	if (VelocityData.Num() == 3)
 	{
@@ -309,7 +352,7 @@ FRotator ARealTimeDroneReceiver::QuatToEuler(const FQuat& Q)
 	//
 	// 无人机四元数（NED 坐标系）：
 	//   表示从 NED 参考系到机体系的旋转
-	//   q = [qx, qy, qz, qw]
+	//   q = [w, x, y, z] (已在ParseYAMLData中重新排列)
 	//
 	// UE5 欧拉角（FRotator）：
 	//   Pitch (俯仰，绕 Y 轴)
@@ -319,19 +362,20 @@ FRotator ARealTimeDroneReceiver::QuatToEuler(const FQuat& Q)
 	// 注意：NED 和 UE5 坐标系不同，需要转换
 	// ====================================================================
 
-	// 方法1：使用 UE5 内置的四元数转换（推荐）
-	// 先将 NED 四元数转换为 UE5 四元数
-	FQuat UE5Quat = Q;
-
-	// 【关键】NED 到 UE5 的四元数转换
+	// 【修复】NED 到 UE5 的坐标系转换
 	// NED: X=North, Y=East, Z=Down
 	// UE5: X=Forward, Y=Right, Z=Up
-	// 需要绕 X 轴旋转 180° 来翻转 Z 轴（Down → Up）
-	FQuat ConversionQuat = FQuat(FVector(1, 0, 0), PI);  // 绕 X 轴旋转 180°
-	UE5Quat = ConversionQuat * Q;
+	//
+	// 转换方式：将NED的Z轴翻转（Down → Up）
+	// 这相当于对四元数的Z分量取负
+	FQuat UE5Quat(Q.X, Q.Y, -Q.Z, Q.W);
 
 	// 转换为欧拉角
 	FRotator EulerAngles = UE5Quat.Rotator();
+
+	// 【修复】翻转Yaw角方向，使现实中顺时针转动对应UE中顺时针转动
+	// NED坐标系（右手系）到UE5坐标系（左手系）的转换需要翻转Yaw方向
+	EulerAngles.Yaw = -EulerAngles.Yaw;
 
 	return EulerAngles;
 }
@@ -414,7 +458,8 @@ void ARealTimeDroneReceiver::UpdateRotationOnly(const TArray<uint8>& Data)
 	// 验证是否成功解析
 	if (QuatData.Num() == 4)
 	{
-		FQuat Q(QuatData[0], QuatData[1], QuatData[2], QuatData[3]);
+		// 【关键修复】PX4/ROS2的四元数格式是 [w, x, y, z]，但UE5的FQuat构造函数是 (x, y, z, w)
+		FQuat Q(QuatData[1], QuatData[2], QuatData[3], QuatData[0]);
 		TargetRotation = QuatToEuler(Q);
 	}
 }
@@ -425,38 +470,42 @@ void ARealTimeDroneReceiver::ProcessPacket(const TArray<uint8>& Data)
 	FString YAMLString;
 	YAMLString.AppendChars((const ANSICHAR*)Data.GetData(), Data.Num());
 
-	// 【优化】减少日志输出，只在需要时打印
-	#if !UE_BUILD_SHIPPING
+	// // 【优化】减少日志输出，只在需要时打印
+	// #if !UE_BUILD_SHIPPING
+	// static int32 PacketCounter = 0;
+	// PacketCounter++;
+	// // 每100个包才打印一次
+	// if (PacketCounter % 100 == 0)
+	// {
+	// 	UE_LOG(LogTemp, Log, TEXT(">>> [ProcessPacket] 已处理 %d 个数据包"), PacketCounter);
+	// }
+	// #endif
+
+	// 【性能优化】保留计数器用于其他调试代码，但不输出日志
 	static int32 PacketCounter = 0;
 	PacketCounter++;
-	// 每100个包才打印一次
-	if (PacketCounter % 100 == 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT(">>> [ProcessPacket] 已处理 %d 个数据包"), PacketCounter);
-	}
-	#endif
 
 	// 解析 YAML 数据
 	FDroneYAMLData DroneData;
 	if (!ParseYAMLData(YAMLString, DroneData))
 	{
-		UE_LOG(LogTemp, Warning, TEXT(">>> [ProcessPacket] YAML 解析失败"));
+		// UE_LOG(LogTemp, Warning, TEXT(">>> [ProcessPacket] YAML 解析失败"));
 		return;
 	}
 
-	// 【诊断】打印原始NED数据（每50个包打印一次）
-	#if !UE_BUILD_SHIPPING
-	if (PacketCounter % 50 == 0)
-	{
-		// 获取当前时间
-		FDateTime Now = FDateTime::Now();
-		FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
-			Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+	// // 【诊断】打印原始NED数据（每50个包打印一次）
+	// #if !UE_BUILD_SHIPPING
+	// if (PacketCounter % 50 == 0)
+	// {
+	// 	// 获取当前时间
+	// 	FDateTime Now = FDateTime::Now();
+	// 	FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+	// 		Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
 
-		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [原始数据] NED Position: (%.6f, %.6f, %.6f) 米"),
-			*TimeStr, DroneData.Position.X, DroneData.Position.Y, DroneData.Position.Z);
-	}
-	#endif
+	// 	UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [原始数据] NED Position: (%.6f, %.6f, %.6f) 米"),
+	// 		*TimeStr, DroneData.Position.X, DroneData.Position.Y, DroneData.Position.Z);
+	// }
+	// #endif
 
 	// 【关键修复】第一次接收数据时，记录参考位置
 	if (!bHasReceivedFirstData)
@@ -464,79 +513,95 @@ void ARealTimeDroneReceiver::ProcessPacket(const TArray<uint8>& Data)
 		ReferencePosition = DroneData.Position;
 		bHasReceivedFirstData = true;
 
-		// 获取当前时间
-		FDateTime Now = FDateTime::Now();
-		FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
-			Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+		// // 获取当前时间
+		// FDateTime Now = FDateTime::Now();
+		// FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+		// 	Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
 
-		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [参考位置] 已记录参考位置: (%.6f, %.6f, %.6f) 米"),
-			*TimeStr, ReferencePosition.X, ReferencePosition.Y, ReferencePosition.Z);
+		// UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [参考位置] 已记录参考位置: (%.6f, %.6f, %.6f) 米"),
+		// 	*TimeStr, ReferencePosition.X, ReferencePosition.Y, ReferencePosition.Z);
 	}
 
 	// 【关键修复】计算相对偏移量（当前位置 - 参考位置）
 	FVector RelativeOffset = DroneData.Position - ReferencePosition;
 
-	// 【诊断】打印相对偏移量
+	// // 【诊断】打印相对偏移量
+	// #if !UE_BUILD_SHIPPING
+	// if (PacketCounter % 50 == 0)
+	// {
+	// 	// 获取当前时间
+	// 	FDateTime Now = FDateTime::Now();
+	// 	FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
+	// 		Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
+
+	// 	UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [相对偏移] Relative Offset: (%.6f, %.6f, %.6f) 米"),
+	// 		*TimeStr, RelativeOffset.X, RelativeOffset.Y, RelativeOffset.Z);
+	// }
+	// #endif
+
+	// 坐标系和单位转换: NED (米) -> UE5 (厘米)
+	FVector NEDOffset = NEDToUE5(RelativeOffset);
+
+	// // 【诊断】打印转换后的偏移量
+	// #if !UE_BUILD_SHIPPING
+	// if (PacketCounter % 50 == 0)
+	// {
+	// 	UE_LOG(LogTemp, Warning, TEXT(">>> [转换后] UE5 Offset: (%.2f, %.2f, %.2f) 厘米"),
+	// 		NEDOffset.X, NEDOffset.Y, NEDOffset.Z);
+	// }
+	// #endif
+
+	// 【关键修改】以初始位置为原点，NEDOffset 是相对位移
+	FVector NewTarget = InitialLocation + NEDOffset;
+
+	// // 【诊断】打印最终目标位置和初始位置
+	// #if !UE_BUILD_SHIPPING
+	// if (PacketCounter % 50 == 0)
+	// {
+	// 	UE_LOG(LogTemp, Warning, TEXT(">>> [最终位置] Target: (%.2f, %.2f, %.2f) | Initial: (%.2f, %.2f, %.2f)"),
+	// 		NewTarget.X, NewTarget.Y, NewTarget.Z,
+	// 		InitialLocation.X, InitialLocation.Y, InitialLocation.Z);
+	// 	UE_LOG(LogTemp, Warning, TEXT(">>> [距离差] 从Initial到Target的距离: %.2f 厘米"),
+	// 		FVector::Dist(InitialLocation, NewTarget));
+	// }
+	// #endif
+
+	// 四元数转欧拉角
+	FRotator NewRotation = QuatToEuler(DroneData.Quaternion);
+
+	// 【临时调试】打印四元数和转换后的欧拉角（带时间戳）
 	#if !UE_BUILD_SHIPPING
-	if (PacketCounter % 50 == 0)
+	if (PacketCounter % 30 == 0)
 	{
 		// 获取当前时间
 		FDateTime Now = FDateTime::Now();
 		FString TimeStr = FString::Printf(TEXT("%02d:%02d:%02d.%03d"),
 			Now.GetHour(), Now.GetMinute(), Now.GetSecond(), Now.GetMillisecond());
 
-		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [相对偏移] Relative Offset: (%.6f, %.6f, %.6f) 米"),
-			*TimeStr, RelativeOffset.X, RelativeOffset.Y, RelativeOffset.Z);
+		FQuat Q = DroneData.Quaternion;
+		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [四元数] W=%.4f, X=%.4f, Y=%.4f, Z=%.4f"),
+			*TimeStr, Q.W, Q.X, Q.Y, Q.Z);
+		UE_LOG(LogTemp, Warning, TEXT(">>> [%s] [欧拉角] Pitch=%.2f°, Yaw=%.2f°, Roll=%.2f°"),
+			*TimeStr, NewRotation.Pitch, NewRotation.Yaw, NewRotation.Roll);
 	}
 	#endif
-
-	// 坐标系和单位转换: NED (米) -> UE5 (厘米)
-	FVector NEDOffset = NEDToUE5(RelativeOffset);
-
-	// 【诊断】打印转换后的偏移量
-	#if !UE_BUILD_SHIPPING
-	if (PacketCounter % 50 == 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT(">>> [转换后] UE5 Offset: (%.2f, %.2f, %.2f) 厘米"),
-			NEDOffset.X, NEDOffset.Y, NEDOffset.Z);
-	}
-	#endif
-
-	// 【关键修改】以初始位置为原点，NEDOffset 是相对位移
-	FVector NewTarget = InitialLocation + NEDOffset;
-
-	// 【诊断】打印最终目标位置和初始位置
-	#if !UE_BUILD_SHIPPING
-	if (PacketCounter % 50 == 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT(">>> [最终位置] Target: (%.2f, %.2f, %.2f) | Initial: (%.2f, %.2f, %.2f)"),
-			NewTarget.X, NewTarget.Y, NewTarget.Z,
-			InitialLocation.X, InitialLocation.Y, InitialLocation.Z);
-		UE_LOG(LogTemp, Warning, TEXT(">>> [距离差] 从Initial到Target的距离: %.2f 厘米"),
-			FVector::Dist(InitialLocation, NewTarget));
-	}
-	#endif
-
-	// 四元数转欧拉角
-	FRotator NewRotation = QuatToEuler(DroneData.Quaternion);
 
 	// 【关键】更新目标位置和旋转
 	TargetLocation = NewTarget;
 	TargetRotation = NewRotation;
 
-	// 【诊断】屏幕调试信息 - 显示完整数据流
+	// 【优化】屏幕调试信息 - 显示坐标位置和偏转角
 	#if !UE_BUILD_SHIPPING
 	if (GEngine && PacketCounter % 10 == 0)
 	{
 		FVector CurrentPos = GetActorLocation();
+		FRotator CurrentRot = GetActorRotation();
 		FString DebugMsg = FString::Printf(
-			TEXT("NED原始:(%.3f,%.3f,%.3f)m | UE5目标:(%.0f,%.0f,%.0f)cm | 当前:(%.0f,%.0f,%.0f)cm | 距离差:%.0fcm"),
-			DroneData.Position.X, DroneData.Position.Y, DroneData.Position.Z,
-			NewTarget.X, NewTarget.Y, NewTarget.Z,
+			TEXT("位置:(%.0f, %.0f, %.0f)cm | 偏转角: Pitch=%.1f° Yaw=%.1f° Roll=%.1f°"),
 			CurrentPos.X, CurrentPos.Y, CurrentPos.Z,
-			FVector::Dist(CurrentPos, NewTarget)
+			CurrentRot.Pitch, CurrentRot.Yaw, CurrentRot.Roll
 		);
-		GEngine->AddOnScreenDebugMessage(123, 0.1f, FColor::Yellow, DebugMsg);
+		GEngine->AddOnScreenDebugMessage(123, 0.1f, FColor::Cyan, DebugMsg);
 	}
 	#endif
 }

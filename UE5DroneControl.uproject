@@ -42,6 +42,10 @@
 				"Android",
 				"IOS"
 			]
+		},
+		{
+			"Name": "MovieRenderPipeline",
+			"Enabled": true
 		}
 	]
 }

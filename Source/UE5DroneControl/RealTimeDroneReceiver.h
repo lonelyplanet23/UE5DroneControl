@@ -79,9 +79,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config", meta = (EditCondition = "bAutoDetectPort"))
 	float AutoDetectTimeout = 10.0f;
 
-	// ƽ���ƶ��ٶ�
+	// ƽ���ƶ��ٶ� (提高到10.0f以减少位置响应延迟)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
-	float SmoothSpeed = 5.0f;
+	float SmoothSpeed = 10.0f;
 
 	// �������� (Ĭ��1.0����Ϊ��λת������ProcessPacket�д���)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
