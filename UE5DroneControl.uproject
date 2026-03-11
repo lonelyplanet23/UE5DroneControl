@@ -32,18 +32,6 @@
 			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/362651520df94e4fa65492dbcba44ae2"
 		},
 		{
-			"Name": "CesiumForUnreal",
-			"Enabled": true,
-			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/content/87b0d05800a545d49bf858ef3458c4f7",
-			"SupportedTargetPlatforms": [
-				"Win64",
-				"Mac",
-				"Linux",
-				"Android",
-				"IOS"
-			]
-		},
-		{
 			"Name": "MovieRenderPipeline",
 			"Enabled": true
 		}

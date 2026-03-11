@@ -61,11 +61,11 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     PrimaryActorTick.bStartWithTickEnabled = true;
 
     // --- 初始化我们的变量 ---
-    TargetHeight = 200.0f;
+    TargetHeight = 1000.0f;
     LiftSpeed = 300.0f;
     InterpSpeed = 4.0f;
     MinHeight = 50.0f;
-    MaxHeight = 6000.0f;
+    MaxHeight = 10000.0f;
 
     // 初始化相机状态（默认为斜视角）
     bIsTopDownView = false;
@@ -240,29 +240,31 @@ void AUE5DroneControlCharacter::SendUDPData(FVector TargetLocation, int32 Mode)
 
     // 1. 准备数据包
     FDroneSocketData Data;
-    // 获取当前 UTC 时间戳
     Data.Timestamp = FDateTime::UtcNow().ToUnixTimestamp();
 
-    // 如果我们是用 Mesh 偏移法，GetActorLocation() 只能拿到地面的 X,Y
-    // 所以 X,Y 用 TargetLocation (可能是鼠标点，也可能是当前位置)
-    // Z 我们希望发的是飞机的真实高度
-    Data.X = TargetLocation.X;
-    Data.Y = TargetLocation.Y;
-
-    // 如果是 W/S 模式，TargetLocation.Z 已经包含了高度
-    // 为了保险，我们可以再次读取 Mesh 的世界高度
+    // 关键修复：
+    // 不再依赖外部传入的 TargetLocation（玩家点击地面时 Z 通常为地面高度），
+    // 始终使用 Mesh 的世界坐标作为发送位置 —— 这样无论高度是通过 Mesh 相对偏移实现（演示高空）
+    // 还是通过 Actor 本身移动，实现的位置信息都会被准确地发送。
+    FVector WorldPos;
     if (USkeletalMeshComponent* MyMesh = GetMesh())
     {
-        Data.Z = MyMesh->GetComponentLocation().Z;
+        WorldPos = MyMesh->GetComponentLocation();
     }
     else
     {
-        Data.Z = TargetLocation.Z;
+        WorldPos = GetActorLocation();
     }
+
+    Data.X = WorldPos.X;
+    Data.Y = WorldPos.Y;
+    Data.Z = WorldPos.Z;
 
     Data.Mode = Mode;
 
-    // 2. 发送
+    //调试
+    UE_LOG(LogTemp, Log, TEXT("Preparing UDP packet -> Timestamp=%.0f, X=%.3f, Y=%.3f, Z=%.3f, Mode=%d, Remote=%s:%d"),
+        Data.Timestamp, Data.X, Data.Y, Data.Z, Data.Mode, *RemoteIP, RemotePort);// 2. 发送
     int32 BytesSent = 0;
     SenderSocket->SendTo((uint8*)&Data, sizeof(FDroneSocketData), BytesSent, *RemoteAddr);
 }
