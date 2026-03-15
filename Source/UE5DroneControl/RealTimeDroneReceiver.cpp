@@ -14,6 +14,8 @@ ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 	TargetLocation = FVector::ZeroVector;
 	TargetRotation = FRotator::ZeroRotator;
 	ListenSocket = nullptr;
+	// 作为接收端，默认不发送 UDP
+	bEnableUDPSend = false;
 
 	// === 【关键】禁用重力和物理模拟 ===
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())

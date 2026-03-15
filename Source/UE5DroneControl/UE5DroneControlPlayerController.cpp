@@ -109,6 +109,12 @@ void AUE5DroneControlPlayerController::OnSetDestinationReleased()
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, FXCursor, CachedDestination, FRotator::ZeroRotator, FVector(1.f, 1.f, 1.f), true, true, ENCPoolMethod::None, true);
 	}
 
+	// 每次点击释放都更新目标点并开始持续发送（由角色处理）
+	if (AUE5DroneControlCharacter* Drone = Cast<AUE5DroneControlCharacter>(GetPawn()))
+	{
+		Drone->SetClickTargetLocation(CachedDestination, 1);
+	}
+
 	FollowTime = 0.f;
 }
 

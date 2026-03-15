@@ -86,7 +86,7 @@ class UEDataParser:
             如果解析失败返回None
         """
         if len(data) != UEDataParser.DATA_SIZE:
-            logging.warning(f"数据包大小错误: 期望{UEDataParser.DATA_SIZE}字节, 实际{len(data)}字节")
+            # logging.warning(f"数据包大小错误: 期望{UEDataParser.DATA_SIZE}字节, 实际{len(data)}字节")
             return None
 
         try:
@@ -211,6 +211,9 @@ class UEToPX4Bridge(Node):
         self.last_ue_data = None
         self.last_ue_time = 0
         self.current_target = None  # 当前目标位置 (NED坐标系)
+        # UDP接收日志节流
+        self._last_udp_log_time = 0.0
+        self._udp_log_interval = 1.0  # 秒
 
         # 设置QoS配置 (与u1.hpp保持一致)
         qos_profile = QoSProfile(
@@ -241,7 +244,7 @@ class UEToPX4Bridge(Node):
             f"{self.topic_prefix}/fmu/in/vehicle_command",
             qos_profile
         )
-
+    
         # ============ ROS2订阅者初始化 ============
         # 订阅无人机状态 (用于获取当前位置)
         self.odometry_sub = self.create_subscription(
@@ -307,6 +310,10 @@ class UEToPX4Bridge(Node):
             try:
                 # 接收UDP数据
                 data, addr = self.udp_socket.recvfrom(1024)  # 缓冲区1024字节
+                now = time.time()
+                if now - self._last_udp_log_time >= self._udp_log_interval:
+                    self._last_udp_log_time = now
+                    self.get_logger().info(f"收到UDP包: {len(data)} bytes from {addr[0]}:{addr[1]}")
 
                 # 解析数据
                 parsed_data = UEDataParser.parse_udp_data(data)
@@ -435,7 +442,7 @@ class UEToPX4Bridge(Node):
                     # param2=6.0 (PX4_CUSTOM_MAIN_MODE_OFFBOARD)
                     self.publish_vehicle_command(176, 1.0, 6.0)
                     self.is_offboard = True
-                    self.get_logger().warn(f"无人机{self.drone_id}切换到OFFBOARD模式")
+                    # self.get_logger().warn(f"无人机{self.drone_id}切换到OFFBOARD模式")
 
             return False
         return True
@@ -513,13 +520,15 @@ class UEToPX4Bridge(Node):
         if self.last_ue_time > 0 and (current_time - self.last_ue_time) > OFFBOARD_TIMEOUT_SEC:
             # UDP数据超时，进入悬停模式
             if self.is_offboard:
-                self.get_logger().warn(f"UDP数据超时({current_time - self.last_ue_time:.1f}s)，切换到悬停模式")
+                # self.get_logger().warn(f"UDP数据超时({current_time - self.last_ue_time:.1f}s)，切换到悬停模式")
+                pass
                 self.current_target = None
 
         # 检查odometry数据是否超时 (心跳监测)
         odometry_age = current_time - self.last_odometry_time if self.last_odometry_time > 0 else float('inf')
         if odometry_age > 1.0:  # 1秒没有收到odometry数据
-            self.get_logger().warn(f"Odometry数据超时: {odometry_age:.1f}s未收到")
+            # self.get_logger().warn(f"Odometry数据超时: {odometry_age:.1f}s未收到")
+            pass
             # 这里可以添加更复杂的处理，比如尝试重新初始化
 
         # ============ OFFBOARD模式维持 ============

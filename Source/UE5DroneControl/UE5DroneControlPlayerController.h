@@ -70,6 +70,7 @@ protected:
 
 	/** Initialize input bindings */
 	virtual void SetupInputComponent() override;
+
 	
 	/** Input handlers */
 	void OnInputStarted();
@@ -92,6 +93,6 @@ private:
 	/** Reference to the RealTime drone actor */
 	UPROPERTY()
 	class ARealTimeDroneReceiver* CachedRealTimeDrone;
+
+	// --- 点击目标点持续发送（由角色处理） ---
 };
-
-

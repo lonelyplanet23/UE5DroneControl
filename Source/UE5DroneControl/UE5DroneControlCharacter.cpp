@@ -236,7 +236,7 @@ void AUE5DroneControlCharacter::SwitchToRealTimeView()
 // --- 【新增】发送函数 ---
 void AUE5DroneControlCharacter::SendUDPData(FVector TargetLocation, int32 Mode)
 {
-    if (!SenderSocket || !RemoteAddr.IsValid()) return;
+    if (!bEnableUDPSend || !SenderSocket || !RemoteAddr.IsValid()) return;
 
     // 1. 准备数据包
     FDroneSocketData Data;
@@ -269,6 +269,40 @@ void AUE5DroneControlCharacter::SendUDPData(FVector TargetLocation, int32 Mode)
     SenderSocket->SendTo((uint8*)&Data, sizeof(FDroneSocketData), BytesSent, *RemoteAddr);
 }
 
+// --- 【新增】发送目标点坐标（不使用自身位置） ---
+void AUE5DroneControlCharacter::SendUDPTargetLocation(FVector TargetLocation, int32 Mode)
+{
+    if (!bEnableUDPSend || !SenderSocket || !RemoteAddr.IsValid()) return;
+
+    FDroneSocketData Data;
+    Data.Timestamp = FDateTime::UtcNow().ToUnixTimestamp();
+    Data.X = TargetLocation.X;
+    Data.Y = TargetLocation.Y;
+    Data.Z = TargetLocation.Z;
+    Data.Mode = Mode;
+
+    UE_LOG(LogTemp, Log, TEXT("Preparing UDP packet (Target) -> Timestamp=%.0f, X=%.3f, Y=%.3f, Z=%.3f, Mode=%d, Remote=%s:%d"),
+        Data.Timestamp, Data.X, Data.Y, Data.Z, Data.Mode, *RemoteIP, RemotePort);
+
+    int32 BytesSent = 0;
+    SenderSocket->SendTo((uint8*)&Data, sizeof(FDroneSocketData), BytesSent, *RemoteAddr);
+}
+
+void AUE5DroneControlCharacter::SetClickTargetLocation(FVector TargetLocation, int32 Mode)
+{
+    ClickTargetLocation = TargetLocation;
+    ClickTargetMode = Mode;
+    bSendClickTarget = true;
+    ClickSendTimer = ClickSendInterval; // 触发立即发送
+
+    SendUDPTargetLocation(ClickTargetLocation, ClickTargetMode);
+}
+
+void AUE5DroneControlCharacter::StopClickTargetSending()
+{
+    bSendClickTarget = false;
+}
+
 void AUE5DroneControlCharacter::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
@@ -287,14 +321,35 @@ void AUE5DroneControlCharacter::Tick(float DeltaSeconds)
             CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, NewZ));
         }
 
-        // --- 【新增】自动发送逻辑 (心跳包) ---
-        // 即使不动，也每隔 0.1s 发送一次当前位置，保持同步
-        SendTimer += DeltaSeconds;
-        if (SendTimer >= SendInterval)
+        if (bEnableUDPSend)
         {
-            SendTimer = 0.0f;
-            // Mode 0 = Idle (如果按了 W/S 或点击了移动，由那些事件去发高频包)
-            SendUDPData(MyMesh->GetComponentLocation(), 0);
+            // 到达点击目标点后，切换为悬停模式（Mode=0）
+            if (bSendClickTarget)
+            {
+                FVector CurrentPos = MyMesh ? MyMesh->GetComponentLocation() : GetActorLocation();
+                const float DistSq = FVector::DistSquared(CurrentPos, ClickTargetLocation);
+                const float ThresholdSq = ClickArriveThreshold * ClickArriveThreshold;
+                if (DistSq <= ThresholdSq)
+                {
+                    bSendClickTarget = false;
+                }
+            }
+
+            // --- 【新增】自动发送逻辑 (心跳包) ---
+            SendTimer += DeltaSeconds;
+            if (SendTimer >= SendInterval)
+            {
+                SendTimer = 0.0f;
+                if (bSendClickTarget)
+                {
+                    SendUDPTargetLocation(ClickTargetLocation, ClickTargetMode);
+                }
+                else
+                {
+                    // Mode 0 = Idle (如果按了 W/S 或点击了移动，由那些事件去发高频包)
+                    SendUDPData(MyMesh->GetComponentLocation(), 0);
+                }
+            }
         }
     }
 }
