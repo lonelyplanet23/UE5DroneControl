@@ -25,7 +25,7 @@ from rclpy.qos import QoSProfile, QoSHistoryPolicy, QoSReliabilityPolicy, QoSDur
 # PX4消息导入 - 假设px4_msgs已完整安装
 try:
     from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand
-    from px4_msgs.msg import VehicleOdometry
+    from px4_msgs.msg import VehicleOdometry, VehicleStatus
 except ImportError as e:
     print(f"错误: 无法导入PX4消息: {e}")
     print("请确保px4_msgs包已正确安装")
@@ -207,10 +207,13 @@ class UEToPX4Bridge(Node):
         # 状态变量
         self.is_initialized = False
         self.is_offboard = False
+        self.is_armed = False  # 解锁状态
         self.init_counter = 0
         self.last_ue_data = None
         self.last_ue_time = 0
-        self.current_target = None  # 当前目标位置 (NED坐标系)
+        self.current_target = None  # 当前目标位置 (NED坐标系)，鼠标点击后持续生效直到下一次点击
+        self.offboard_command_sent = False  # OFFBOARD命令是否已发送
+        self.arm_command_sent = False  # 解锁命令是否已发送
         # UDP接收日志节流
         self._last_udp_log_time = 0.0
         self._udp_log_interval = 1.0  # 秒
@@ -251,6 +254,14 @@ class UEToPX4Bridge(Node):
             VehicleOdometry,
             f"{self.topic_prefix}/fmu/out/vehicle_odometry",
             self.odometry_callback,
+            qos_profile
+        )
+
+        # 订阅无人机状态 (用于检测解锁和OFFBOARD状态)
+        self.status_sub = self.create_subscription(
+            VehicleStatus,
+            f"{self.topic_prefix}/fmu/out/vehicle_status",
+            self.status_callback,
             qos_profile
         )
 
@@ -398,6 +409,30 @@ class UEToPX4Bridge(Node):
                 f"频率: {self.odometry_frequency:.1f}Hz"
             )
 
+    def status_callback(self, msg: VehicleStatus):
+        """无人机状态回调 - 检测解锁和OFFBOARD状态"""
+        was_armed = self.is_armed
+        self.is_armed = (msg.arming_state == 2)  # 2=ARMED
+        in_offboard = (msg.nav_state == 14)  # 14=OFFBOARD
+
+        # 飞控确认OFFBOARD模式
+        if in_offboard and not self.is_offboard:
+            self.is_offboard = True
+            self.get_logger().info("飞控已确认OFFBOARD模式")
+
+        # 飞控退出OFFBOARD，重置以便重新进入
+        if not in_offboard and self.is_offboard:
+            self.is_offboard = False
+            self.offboard_command_sent = False
+            self.init_counter = 0
+            self.get_logger().warn("飞控已退出OFFBOARD，准备重新进入")
+
+        # 解锁状态变化
+        if self.is_armed and not was_armed:
+            self.get_logger().info("无人机已解锁")
+        elif not self.is_armed and was_armed:
+            self.get_logger().warn("无人机已上锁")
+
     def publish_vehicle_command(self, command: int, param1: float = 0.0, param2: float = 0.0):
         """发布车辆命令 (仿照u1.hpp)
 
@@ -429,22 +464,40 @@ class UEToPX4Bridge(Node):
         self.get_logger().info(f"发送车辆命令: {cmd_name}, param1={param1}, param2={param2}")
 
     def enter_offboard_mode(self):
-        """进入OFFBOARD模式 (仿照u1.hpp流程)"""
-        if not self.is_offboard:
-            # 步骤1: 先发送20次空的TrajectorySetpoint
-            if self.init_counter < INIT_COUNT_THRESHOLD:
-                self.publish_empty_setpoint()
-                self.init_counter += 1
+        """进入OFFBOARD模式 (仿照u1.hpp流程)
+        
+        流程：
+        1. 先发送20次空的TrajectorySetpoint（预设点）
+        2. 发送OFFBOARD模式切换命令（无论是否解锁都发）
+        3. 飞控通过status_callback确认进入OFFBOARD
+        
+        即使失败也会持续尝试，不会停止发送。
+        """
+        # 步骤1: 先发送足够的空setpoint
+        if self.init_counter < INIT_COUNT_THRESHOLD:
+            self.publish_empty_setpoint()
+            self.init_counter += 1
 
-                if self.init_counter == INIT_COUNT_THRESHOLD:
-                    # 步骤2: 发送切换到OFFBOARD模式的命令
-                    # param1=1.0 (MAV_MODE_FLAG_CUSTOM_MODE_ENABLED)
-                    # param2=6.0 (PX4_CUSTOM_MAIN_MODE_OFFBOARD)
+            if self.init_counter >= INIT_COUNT_THRESHOLD:
+                # 步骤2: 发送OFFBOARD模式命令
+                if not self.offboard_command_sent:
                     self.publish_vehicle_command(176, 1.0, 6.0)
-                    self.is_offboard = True
-                    # self.get_logger().warn(f"无人机{self.drone_id}切换到OFFBOARD模式")
+                    self.offboard_command_sent = True
+                    self.get_logger().info("已发送OFFBOARD切换命令，等待飞控确认...")
 
             return False
+
+        # init_counter已满但还没确认OFFBOARD，继续发命令
+        if not self.is_offboard:
+            # 每秒重试一次OFFBOARD命令
+            if not hasattr(self, '_last_offboard_retry'):
+                self._last_offboard_retry = 0
+            if time.time() - self._last_offboard_retry > 1.0:
+                self.publish_vehicle_command(176, 1.0, 6.0)
+                self._last_offboard_retry = time.time()
+                self.get_logger().info("重试OFFBOARD切换命令...")
+            return False
+
         return True
 
     def publish_empty_setpoint(self):
@@ -532,9 +585,18 @@ class UEToPX4Bridge(Node):
             # 这里可以添加更复杂的处理，比如尝试重新初始化
 
         # ============ OFFBOARD模式维持 ============
-        # 关键: 只要在OFFBOARD模式下，就必须持续发送控制消息，否则PX4会自动退出OFFBOARD
+        # 关键: 必须持续发送OffboardControlMode，否则PX4会自动退出OFFBOARD
+        # 即使未解锁也要持续发送，保持连接
 
         if self.is_offboard:
+            # 检查解锁状态，未解锁则尝试解锁（每2秒一次）
+            if not self.is_armed:
+                if not hasattr(self, '_last_arm_retry'):
+                    self._last_arm_retry = 0
+                if time.time() - self._last_arm_retry > 2.0:
+                    self.publish_vehicle_command(400, 1.0, 0.0)  # ARM
+                    self._last_arm_retry = time.time()
+                    self.get_logger().info("尝试解锁...")
             # 无论是否有UDP指令，都必须发布OffboardControlMode
             self.publish_offboard_control_mode(position=True)
 
@@ -581,9 +643,8 @@ class UEToPX4Bridge(Node):
 
         # ============ 不在OFFBOARD模式但已初始化 ============
         else:
-            # 应该进入OFFBOARD模式但尚未进入
-            if self.enter_offboard_mode():
-                self.get_logger().info("重新进入OFFBOARD模式")
+            # 持续尝试进入OFFBOARD模式（即使解锁失败也继续发）
+            self.enter_offboard_mode()
 
     def print_status(self):
         """打印状态信息 (1Hz) - 包含心跳监测"""

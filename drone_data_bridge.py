@@ -206,7 +206,7 @@ class WiFiManager:
         """测试网络连接"""
         try:
             result = subprocess.run(
-                ["ping", "-c" if self.system != "Windows" else "-n", "1", "192.168.10.1"],
+                ["ping", "-c" if self.system != "Windows" else "-n", "1", "192.168.30.101"],
                 capture_output=True,
                 timeout=5
             )
@@ -221,7 +221,7 @@ class WiFiManager:
 class SSHManager:
     """SSH 连接管理器"""
 
-    def __init__(self, host: str = "192.168.10.1", user: str = "jetson1", password: str = "123456"):
+    def __init__(self, host: str = "192.168.30.101", user: str = "jetson1", password: str = "123456"):
         self.host = host
         self.user = user
         self.password = password
@@ -401,7 +401,7 @@ class SSHManager:
 class ROS2DataReceiver:
     """ROS 2 数据接收器 - 从终端2的输出文件读取 ros2 topic echo 的结果"""
 
-    def __init__(self, ssh_host: str = "192.168.10.1", ssh_user: str = "jetson1", 
+    def __init__(self, ssh_host: str = "192.168.30.101", ssh_user: str = "jetson1", 
                  ssh_password: str = "123456", ue_host: str = "127.0.0.1", 
                  ue_port: int = 8888, topic: str = "/px4_1/fmu/out/vehicle_odometry"):
         self.ssh_host = ssh_host
@@ -678,7 +678,7 @@ def main():
     parser = argparse.ArgumentParser(description="无人机数据接收与转发脚本")
     parser.add_argument('--ue-host', default='127.0.0.1', help='UE5 主机地址')
     parser.add_argument('--ue-port', type=int, default=8888, help='UE5 监听端口')
-    parser.add_argument('--ssh-host', default='192.168.10.1', help='无人机 SSH 地址')
+    parser.add_argument('--ssh-host', default='192.168.30.101', help='无人机 SSH 地址')
     parser.add_argument('--ssh-user', default='jetson1', help='SSH 用户名')
     parser.add_argument('--ssh-password', default='123456', help='SSH 密码')
     parser.add_argument('--ros-topic', default='/px4_1/fmu/out/vehicle_odometry', help='ROS 2 话题')
@@ -716,13 +716,13 @@ def main():
             ssh = SSHManager(args.ssh_host, args.ssh_user, args.ssh_password)
 
             if ssh.test_connection():
-                logger.info("[OK] SSH 连接可用，可以访问 jetson1@192.168.10.1")
+                logger.info("[OK] SSH 连接可用，可以访问 jetson1@192.168.30.101")
 
                 # ============ 步骤 3: 打开终端1 运行 MicroXRCE Agent ============
                 logger.info("\n" + "="*60)
                 logger.info("[步骤 3/5] 打开终端1 - 执行 SSH 连接 → MicroXRCE Agent")
                 logger.info("="*60)
-                logger.info("命令: ssh jetson1@192.168.10.1")
+                logger.info("命令: ssh jetson1@192.168.30.101")
                 logger.info("      → MicroXRCEAgent serial --dev /dev/ttyTHS1 -b 921600")
                 ssh.open_microxrce_agent_terminal()
                 logger.info("[OK] 终端1 已打开 (请保持运行)")
@@ -732,7 +732,7 @@ def main():
                 logger.info("\n" + "="*60)
                 logger.info("[步骤 4/5] 打开终端2 - 执行 SSH 连接 → ROS 2 echo")
                 logger.info("="*60)
-                logger.info("命令: ssh jetson1@192.168.10.1")
+                logger.info("命令: ssh jetson1@192.168.30.101")
                 logger.info("      → ros2 topic echo /px4_1/fmu/out/vehicle_odometry")
                 ssh.open_ros2_echo_terminal()
                 logger.info("[OK] 终端2 已打开 (将显示 Odometry 数据)")
@@ -742,7 +742,7 @@ def main():
                 logger.error("[ERROR] 无法连接到 SSH，请检查网络")
                 logger.error("请确保:")
                 logger.error("  1. 已连接到 UAV1 网络")
-                logger.error("  2. 无人机地址正确: 192.168.10.1")
+                logger.error("  2. 无人机地址正确: 192.168.30.101")
                 logger.error("  3. SSH 服务已启动")
                 return False
         else:

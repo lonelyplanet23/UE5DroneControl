@@ -4,7 +4,7 @@
 drones:
   # 无人机 1
   - name: "UAV1"
-    ssh_host: "192.168.10.1"
+    ssh_host: "192.168.30.101"
     ssh_user: "jetson1"
     ssh_password: "123456"
     ros_topic: "/px4_1/fmu/out/vehicle_odometry"
@@ -13,7 +13,7 @@ drones:
 
   # 无人机 2（未来扩展）
   - name: "UAV2"
-    ssh_host: "192.168.10.2"
+    ssh_host: "192.168.30.102"
     ssh_user: "jetson2"
     ssh_password: "123456"
     ros_topic: "/px4_2/fmu/out/vehicle_odometry"
@@ -22,7 +22,7 @@ drones:
 
   # 无人机 3（未来扩展）
   - name: "UAV3"
-    ssh_host: "192.168.10.3"
+    ssh_host: "192.168.30.103"
     ssh_user: "jetson3"
     ssh_password: "123456"
     ros_topic: "/px4_3/fmu/out/vehicle_odometry"
