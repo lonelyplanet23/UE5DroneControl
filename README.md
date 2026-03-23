@@ -50,7 +50,7 @@
 ## 关键配置文件
 - `drone_bridge_config.yaml`
   - UE5 端口（默认 `8888`）
-  - 无人机 SSH 地址/账号（默认 `192.168.10.1 / jetson1 / 123456`）
+  - 无人机 SSH 地址/账号（默认 `192.168.30.101 / jetson1 / 123456`）
   - WiFi SSID/密码（默认 `uav1 / 12345678`）
   - ROS2 话题（默认 `/px4_1/fmu/out/vehicle_odometry`）
 
