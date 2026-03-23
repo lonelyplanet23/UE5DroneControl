@@ -7,14 +7,14 @@ ue5:
 
 # 无人机 SSH 连接配置
 drone:
-  ssh_host: "192.168.30.101"    # 无人机地址
+  ssh_host: "192.168.30.104"    # 无人机地址
   ssh_user: "jetson1"         # SSH 用户名
   ssh_password: "123456"      # SSH 密码
   
 # WiFi 网络配置
 network:
   ssid: "virtualUAV"                # WiFi 网络名称
-  password: "buaa12345678"        # WiFi 密码
+  password: "buaa123456"        # WiFi 密码
   check_interval: 2           # 网络检查间隔（秒）
   max_attempts: 60            # 最大检查次数
 

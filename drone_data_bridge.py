@@ -1,7 +1,7 @@
 """
 无人机数据接收与转发脚本 (Drone Data Bridge)
 功能：
-1. 连接到 UAV1 网络
+1. 连接到 virtualUAV 网络
 2. 通过 SSH 连接到无人机
 3. 启动 MicroXRCE Agent
 4. 订阅 ROS 2 话题
@@ -21,15 +21,22 @@ import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any, Union, List
 from datetime import datetime
-from px4_msgs.vehicle_odometry import VehicleOdometry
+from px4_msgs_bak.vehicle_odometry import VehicleOdometry
 import logging
+from logging.handlers import RotatingFileHandler
 
-# 配置日志
+# 配置日志（滚动文件，避免日志无限增大）
+_log_file_handler = RotatingFileHandler(
+    'drone_bridge.log',
+    maxBytes=10 * 1024 * 1024,  # 10 MB
+    backupCount=5,
+    encoding='utf-8'
+)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler('drone_bridge.log', encoding='utf-8'),
+        _log_file_handler,
         logging.StreamHandler()
     ]
 )
@@ -54,8 +61,8 @@ class WiFiManager:
     def __init__(self):
         self.system = platform.system()
         self.is_connected = False
-        self.target_ssid = "uav1"
-        self.target_password = "12345678"
+        self.target_ssid = "virtualUAV"
+        self.target_password = "buaa123456"
 
     def scan_networks(self) -> list:
         """扫描可用的 WiFi 网络"""
@@ -135,13 +142,13 @@ class WiFiManager:
             return []
 
     def check_uav1_network(self) -> bool:
-        """检查 UAV1 网络是否可用"""
+        """检查 virtualUAV 网络是否可用"""
         networks = self.scan_networks()
         return self.target_ssid in networks
 
     def connect_to_uav1(self, max_attempts: int = 60, check_interval: int = 2) -> bool:
         """
-        连接到 UAV1 网络
+        连接到 virtualUAV 网络
         
         Args:
             max_attempts: 最大尝试次数
@@ -152,12 +159,12 @@ class WiFiManager:
         """
         attempt = 0
         while attempt < max_attempts:
-            logger.info(f"[{attempt + 1}/{max_attempts}] 检查 UAV1 网络...")
+            logger.info(f"[{attempt + 1}/{max_attempts}] 检查 virtualUAV 网络...")
 
             if self.check_uav1_network():
-                logger.info("[OK] 发现 UAV1 网络，开始连接...")
+                logger.info("[OK] 发现 virtualUAV 网络，开始连接...")
                 if self._do_connect():
-                    logger.info("[OK] 成功连接到 UAV1 网络!")
+                    logger.info("[OK] 成功连接到 virtualUAV 网络!")
                     self.is_connected = True
                     return True
                 else:
@@ -167,7 +174,7 @@ class WiFiManager:
             if attempt < max_attempts:
                 time.sleep(check_interval)
 
-        logger.error("[ERROR] 无法连接到 UAV1 网络")
+        logger.error("[ERROR] 无法连接到 virtualUAV 网络")
         return False
 
     def _do_connect(self) -> bool:
@@ -206,7 +213,7 @@ class WiFiManager:
         """测试网络连接"""
         try:
             result = subprocess.run(
-                ["ping", "-c" if self.system != "Windows" else "-n", "1", "192.168.30.101"],
+                ["ping", "-c" if self.system != "Windows" else "-n", "1", "192.168.30.104"],
                 capture_output=True,
                 timeout=5
             )
@@ -221,7 +228,7 @@ class WiFiManager:
 class SSHManager:
     """SSH 连接管理器"""
 
-    def __init__(self, host: str = "192.168.30.101", user: str = "jetson1", password: str = "123456"):
+    def __init__(self, host: str = "192.168.30.104", user: str = "jetson1", password: str = "123456"):
         self.host = host
         self.user = user
         self.password = password
@@ -401,7 +408,7 @@ class SSHManager:
 class ROS2DataReceiver:
     """ROS 2 数据接收器 - 从终端2的输出文件读取 ros2 topic echo 的结果"""
 
-    def __init__(self, ssh_host: str = "192.168.30.101", ssh_user: str = "jetson1", 
+    def __init__(self, ssh_host: str = "192.168.30.104", ssh_user: str = "jetson1", 
                  ssh_password: str = "123456", ue_host: str = "127.0.0.1", 
                  ue_port: int = 8888, topic: str = "/px4_1/fmu/out/vehicle_odometry"):
         self.ssh_host = ssh_host
@@ -678,7 +685,7 @@ def main():
     parser = argparse.ArgumentParser(description="无人机数据接收与转发脚本")
     parser.add_argument('--ue-host', default='127.0.0.1', help='UE5 主机地址')
     parser.add_argument('--ue-port', type=int, default=8888, help='UE5 监听端口')
-    parser.add_argument('--ssh-host', default='192.168.30.101', help='无人机 SSH 地址')
+    parser.add_argument('--ssh-host', default='192.168.30.104', help='无人机 SSH 地址')
     parser.add_argument('--ssh-user', default='jetson1', help='SSH 用户名')
     parser.add_argument('--ssh-password', default='123456', help='SSH 密码')
     parser.add_argument('--ros-topic', default='/px4_1/fmu/out/vehicle_odometry', help='ROS 2 话题')
@@ -697,11 +704,11 @@ def main():
         # ============ 步骤 1: 连接 WiFi ============
         if not args.skip_network:
             logger.info("\n" + "="*60)
-            logger.info("[步骤 1/5] 连接 UAV1 网络...")
+            logger.info("[步骤 1/5] 连接 virtualUAV 网络...")
             logger.info("="*60)
             wifi = WiFiManager()
             if not wifi.connect_to_uav1():
-                logger.error("[WARNING] 无法连接到 UAV1 网络，但继续尝试...")
+                logger.error("[WARNING] 无法连接到 virtualUAV 网络，但继续尝试...")
                 time.sleep(2)
         else:
             logger.info("\n" + "="*60)
@@ -716,13 +723,13 @@ def main():
             ssh = SSHManager(args.ssh_host, args.ssh_user, args.ssh_password)
 
             if ssh.test_connection():
-                logger.info("[OK] SSH 连接可用，可以访问 jetson1@192.168.30.101")
+                logger.info("[OK] SSH 连接可用，可以访问 jetson1@192.168.30.104")
 
                 # ============ 步骤 3: 打开终端1 运行 MicroXRCE Agent ============
                 logger.info("\n" + "="*60)
                 logger.info("[步骤 3/5] 打开终端1 - 执行 SSH 连接 → MicroXRCE Agent")
                 logger.info("="*60)
-                logger.info("命令: ssh jetson1@192.168.30.101")
+                logger.info("命令: ssh jetson1@192.168.30.104")
                 logger.info("      → MicroXRCEAgent serial --dev /dev/ttyTHS1 -b 921600")
                 ssh.open_microxrce_agent_terminal()
                 logger.info("[OK] 终端1 已打开 (请保持运行)")
@@ -732,7 +739,7 @@ def main():
                 logger.info("\n" + "="*60)
                 logger.info("[步骤 4/5] 打开终端2 - 执行 SSH 连接 → ROS 2 echo")
                 logger.info("="*60)
-                logger.info("命令: ssh jetson1@192.168.30.101")
+                logger.info("命令: ssh jetson1@192.168.30.104")
                 logger.info("      → ros2 topic echo /px4_1/fmu/out/vehicle_odometry")
                 ssh.open_ros2_echo_terminal()
                 logger.info("[OK] 终端2 已打开 (将显示 Odometry 数据)")
@@ -741,8 +748,8 @@ def main():
             else:
                 logger.error("[ERROR] 无法连接到 SSH，请检查网络")
                 logger.error("请确保:")
-                logger.error("  1. 已连接到 UAV1 网络")
-                logger.error("  2. 无人机地址正确: 192.168.30.101")
+                logger.error("  1. 已连接到 virtualUAV 网络")
+                logger.error("  2. 无人机地址正确: 192.168.30.104")
                 logger.error("  3. SSH 服务已启动")
                 return False
         else:

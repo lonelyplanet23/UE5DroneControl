@@ -40,7 +40,7 @@ DEFAULT_UDP_HOST = "0.0.0.0"  # 监听所有接口
 
 # PX4话题配置
 DEFAULT_PX4_TOPIC_PREFIX = "/px4_1"  # 话题前缀，对应无人机ID
-DEFAULT_DRONE_ID = 1  # 无人机ID，用于VehicleCommand.target_system
+DEFAULT_DRONE_ID = 2  # 无人机ID，用于VehicleCommand.target_system
 
 # 控制参数
 INIT_COUNT_THRESHOLD = 20  # 进入OFFBOARD前需要发送的空消息次数

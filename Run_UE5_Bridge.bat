@@ -1,24 +1,29 @@
 @echo off
-:: 1. 设置终端编码为 UTF-8，防止中文乱码
 chcp 65001 >nul
 
+:: --- 路径配置 ---
+set CONDA_ROOT=C:\ProgramData\miniforge3
+set ENV_ROOT=%CONDA_ROOT%\envs\ros_env
+set WORKSPACE=D:\RedAlert
+
 echo ============================================================
-echo [1/4] 正在初始化 Miniforge 环境...
-:: 这里指向你电脑上实际的 mamba_hook 路径
-call C:\ProgramData\miniforge3\condabin\mamba_hook.bat
+echo [1/3] 激活隔离环境...
+set PATH=%CONDA_ROOT%;%CONDA_ROOT%\Scripts;%CONDA_ROOT%\condabin;%SystemRoot%\system32;%SystemRoot%
+call "%CONDA_ROOT%\condabin\mamba_hook.bat"
+call mamba activate "%ENV_ROOT%"
 
-echo [2/4] 正在激活 ros_env 虚拟环境...
-call mamba activate C:\ProgramData\miniforge3\envs\ros_env
+echo [2/3] 注入 ROS2 与自定义消息 DLL 路径...
+:: 核心修复：必须把 install 下的 bin 文件夹加入 PATH，Python 才能加载自定义消息的 C 扩展
+set PATH=%WORKSPACE%\install\px4_msgs\bin;%ENV_ROOT%\Library\bin;%ENV_ROOT%\Scripts;%PATH%
 
-echo [3/4] 正在加载 D:\RedAlert 工作空间变量...
-cd /d D:\RedAlert
-:: 激活你辛苦编译好的 px4_msgs
-call install\setup.bat
+:: 注入 Python 搜索路径
+set PYTHONPATH=%WORKSPACE%\install\px4_msgs\lib\site-packages;%PYTHONPATH%
 
-echo [4/4] 正在启动 UE5 到 PX4 的桥接程序...
+echo [3/3] 环境锁定完成，启动桥接程序...
 echo ============================================================
-cd UE5DroneControl
-python ue_to_px4_bridge.py
 
-:: 如果程序崩溃，保留窗口查看报错信息
+cd /d "%WORKSPACE%\UE5DroneControl"
+:: 使用环境内的 python 运行
+"%ENV_ROOT%\python.exe" ue_to_px4_bridge.py
+
 pause

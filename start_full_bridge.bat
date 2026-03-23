@@ -3,8 +3,10 @@ chcp 65001 >nul
 setlocal
 
 :: ============================================================
-:: PX4->UE5 数据桥接启动脚本
+:: 双端通讯一键启动脚本
 :: 分工：bat 负责 WiFi + SSH 终端，Python 只做数据转发
+:: 阶段1: PX4 -> UE5  (drone_data_bridge.py --skip-ssh --skip-network)
+:: 阶段2: UE5 -> PX4  (ue_to_px4_bridge.py)
 :: 配置来源: drone_bridge_config.yaml
 :: ============================================================
 
@@ -16,14 +18,13 @@ set WIFI_PASS=buaa12345678
 set UE5_HOST=127.0.0.1
 set UE5_PORT=8888
 set ROS_TOPIC=/px4_1/fmu/out/vehicle_odometry
-set OUTPUT_FILE=%TEMP%\ros2_output.txt
+
 set SCRIPT_DIR=%~dp0
 
 echo ============================================================
-echo  PX4 -^> UE5 数据桥接启动脚本
-echo  SSH 主机  : %SSH_HOST%
-echo  WiFi SSID : %WIFI_SSID%
-echo  UE5 目标  : %UE5_HOST%:%UE5_PORT%
+echo  双端通讯一键启动脚本
+echo  [阶段1] PX4 -^> UE5  (drone_data_bridge.py)
+echo  [阶段2] UE5 -^> PX4  (ue_to_px4_bridge.py)
 echo ============================================================
 echo.
 
@@ -31,7 +32,7 @@ echo.
 :: 步骤1：连接 WiFi
 :: ============================================================
 echo.
-echo [步骤1/5] 连接 WiFi: %WIFI_SSID%
+echo [步骤1/4] 连接 WiFi: %WIFI_SSID%
 netsh wlan connect name="%WIFI_SSID%" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] WiFi 连接命令失败，无法继续
@@ -45,7 +46,7 @@ timeout /t 3 /nobreak >nul
 :: 步骤2：测试连通性
 :: ============================================================
 echo.
-echo [步骤2/5] 测试 SSH 主机连通性: %SSH_HOST%
+echo [步骤2/4] 测试 SSH 主机连通性: %SSH_HOST%
 ping -n 1 %SSH_HOST% >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] 无法 ping 到 %SSH_HOST%，请检查:
@@ -60,7 +61,7 @@ echo [OK] %SSH_HOST% 可达
 :: 步骤3：终端1 - MicroXRCE Agent（手动输入）
 :: ============================================================
 echo.
-echo [步骤3/5] 打开终端1 - MicroXRCE Agent
+echo [步骤3/4] 打开终端1 - MicroXRCE Agent
 
 set TERM1=%TEMP%\drone_term1.bat
 (
@@ -87,9 +88,7 @@ if errorlevel 2 (
 :: 步骤4：终端2 - ROS2 topic echo（手动输入）
 :: ============================================================
 echo.
-echo [步骤4/5] 打开终端2 - ROS2 topic echo
-
-if exist "%OUTPUT_FILE%" del /f /q "%OUTPUT_FILE%"
+echo [步骤4/4] 打开终端2 - ROS2 topic echo
 
 set TERM2=%TEMP%\drone_term2.bat
 (
@@ -115,27 +114,65 @@ if errorlevel 2 (
 )
 
 :: ============================================================
-:: 步骤5：启动 Python 主进程（只做数据转发，SSH 已由 bat 处理）
+:: 阶段1：启动 PX4->UE5 主进程
+:: --skip-ssh --skip-network：SSH 终端已由 bat 启动，Python 只做数据转发
 :: ============================================================
 echo.
-echo [步骤5/5] 启动 PX4-^>UE5 主进程 (drone_data_bridge.py)
-echo   目标: %UE5_HOST%:%UE5_PORT%
+echo [阶段1] 启动 PX4-^>UE5 主进程 (drone_data_bridge.py)
+
+set BRIDGE1=%TEMP%\drone_bridge1.bat
+(
+    echo @echo off
+    echo chcp 65001 ^>nul
+    echo echo [PX4-^>UE5] 激活虚拟环境...
+    echo call "%SCRIPT_DIR%drone_env\Scripts\activate.bat"
+    echo echo [PX4-^>UE5] 启动 drone_data_bridge.py...
+    echo python "%SCRIPT_DIR%drone_data_bridge.py" --ue-host %UE5_HOST% --ue-port %UE5_PORT% --ssh-host %SSH_HOST% --ssh-user %SSH_USER% --ros-topic %ROS_TOPIC% --skip-ssh --skip-network
+    echo echo [PX4-^>UE5] 进程已退出
+    echo pause
+) > "%BRIDGE1%"
+
+start "PX4->UE5 Bridge" cmd /k "%BRIDGE1%"
+echo [OK] PX4-^>UE5 桥接已启动
+choice /C YN /M "已确认 PX4->UE5 桥接窗口正常运行?"
+if errorlevel 2 (
+    echo [ERROR] 阶段1未成功启动，停止后续步骤
+    pause
+    exit /b 1
+)
+choice /C YN /M "已确认 ROS2 数据流正常?"
+if errorlevel 2 (
+    echo [ERROR] 数据流异常，停止后续步骤
+    pause
+    exit /b 1
+)
+
+:: ============================================================
+:: 阶段2：UE5->PX4 (ue_to_px4_bridge.py)
+:: ============================================================
+:STAGE2
 echo.
 echo ============================================================
-echo  所有终端已启动，按 Ctrl+C 可退出主进程
+echo  [阶段2] 启动 UE5 -^> PX4 桥接 (ue_to_px4_bridge.py)
+echo ============================================================
+
+if not exist "%SCRIPT_DIR%Run_UE5_Bridge.bat" (
+    echo [ERROR] 未找到 Run_UE5_Bridge.bat: %SCRIPT_DIR%Run_UE5_Bridge.bat
+    pause
+    exit /b 1
+)
+
+start "UE5->PX4 Bridge" cmd /k "%SCRIPT_DIR%Run_UE5_Bridge.bat"
+echo [OK] UE5-^>PX4 桥接已启动（Run_UE5_Bridge.bat）
+
+echo.
+echo ============================================================
+echo  全部启动完成
+echo  终端1  : MicroXRCE Agent  (SSH ^> Jetson)
+echo  终端2  : ROS2 topic echo  (SSH ^> Jetson)
+echo  窗口3  : PX4 -^> UE5      (drone_data_bridge.py)
+echo  窗口4  : UE5 -^> PX4      (ue_to_px4_bridge.py)
+echo  关闭对应窗口可停止各进程
 echo ============================================================
 echo.
-
-call "%SCRIPT_DIR%drone_env\Scripts\activate.bat"
-python "%SCRIPT_DIR%drone_data_bridge.py" ^
-    --ue-host %UE5_HOST% ^
-    --ue-port %UE5_PORT% ^
-    --ssh-host %SSH_HOST% ^
-    --ssh-user %SSH_USER% ^
-    --ros-topic %ROS_TOPIC% ^
-    --skip-ssh ^
-    --skip-network
-
-echo.
-echo [完成] 主进程已退出
 pause
