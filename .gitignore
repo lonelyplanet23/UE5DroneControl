@@ -41,3 +41,5 @@ Thumbs.db
 *.sqlite-shm
 *.sqlite-wal
 cesium-request-cache.sqlite
+
+drone_bridge.log

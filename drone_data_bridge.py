@@ -19,11 +19,30 @@ import platform
 import argparse
 import yaml
 from pathlib import Path
-from typing import Optional, Dict, Any, Union, List
+from typing import Optional, Dict, Any, List
 from datetime import datetime
-from px4_msgs_bak.vehicle_odometry import VehicleOdometry
 import logging
 from logging.handlers import RotatingFileHandler
+
+# 可选：自动切换到 drone_env 虚拟环境运行（Windows venv）
+def _ensure_drone_env():
+    # 若已在虚拟环境中运行，则不处理
+    if os.environ.get("VIRTUAL_ENV"):
+        return
+
+    script_dir = Path(__file__).resolve().parent
+    venv_python = script_dir / "drone_env" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        return
+
+    # 防止递归重新执行
+    if os.environ.get("DRONE_BRIDGE_REEXEC") == "1":
+        return
+
+    os.environ["DRONE_BRIDGE_REEXEC"] = "1"
+    os.execv(str(venv_python), [str(venv_python)] + sys.argv)
+
+_ensure_drone_env()
 
 # 配置日志（滚动文件，避免日志无限增大）
 _log_file_handler = RotatingFileHandler(
@@ -465,62 +484,46 @@ class ROS2DataReceiver:
             logger.debug(f"YAML 解析失败: {e}")
         return {}
 
-    def process_odometry_data(self, data: Union[Dict[str, Any], VehicleOdometry]) -> Dict[str, Any]:
-        """处理 Odometry 数据，提取关键信息。
-        支持原始 dict（ros2 echo 输出解析）或手动定义的 VehicleOdometry 实例。
-        """
+    def process_odometry_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """处理 Odometry 数据，提取关键信息（来自 ros2 echo 的 YAML 输出）。"""
         try:
-            # 如果已经是 VehicleOdometry 实例，直接使用
-            if isinstance(data, VehicleOdometry):
-                vo: VehicleOdometry = data
-                timestamp_value = int(vo.timestamp or 0)
-                position_list = [float(x) for x in (vo.position or [0.0, 0.0, 0.0])][:3]
-                q_list = [float(x) for x in (vo.q or [0.0, 0.0, 0.0, 1.0])][:4]
-                velocity_list = [float(x) for x in (vo.velocity or [0.0, 0.0, 0.0])][:3]
-                angular_velocity_list = [float(x) for x in (vo.angular_velocity or [0.0, 0.0, 0.0])][:3]
-                position_variance = [float(x) for x in (vo.position_variance or [0.0, 0.0, 0.0])][:3]
-                velocity_variance = [float(x) for x in (vo.velocity_variance or [0.0, 0.0, 0.0])][:3]
-                reset_counter = int(vo.reset_counter or 0)
-                quality = int(vo.quality or 0)
+            # 【修正】处理 PX4 VehicleOdometry 的扁平 YAML 格式
+            # 实际数据格式示例：
+            # {
+            #   'timestamp': 1765353093720576,
+            #   'position': [9.086, 35.671, 2.786],
+            #   'q': [-0.691, -0.024, 0.006, 0.722],
+            #   ...
+            # }
 
-            else:
-                # 【修正】处理 PX4 VehicleOdometry 的扁平 YAML 格式
-                # 实际数据格式示例：
-                # {
-                #   'timestamp': 1765353093720576,
-                #   'position': [9.086, 35.671, 2.786],
-                #   'q': [-0.691, -0.024, 0.006, 0.722],
-                #   ...
-                # }
+            # 1. 提取时间戳（直接从最外层）
+            timestamp_value = int(data.get('timestamp', 0))
 
-                # 1. 提取时间戳（直接从最外层）
-                timestamp_value = int(data.get('timestamp', 0))
+            # 2. 提取位置（直接处理列表）
+            raw_position = data.get('position', [0.0, 0.0, 0.0])
+            position_list = [float(x) for x in raw_position] if isinstance(raw_position, list) else [0.0, 0.0, 0.0]
 
-                # 2. 提取位置（直接处理列表）
-                raw_position = data.get('position', [0.0, 0.0, 0.0])
-                position_list = [float(x) for x in raw_position] if isinstance(raw_position, list) else [0.0, 0.0, 0.0]
+            # 3. 提取四元数（直接处理列表）
+            raw_q = data.get('q', [0.0, 0.0, 0.0, 1.0])
+            q_list = [float(x) for x in raw_q] if isinstance(raw_q, list) else [0.0, 0.0, 0.0, 1.0]
 
-                # 3. 提取四元数（直接处理列表）
-                raw_q = data.get('q', [0.0, 0.0, 0.0, 1.0])
-                q_list = [float(x) for x in raw_q] if isinstance(raw_q, list) else [0.0, 0.0, 0.0, 1.0]
+            # 4. 提取速度（直接处理列表）
+            raw_velocity = data.get('velocity', [0.0, 0.0, 0.0])
+            velocity_list = [float(x) for x in raw_velocity] if isinstance(raw_velocity, list) else [0.0, 0.0, 0.0]
 
-                # 4. 提取速度（直接处理列表）
-                raw_velocity = data.get('velocity', [0.0, 0.0, 0.0])
-                velocity_list = [float(x) for x in raw_velocity] if isinstance(raw_velocity, list) else [0.0, 0.0, 0.0]
+            # 5. 提取角速度
+            raw_angular_velocity = data.get('angular_velocity', [0.0, 0.0, 0.0])
+            angular_velocity_list = [float(x) for x in raw_angular_velocity] if isinstance(raw_angular_velocity, list) else [0.0, 0.0, 0.0]
 
-                # 5. 提取角速度
-                raw_angular_velocity = data.get('angular_velocity', [0.0, 0.0, 0.0])
-                angular_velocity_list = [float(x) for x in raw_angular_velocity] if isinstance(raw_angular_velocity, list) else [0.0, 0.0, 0.0]
+            # 6. 提取方差数据
+            raw_position_variance = data.get('position_variance', [0.0, 0.0, 0.0])
+            position_variance = [float(x) for x in raw_position_variance] if isinstance(raw_position_variance, list) else [0.0, 0.0, 0.0]
 
-                # 6. 提取方差数据
-                raw_position_variance = data.get('position_variance', [0.0, 0.0, 0.0])
-                position_variance = [float(x) for x in raw_position_variance] if isinstance(raw_position_variance, list) else [0.0, 0.0, 0.0]
+            raw_velocity_variance = data.get('velocity_variance', [0.0, 0.0, 0.0])
+            velocity_variance = [float(x) for x in raw_velocity_variance] if isinstance(raw_velocity_variance, list) else [0.0, 0.0, 0.0]
 
-                raw_velocity_variance = data.get('velocity_variance', [0.0, 0.0, 0.0])
-                velocity_variance = [float(x) for x in raw_velocity_variance] if isinstance(raw_velocity_variance, list) else [0.0, 0.0, 0.0]
-
-                reset_counter = int(data.get('reset_counter', 0))
-                quality = int(data.get('quality', 0))
+            reset_counter = int(data.get('reset_counter', 0))
+            quality = int(data.get('quality', 0))
 
             # 组织为 YAML 格式的字典
             cleaned_data = {
