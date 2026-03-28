@@ -1,11 +1,17 @@
 # UE5到PX4无人机控制桥接配置
 # 此配置用于控制真实无人机跟随UE5仿真无人机
 
+# 重要：三架飞机的 MAVLink System ID 分别为:
+#   px4_1 -> target_system = 2
+#   px4_2 -> target_system = 3
+#   px4_3 -> target_system = 4
+# 注意：这不是ROS2话题prefix中的数字！
+
 # 无人机配置
 drone:
-  id: 1                          # 无人机ID (1,2,3...)
+  id: 2                          # PX4 MAVLink system ID (必须是2,3,4中的一个)
   topic_prefix: "/px4_1"        # ROS2话题前缀
-  system_id: 1                  # PX4系统ID (用于VehicleCommand.target_system)
+  system_id: 2                  # PX4系统ID (用于VehicleCommand.target_system)
 
 # UDP网络配置
 udp:
