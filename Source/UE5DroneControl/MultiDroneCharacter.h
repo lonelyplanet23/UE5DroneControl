@@ -9,6 +9,7 @@
 
 class UDroneSelectionComponent;
 class UDroneCommandSenderComponent;
+class UWidgetComponent;
 
 /**
  * Multi-drone sender pawn.
@@ -69,10 +70,22 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDroneCommandSenderComponent> CommandSenderComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> SelectionWidgetComponent;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Selection UI")
+	FText SelectedWidgetText = FText::FromString(TEXT("已选中"));
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Selection UI")
+	FVector SelectionWidgetRelativeLocation = FVector(0.0f, 0.0f, 180.0f);
+
 	// ---- IDroneSelectableInterface ----
 	virtual int32 GetDroneId_Implementation() const override { return DroneId; }
 	virtual void OnPrimarySelected_Implementation() override;
 	virtual void OnSecondarySelected_Implementation(bool bSelected) override;
 	virtual void OnHoveredChanged_Implementation(bool bHovered) override;
 	virtual void OnDeselected_Implementation() override;
+
+	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
+	virtual void StopClickTargetSending() override;
 };
