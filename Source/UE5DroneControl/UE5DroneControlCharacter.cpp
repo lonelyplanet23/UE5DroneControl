@@ -263,8 +263,8 @@ void AUE5DroneControlCharacter::SendUDPData(FVector TargetLocation, int32 Mode)
     Data.Mode = Mode;
 
     //调试
-    UE_LOG(LogTemp, Log, TEXT("Preparing UDP packet -> Timestamp=%.0f, X=%.3f, Y=%.3f, Z=%.3f, Mode=%d, Remote=%s:%d"),
-        Data.Timestamp, Data.X, Data.Y, Data.Z, Data.Mode, *RemoteIP, RemotePort);// 2. 发送
+    // UE_LOG(LogTemp, Log, TEXT("Preparing UDP packet -> Timestamp=%.0f, X=%.3f, Y=%.3f, Z=%.3f, Mode=%d, Remote=%s:%d"),
+    //     Data.Timestamp, Data.X, Data.Y, Data.Z, Data.Mode, *RemoteIP, RemotePort);// 2. 发送
     int32 BytesSent = 0;
     SenderSocket->SendTo((uint8*)&Data, sizeof(FDroneSocketData), BytesSent, *RemoteAddr);
 }

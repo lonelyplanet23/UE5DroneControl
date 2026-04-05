@@ -5,9 +5,15 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
+#include "Components/WidgetComponent.h"
 #include "DroneOpsPlayerController.generated.h"
 
 class UDroneRegistrySubsystem;
+
+/**
+ * Delegate for when drone info panel is requested by middle click.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnOpenDroneInfoPanelRequested, int32, DroneId);
 
 /**
  * Player controller for drone operations
@@ -67,7 +73,27 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	bool GetWorldLocationUnderCursor(FVector& OutLocation) const;
 
-	AActor* GetSelectableDroneUnderCursor(FVector* OutFallbackWorldLocation = nullptr) const;
-	AActor* FindNearestSelectableDroneOnScreen(float MaxScreenDistance) const;
-	AActor* ResolveDroneActorById(int32 DroneId) const;
+public:
+	/**
+	 * Event broadcast when user clicks middle mouse button while hovering a drone.
+	 * The HUD should handle this event and open the drone info panel.
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "DroneOps Events")
+	FOnOpenDroneInfoPanelRequested OnOpenDroneInfoPanelRequested;
+
+	/** Class of the main HUD widget to spawn on begin play */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
+	TSubclassOf<UUserWidget> DroneOpsHUDWidgetClass;
+
+	/** Class of the drone info panel widget */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
+	TSubclassOf<UUserWidget> DroneInfoPanelWidgetClass;
+
+private:
+	/** Current open info panel, if any */
+	UPROPERTY()
+	UUserWidget* CurrentDroneInfoPanel = nullptr;
+
+	/** Open drone info panel for given DroneId (C++ implementation) */
+	void OpenDroneInfoPanel(int32 DroneId);
 };

@@ -41,9 +41,15 @@ void UDroneTelemetryComponent::PushSnapshot(const FDroneTelemetrySnapshot& Snaps
 {
 	CurrentSnapshot = Snapshot;
 	CurrentSnapshot.Availability = EDroneAvailability::Online;
-	CurrentSnapshot.LastUpdateTime = FPlatformTime::Seconds();
 
-	LastUpdateRealTime = CurrentSnapshot.LastUpdateTime;
+	// LastUpdateRealTime uses FPlatformTime for interval calculations in C++
+	LastUpdateRealTime = FPlatformTime::Seconds();
+	// CurrentSnapshot.LastUpdateTime uses world time for UI display (blueprint does Now - LastUpdateTime)
+	if (GetWorld())
+	{
+		CurrentSnapshot.LastUpdateTime = GetWorld()->GetTimeSeconds();
+	}
+
 	bHasValidTelemetry = true;
 
 	OnSnapshotUpdated.Broadcast(CurrentSnapshot);

@@ -46,8 +46,12 @@ ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 
 		// 3. 忽略摄像机，防止遮挡视线
 		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-		
-		// 4. 禁用物理模拟 - 防止碰撞弹起
+
+		// 4. 【关键修复】确保 Visibility 通道是阻塞的 - 这是鼠标悬停检测必需的
+		// DroneOpsPlayerController::Tick() 使用 ECC_Visibility 进行光线检测
+		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+		// 5. 禁用物理模拟 - 防止碰撞弹起
 		Capsule->SetSimulatePhysics(false);
 	}
 }
@@ -719,9 +723,19 @@ void ARealTimeDroneReceiver::PushTelemetry(const FDroneYAMLData& DroneData, cons
 	Snap.Velocity        = DroneData.Velocity;
 	Snap.Attitude        = WorldRot;
 	Snap.Altitude        = -DroneData.Position.Z; // NED down is negative altitude
-	Snap.LastUpdateTime  = FPlatformTime::Seconds();
+	Snap.LastUpdateTime  = GetWorld()->GetTimeSeconds();
 
 	TelemetryComponent->PushSnapshot(Snap);
+}
+
+FDroneTelemetrySnapshot ARealTimeDroneReceiver::GetDroneInfoSnapshot_Implementation() const
+{
+	if (TelemetryComponent && TelemetryComponent->HasValidTelemetry())
+	{
+		return TelemetryComponent->GetCurrentSnapshot();
+	}
+
+	return FDroneTelemetrySnapshot();
 }
 
 // ---- IDroneSelectableInterface implementations ----

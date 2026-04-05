@@ -11,19 +11,23 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/TextBlock.h"
+#include "Components/CapsuleComponent.h"
 
 AMultiDroneCharacter::AMultiDroneCharacter()
 {
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
-	SelectionWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("SelectionWidgetComponent"));
-	if (SelectionWidgetComponent)
+
+	// 确保碰撞设置正确，支持鼠标悬停检测
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
-		SelectionWidgetComponent->SetupAttachment(GetRootComponent());
-		SelectionWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
-		SelectionWidgetComponent->SetDrawAtDesiredSize(true);
-		SelectionWidgetComponent->SetRelativeLocation(SelectionWidgetRelativeLocation);
-		SelectionWidgetComponent->SetVisibility(false);
+		// 保持 Pawn 配置，但确保 Visibility 通道阻塞（鼠标检测需要）
+		Capsule->SetCollisionProfileName(TEXT("Pawn"));
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		// 【关键】确保 Visibility 通道阻塞 - 鼠标悬停检测需要
+		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		Capsule->SetSimulatePhysics(false);
 	}
 }
 

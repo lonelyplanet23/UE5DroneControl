@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "UE5DroneControlCharacter.h"
 #include "DroneOps/Interfaces/DroneSelectableInterface.h"
+#include "DroneOps/Interfaces/DroneInfoProviderInterface.h"
+#include "DroneOps/Core/DroneOpsTypes.h"
 #include "Networking.h"
 #include "Sockets.h"
 #include "RealTimeDroneReceiver.generated.h"
@@ -47,7 +49,7 @@ struct FDroneYAMLData
  * Also implements IDroneSelectableInterface for click selection.
  */
 UCLASS()
-class UE5DRONECONTROL_API ARealTimeDroneReceiver : public AUE5DroneControlCharacter, public IDroneSelectableInterface
+class UE5DRONECONTROL_API ARealTimeDroneReceiver : public AUE5DroneControlCharacter, public IDroneSelectableInterface, public IDroneInfoProvider
 {
 	GENERATED_BODY()
 
@@ -95,6 +97,13 @@ public:
 	virtual void OnSecondarySelected_Implementation(bool bSelected) override;
 	virtual void OnHoveredChanged_Implementation(bool bHovered) override;
 	virtual void OnDeselected_Implementation() override;
+
+	// ---- IDroneInfoProvider ----
+	virtual FDroneTelemetrySnapshot GetDroneInfoSnapshot_Implementation() const override;
+	virtual FString GetDroneDisplayName_Implementation() const override { return DroneName; }
+	virtual FLinearColor GetThemeColor_Implementation() const override { return ThemeColor; }
+
+	// GetDroneId is already inherited from IDroneSelectableInterface
 
 	// ---- Receive Config ----
 
