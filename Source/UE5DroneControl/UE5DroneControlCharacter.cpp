@@ -321,6 +321,24 @@ void AUE5DroneControlCharacter::Tick(float DeltaSeconds)
             CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, NewZ));
         }
 
+        // ---- 本地模拟移动 ----
+        if (bSendClickTarget)
+        {
+            FVector CurrentPos = GetActorLocation();
+            FVector TargetPos = ClickTargetLocation;
+            // 保持高度由 TargetHeight 控制，主要 XY 方向移动
+            TargetPos.Z = CurrentPos.Z;
+            FVector NewPos = FMath::VInterpConstantTo(CurrentPos, TargetPos, DeltaSeconds, LocalMoveSpeed);
+            SetActorLocation(NewPos);
+
+            const float DistSq = FVector::DistSquared(CurrentPos, TargetPos);
+            if (DistSq <= ClickArriveThreshold * ClickArriveThreshold)
+            {
+                bSendClickTarget = false;
+                UE_LOG(LogTemp, Log, TEXT("Local movement已到达目标，停止发送ClickTarget"));
+            }
+        }
+
         if (bEnableUDPSend)
         {
             // 到达点击目标点后，切换为悬停模式（Mode=0）

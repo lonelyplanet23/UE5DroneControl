@@ -1,0 +1,443 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "DroneOpsPlayerController.h"
+#include "InputCoreTypes.h"
+#include "DroneOps/Core/DroneRegistrySubsystem.h"
+#include "DroneOps/Core/ICoordinateService.h"
+#include "DroneOps/Interfaces/DroneSelectableInterface.h"
+#include "DroneOps/Drone/DroneSelectionComponent.h"
+#include "DroneOps/Drone/DroneCommandSenderComponent.h"
+#include "MultiDroneManager.h"
+#include "UE5DroneControlCharacter.h"
+#include "Engine/EngineTypes.h"
+#include "Engine/GameInstance.h"
+#include "Engine/OverlapResult.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
+
+ADroneOpsPlayerController::ADroneOpsPlayerController()
+{
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+
+	PrimaryActorTick.bCanEverTick = true;
+}
+
+void ADroneOpsPlayerController::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, TEXT(">>> DroneOpsPlayerController ACTIVE <<<"));
+	}
+	UE_LOG(LogTemp, Warning, TEXT("=== DroneOpsPlayerController::BeginPlay CALLED ==="));
+
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		DroneRegistry = GameInstance->GetSubsystem<UDroneRegistrySubsystem>();
+		if (DroneRegistry)
+		{
+			UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: Connected to DroneRegistry"));
+		}
+	}
+
+	CameraModeState.CameraMode = EDroneCameraMode::Follow;
+	CameraModeState.FollowDroneId = 0;
+
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+
+	FInputModeGameAndUI InputMode;
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+	SetInputMode(InputMode);
+}
+
+void ADroneOpsPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+}
+
+void ADroneOpsPlayerController::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (WasInputKeyJustPressed(EKeys::LeftMouseButton))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("Left Click Detected!"));
+		}
+		OnPrimaryClick();
+	}
+	if (WasInputKeyJustPressed(EKeys::MiddleMouseButton))
+	{
+		OnShowInfo();
+	}
+	if (WasInputKeyJustPressed(EKeys::F))
+	{
+		OnFreeCamToggle();
+	}
+
+	int32 NewHoveredId = 0;
+	AActor* HoveredActor = GetSelectableDroneUnderCursor();
+	if (HoveredActor && HoveredActor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+	{
+		NewHoveredId = IDroneSelectableInterface::Execute_GetDroneId(HoveredActor);
+	}
+
+	if (HoveredDroneId != NewHoveredId)
+	{
+		if (HoveredDroneId > 0)
+		{
+			if (AActor* OldActor = ResolveDroneActorById(HoveredDroneId))
+			{
+				if (OldActor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+				{
+					IDroneSelectableInterface::Execute_OnHoveredChanged(OldActor, false);
+				}
+			}
+		}
+
+		if (NewHoveredId > 0 && HoveredActor)
+		{
+			IDroneSelectableInterface::Execute_OnHoveredChanged(HoveredActor, true);
+		}
+
+		HoveredDroneId = NewHoveredId;
+	}
+}
+
+void ADroneOpsPlayerController::OnPrimaryClick()
+{
+	FVector WorldLocation = FVector::ZeroVector;
+	AActor* DroneActor = GetSelectableDroneUnderCursor(&WorldLocation);
+
+	if (GEngine)
+	{
+		if (DroneActor)
+		{
+			const int32 Id = IDroneSelectableInterface::Execute_GetDroneId(DroneActor);
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+				FString::Printf(TEXT("DRONE FOUND: %s (ID=%d)"), *DroneActor->GetName(), Id));
+		}
+		else
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan,
+				FString::Printf(TEXT("Map click at (%.0f, %.0f, %.0f) - no drone nearby"),
+					WorldLocation.X, WorldLocation.Y, WorldLocation.Z));
+		}
+	}
+
+	if (DroneActor)
+	{
+		HandleDroneClick(DroneActor);
+		return;
+	}
+
+	if (WorldLocation.IsNearlyZero() && !GetWorldLocationUnderCursor(WorldLocation))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Ray miss - no hit under cursor"));
+		}
+		return;
+	}
+
+	HandleMapClick(WorldLocation);
+}
+
+void ADroneOpsPlayerController::OnShowInfo()
+{
+	if (HoveredDroneId > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Show info for DroneId: %d"), HoveredDroneId);
+	}
+}
+
+void ADroneOpsPlayerController::OnFreeCamToggle()
+{
+	if (CameraModeState.CameraMode == EDroneCameraMode::Follow)
+	{
+		CameraModeState.CameraMode = EDroneCameraMode::Free;
+		UE_LOG(LogTemp, Log, TEXT("Switched to Free Camera"));
+	}
+	else
+	{
+		CameraModeState.CameraMode = EDroneCameraMode::Follow;
+		UE_LOG(LogTemp, Log, TEXT("Switched to Follow Camera"));
+	}
+}
+
+void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
+{
+	if (!SelectedDroneActor || SelectedDroneId <= 0)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange, TEXT("No drone selected"));
+		}
+		return;
+	}
+
+	AActor* TargetActor = SelectedDroneActor.Get();
+	if (!IsValid(TargetActor))
+	{
+		TargetActor = ResolveDroneActorById(SelectedDroneId);
+		SelectedDroneActor = TargetActor;
+	}
+
+	AUE5DroneControlCharacter* DroneChar = Cast<AUE5DroneControlCharacter>(TargetActor);
+	if (!DroneChar)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Selected actor cannot receive map target"));
+		}
+		return;
+	}
+
+	DroneChar->SetClickTargetLocation(WorldLocation, 1);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
+			FString::Printf(TEXT("Target assigned -> %s (%.0f, %.0f, %.0f)"),
+				*TargetActor->GetName(), WorldLocation.X, WorldLocation.Y, WorldLocation.Z));
+	}
+
+	DrawDebugSphere(GetWorld(), WorldLocation, 50.0f, 12, FColor::Green, false, 3.0f);
+}
+
+void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
+{
+	if (!ClickedActor)
+	{
+		return;
+	}
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+			FString::Printf(TEXT("Selected: %s - click map to assign target"), *ClickedActor->GetName()));
+	}
+
+	if (!DroneRegistry)
+	{
+		SelectedDroneActor = ClickedActor;
+		return;
+	}
+
+	if (!ClickedActor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+	{
+		SelectedDroneActor = ClickedActor;
+		return;
+	}
+
+	const int32 ClickedDroneId = IDroneSelectableInterface::Execute_GetDroneId(ClickedActor);
+	if (ClickedDroneId <= 0)
+	{
+		return;
+	}
+
+	EDroneControlLockReason LockReason = EDroneControlLockReason::None;
+	if (DroneRegistry->IsControlLocked(ClickedDroneId, LockReason) &&
+		LockReason == EDroneControlLockReason::Offline)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Drone %d is offline, cannot select"), ClickedDroneId);
+		return;
+	}
+
+	const int32 OldDroneId = DroneRegistry->GetPrimarySelectedDrone();
+	if (OldDroneId > 0 && OldDroneId != ClickedDroneId)
+	{
+		if (AActor* OldActor = ResolveDroneActorById(OldDroneId))
+		{
+			if (OldActor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+			{
+				IDroneSelectableInterface::Execute_OnDeselected(OldActor);
+			}
+		}
+	}
+
+	SelectedDroneId = ClickedDroneId;
+	SelectedDroneActor = ClickedActor;
+
+	DroneRegistry->SetPrimarySelectedDrone(ClickedDroneId);
+	IDroneSelectableInterface::Execute_OnPrimarySelected(ClickedActor);
+
+	FDroneDescriptor Desc;
+	FString DisplayName = FString::Printf(TEXT("Drone-%d"), ClickedDroneId);
+	if (DroneRegistry->GetDroneDescriptor(ClickedDroneId, Desc))
+	{
+		DisplayName = Desc.Name;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("Primary selected: %s (ID=%d)"), *DisplayName, ClickedDroneId);
+}
+
+void ADroneOpsPlayerController::SendTargetCommand(int32 DroneId, const FVector& TargetWorldLocation)
+{
+	if (!DroneRegistry)
+	{
+		return;
+	}
+
+	TScriptInterface<ICoordinateService> CoordService = DroneRegistry->GetCoordinateService();
+	if (!CoordService.GetObject())
+	{
+		UE_LOG(LogTemp, Error, TEXT("No coordinate service available"));
+		return;
+	}
+
+	const FVector NedLocation = ICoordinateService::Execute_WorldToNed(CoordService.GetObject(), TargetWorldLocation);
+
+	FDroneTargetCommand Command;
+	Command.DroneId = DroneId;
+	Command.TargetWorldLocation = TargetWorldLocation;
+	Command.TargetNedLocation = NedLocation;
+	Command.Mode = 1;
+	Command.IssuedAt = GetWorld()->GetTimeSeconds();
+
+	UE_LOG(LogTemp, Log, TEXT("Target command for Drone %d: World=(%.1f, %.1f, %.1f) NED=(%.2f, %.2f, %.2f)"),
+		DroneId,
+		TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z,
+		NedLocation.X, NedLocation.Y, NedLocation.Z);
+
+	UDroneCommandSenderComponent* CommandSender = nullptr;
+	TArray<AActor*> Managers;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AMultiDroneManager::StaticClass(), Managers);
+	if (Managers.Num() > 0)
+	{
+		CommandSender = Managers[0]->FindComponentByClass<UDroneCommandSenderComponent>();
+	}
+
+	if (CommandSender)
+	{
+		CommandSender->SendSingleDroneCommand(DroneId, NedLocation, Command.Mode);
+		UE_LOG(LogTemp, Log, TEXT("Command dispatched via DroneCommandSenderComponent for Drone %d"), DroneId);
+		return;
+	}
+
+	if (APawn* SenderPawn = DroneRegistry->GetSenderPawn(DroneId))
+	{
+		if (AUE5DroneControlCharacter* DroneChar = Cast<AUE5DroneControlCharacter>(SenderPawn))
+		{
+			DroneChar->SetClickTargetLocation(TargetWorldLocation, Command.Mode);
+			UE_LOG(LogTemp, Log, TEXT("Command dispatched via legacy SetClickTargetLocation for Drone %d"), DroneId);
+			return;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("No command sender available for Drone %d"), DroneId);
+}
+
+AActor* ADroneOpsPlayerController::GetActorUnderCursor() const
+{
+	FHitResult HitResult;
+	if (GetHitResultUnderCursor(ECC_Visibility, false, HitResult))
+	{
+		return HitResult.GetActor();
+	}
+	return nullptr;
+}
+
+bool ADroneOpsPlayerController::GetWorldLocationUnderCursor(FVector& OutLocation) const
+{
+	FHitResult HitResult;
+	if (GetHitResultUnderCursor(ECC_Visibility, false, HitResult))
+	{
+		OutLocation = HitResult.Location;
+		return true;
+	}
+	return false;
+}
+
+AActor* ADroneOpsPlayerController::GetSelectableDroneUnderCursor(FVector* OutFallbackWorldLocation) const
+{
+	FHitResult PawnHit;
+	if (GetHitResultUnderCursor(ECC_Pawn, false, PawnHit))
+	{
+		if (OutFallbackWorldLocation)
+		{
+			*OutFallbackWorldLocation = PawnHit.Location;
+		}
+
+		AActor* PawnActor = PawnHit.GetActor();
+		if (PawnActor && PawnActor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+		{
+			return PawnActor;
+		}
+	}
+
+	FHitResult VisibilityHit;
+	if (!GetHitResultUnderCursor(ECC_Visibility, false, VisibilityHit))
+	{
+		return nullptr;
+	}
+
+	if (OutFallbackWorldLocation)
+	{
+		*OutFallbackWorldLocation = VisibilityHit.Location;
+	}
+
+	AActor* VisibleActor = VisibilityHit.GetActor();
+	if (VisibleActor && VisibleActor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+	{
+		return VisibleActor;
+	}
+
+	const float ClickRadius = 200.0f;
+	TArray<FOverlapResult> Overlaps;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(GetPawn());
+
+	if (!GetWorld()->OverlapMultiByChannel(
+		Overlaps,
+		VisibilityHit.Location,
+		FQuat::Identity,
+		ECC_Pawn,
+		FCollisionShape::MakeSphere(ClickRadius),
+		QueryParams))
+	{
+		return nullptr;
+	}
+
+	float BestDist = ClickRadius + 1.0f;
+	AActor* ClosestDroneActor = nullptr;
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* OverlapActor = Overlap.GetActor();
+		if (!OverlapActor || !OverlapActor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+		{
+			continue;
+		}
+
+		const float Dist = FVector::Dist(VisibilityHit.Location, OverlapActor->GetActorLocation());
+		if (Dist < BestDist)
+		{
+			BestDist = Dist;
+			ClosestDroneActor = OverlapActor;
+		}
+	}
+
+	return ClosestDroneActor;
+}
+
+AActor* ADroneOpsPlayerController::ResolveDroneActorById(int32 DroneId) const
+{
+	if (!DroneRegistry || DroneId <= 0)
+	{
+		return nullptr;
+	}
+
+	if (APawn* SenderPawn = DroneRegistry->GetSenderPawn(DroneId))
+	{
+		return SenderPawn;
+	}
+
+	return DroneRegistry->GetReceiverActor(DroneId);
+}

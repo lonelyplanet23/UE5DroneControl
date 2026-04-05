@@ -85,11 +85,11 @@ public:
 
     // --- ���õ��Ŀ��㲢��ʼ�������� ---
     UFUNCTION(BlueprintCallable, Category = "Drone Network")
-    void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1);
+    virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1);
 
     // --- ֹͣ�������͵��Ŀ�� ---
     UFUNCTION(BlueprintCallable, Category = "Drone Network")
-    void StopClickTargetSending();
+    virtual void StopClickTargetSending();
 
 protected:
     // --- 我们的核心变�?---
@@ -101,7 +101,9 @@ protected:
     // 升降速度
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Flight")
     float LiftSpeed;
-
+    // ---- 本地模拟移动速度（用于无外部飞控时的直接地图移动）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Flight")
+    float LocalMoveSpeed = 600.0f; // 单位 cm/s
     // 平滑阻尼系数
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Flight")
     float InterpSpeed;

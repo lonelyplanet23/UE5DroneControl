@@ -47,6 +47,16 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "DroneOps")
 	int32 HoveredDroneId = 0;
 
+	UPROPERTY()
+	TObjectPtr<AActor> HoveredDroneActor = nullptr;
+
+	// Currently selected drone actor (direct ref for immediate command dispatch)
+	UPROPERTY()
+	TObjectPtr<AActor> SelectedDroneActor = nullptr;
+
+	// Currently selected drone id
+	int32 SelectedDroneId = 0;
+
 	// Helper functions
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	void SendTargetCommand(int32 DroneId, const FVector& TargetWorldLocation);
@@ -56,4 +66,8 @@ protected:
 
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	bool GetWorldLocationUnderCursor(FVector& OutLocation) const;
+
+	AActor* GetSelectableDroneUnderCursor(FVector* OutFallbackWorldLocation = nullptr) const;
+	AActor* FindNearestSelectableDroneOnScreen(float MaxScreenDistance) const;
+	AActor* ResolveDroneActorById(int32 DroneId) const;
 };

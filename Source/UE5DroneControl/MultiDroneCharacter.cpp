@@ -7,11 +7,24 @@
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
+#include "Components/WidgetComponent.h"
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/TextBlock.h"
 
 AMultiDroneCharacter::AMultiDroneCharacter()
 {
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
+	SelectionWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("SelectionWidgetComponent"));
+	if (SelectionWidgetComponent)
+	{
+		SelectionWidgetComponent->SetupAttachment(GetRootComponent());
+		SelectionWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+		SelectionWidgetComponent->SetDrawAtDesiredSize(true);
+		SelectionWidgetComponent->SetRelativeLocation(SelectionWidgetRelativeLocation);
+		SelectionWidgetComponent->SetVisibility(false);
+	}
 }
 
 void AMultiDroneCharacter::BeginPlay()
@@ -23,6 +36,36 @@ void AMultiDroneCharacter::BeginPlay()
 	{
 		SelectionComponent->DroneId = DroneId;
 		SelectionComponent->ThemeColor = ThemeColor;
+	}
+
+	if (SelectionWidgetComponent)
+	{
+		SelectionWidgetComponent->SetRelativeLocation(SelectionWidgetRelativeLocation);
+		SelectionWidgetComponent->SetVisibility(false);
+
+		UUserWidget* Widget = SelectionWidgetComponent->GetWidget();
+		if (!Widget)
+		{
+			Widget = NewObject<UUserWidget>(this, UUserWidget::StaticClass());
+			if (Widget)
+			{
+				UTextBlock* TextBlock = Widget->WidgetTree ? Widget->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SelectedText")) : nullptr;
+				if (TextBlock && Widget->WidgetTree)
+				{
+					TextBlock->SetText(SelectedWidgetText);
+					TextBlock->SetColorAndOpacity(FSlateColor(FLinearColor::Yellow));
+					Widget->WidgetTree->RootWidget = TextBlock;
+				}
+				SelectionWidgetComponent->SetWidget(Widget);
+			}
+		}
+		else
+		{
+			if (UTextBlock* TextBlock = Cast<UTextBlock>(Widget->GetWidgetFromName(TEXT("SelectedText"))))
+			{
+				TextBlock->SetText(SelectedWidgetText);
+			}
+		}
 	}
 
 	// Register with DroneRegistrySubsystem
@@ -62,6 +105,10 @@ void AMultiDroneCharacter::OnPrimarySelected_Implementation()
 		SelectionComponent->SetPrimarySelected(true);
 		SelectionComponent->SetSecondarySelected(false);
 	}
+	if (SelectionWidgetComponent)
+	{
+		SelectionWidgetComponent->SetVisibility(true);
+	}
 }
 
 void AMultiDroneCharacter::OnSecondarySelected_Implementation(bool bSelected)
@@ -87,4 +134,21 @@ void AMultiDroneCharacter::OnDeselected_Implementation()
 		SelectionComponent->SetPrimarySelected(false);
 		SelectionComponent->SetSecondarySelected(false);
 	}
+	if (SelectionWidgetComponent)
+	{
+		SelectionWidgetComponent->SetVisibility(false);
+	}
+}
+
+void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 Mode)
+{
+	ClickTargetLocation = TargetLocation;
+	ClickTargetMode = Mode;
+	bSendClickTarget = true;
+	ClickSendTimer = ClickSendInterval;
+}
+
+void AMultiDroneCharacter::StopClickTargetSending()
+{
+	bSendClickTarget = false;
 }

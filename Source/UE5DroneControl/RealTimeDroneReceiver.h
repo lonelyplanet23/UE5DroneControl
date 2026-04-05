@@ -10,6 +10,7 @@
 #include "RealTimeDroneReceiver.generated.h"
 
 class UDroneTelemetryComponent;
+class UDroneSelectionComponent;
 
 /**
  * YAML format telemetry data structure
@@ -78,6 +79,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Identity")
 	FLinearColor ThemeColor = FLinearColor::White;
 
+	// ---- Selection Component ----
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UDroneSelectionComponent> SelectionComponent;
+
 	// ---- Telemetry Component ----
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -85,10 +91,10 @@ public:
 
 	// ---- IDroneSelectableInterface ----
 	virtual int32 GetDroneId_Implementation() const override { return DroneId; }
-	virtual void OnPrimarySelected_Implementation() override {}
-	virtual void OnSecondarySelected_Implementation(bool bSelected) override {}
-	virtual void OnHoveredChanged_Implementation(bool bHovered) override {}
-	virtual void OnDeselected_Implementation() override {}
+	virtual void OnPrimarySelected_Implementation() override;
+	virtual void OnSecondarySelected_Implementation(bool bSelected) override;
+	virtual void OnHoveredChanged_Implementation(bool bHovered) override;
+	virtual void OnDeselected_Implementation() override;
 
 	// ---- Receive Config ----
 

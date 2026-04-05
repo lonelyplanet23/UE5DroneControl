@@ -5,11 +5,20 @@
 #include "DroneOps/Core/SimpleCoordinateService.h"
 #include "DroneOpsPlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
 
 ADroneOpsGameMode::ADroneOpsGameMode()
 {
 	// Set default player controller class
 	PlayerControllerClass = ADroneOpsPlayerController::StaticClass();
+
+	// Load the TopDown character Blueprint so we get the spring-arm + camera setup
+	static ConstructorHelpers::FClassFinder<APawn> TopDownPawnBP(
+		TEXT("/Game/TopDown/Blueprints/BP_TopDownCharacter"));
+	if (TopDownPawnBP.Succeeded())
+	{
+		DefaultPawnClass = TopDownPawnBP.Class;
+	}
 }
 
 void ADroneOpsGameMode::BeginPlay()

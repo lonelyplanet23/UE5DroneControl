@@ -147,19 +147,28 @@ void UDroneCommandSenderComponent::SendSingleDroneCommand(int32 DroneId, FVector
 		}
 	}
 
-	int32 BitIndex = 0;
-	if (Registry)
+	// 与 multi_ue_controller.py 当前选择规则保持一致：bit = (drone_id - 1)
+	// 说明：Python 端目前按 drone_id 推导位掩码，而不是读取 UE 的 BitIndex。
+	// 为避免“点A动B”，这里优先使用 DroneId 推导掩码；若 Registry 中配置不一致则打印告警。
+	const int32 MaskBitFromDroneId = DroneId - 1;
+	if (MaskBitFromDroneId < 0 || MaskBitFromDroneId >= 31)
 	{
-		BitIndex = Registry->GetDroneBitIndex(DroneId);
-	}
-
-	if (BitIndex < 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("DroneCommandSender: No BitIndex for DroneId %d"), DroneId);
+		UE_LOG(LogTemp, Warning, TEXT("DroneCommandSender: Invalid DroneId for mask mapping: %d"), DroneId);
 		return;
 	}
 
-	const int32 Mask = (1 << BitIndex);
+	if (Registry)
+	{
+		const int32 RegistryBitIndex = Registry->GetDroneBitIndex(DroneId);
+		if (RegistryBitIndex >= 0 && RegistryBitIndex != MaskBitFromDroneId)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("DroneCommandSender: BitIndex mismatch for DroneId %d (Registry=%d, Using=%d). Consider aligning config."),
+				DroneId, RegistryBitIndex, MaskBitFromDroneId);
+		}
+	}
+
+	const int32 Mask = (1 << MaskBitFromDroneId);
 	SendMultiDroneCommand(Mask, NedTarget, Mode);
 }
 
@@ -172,9 +181,11 @@ void UDroneCommandSenderComponent::SendMultiDroneCommand(int32 DroneMask, FVecto
 
 	FMultiDroneControlPacket Packet;
 	Packet.Timestamp  = FPlatformTime::Seconds();
-	Packet.X          = NedTarget.X;
-	Packet.Y          = NedTarget.Y;
-	Packet.Z          = NedTarget.Z;
+	// 兼容当前 multi_ue_controller.py 协议：接收端会将 X/Y/Z 按 UE厘米 再转换到NED米。
+	// 因此这里把 NED(m) 反变换为 UE(cm) 写入包体，避免在接收端被二次缩放导致几乎不动。
+	Packet.X          = NedTarget.X * 100.0f;
+	Packet.Y          = NedTarget.Y * 100.0f;
+	Packet.Z          = -NedTarget.Z * 100.0f;
 	Packet.Mode       = Mode;
 	Packet.DroneMask  = DroneMask;
 	Packet.Sequence   = ++Sequence;

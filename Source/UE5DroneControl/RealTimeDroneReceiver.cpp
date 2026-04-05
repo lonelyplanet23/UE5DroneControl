@@ -1,5 +1,6 @@
 ﻿#include "RealTimeDroneReceiver.h"
 #include "DroneOps/Drone/DroneTelemetryComponent.h"
+#include "DroneOps/Drone/DroneSelectionComponent.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "Engine/GameInstance.h"
@@ -21,6 +22,7 @@ ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 	bEnableUDPSend = false;
 
 	TelemetryComponent = CreateDefaultSubobject<UDroneTelemetryComponent>(TEXT("TelemetryComponent"));
+	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 
 	// === 【关键】禁用重力和物理模拟 ===
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
@@ -58,6 +60,13 @@ void ARealTimeDroneReceiver::BeginPlay()
 	InitialLocation = GetActorLocation();
 	TargetLocation = InitialLocation;
 	TargetRotation = GetActorRotation();
+
+	// Sync SelectionComponent identity
+	if (SelectionComponent)
+	{
+		SelectionComponent->DroneId = DroneId;
+		SelectionComponent->ThemeColor = ThemeColor;
+	}
 
 	// 【再次确保】禁用重力和物理
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
@@ -713,4 +722,40 @@ void ARealTimeDroneReceiver::PushTelemetry(const FDroneYAMLData& DroneData, cons
 	Snap.LastUpdateTime  = FPlatformTime::Seconds();
 
 	TelemetryComponent->PushSnapshot(Snap);
+}
+
+// ---- IDroneSelectableInterface implementations ----
+
+void ARealTimeDroneReceiver::OnPrimarySelected_Implementation()
+{
+	if (SelectionComponent)
+	{
+		SelectionComponent->SetPrimarySelected(true);
+		SelectionComponent->SetSecondarySelected(false);
+	}
+}
+
+void ARealTimeDroneReceiver::OnSecondarySelected_Implementation(bool bSelected)
+{
+	if (SelectionComponent)
+	{
+		SelectionComponent->SetSecondarySelected(bSelected);
+	}
+}
+
+void ARealTimeDroneReceiver::OnHoveredChanged_Implementation(bool bHovered)
+{
+	if (SelectionComponent)
+	{
+		SelectionComponent->SetHovered(bHovered);
+	}
+}
+
+void ARealTimeDroneReceiver::OnDeselected_Implementation()
+{
+	if (SelectionComponent)
+	{
+		SelectionComponent->SetPrimarySelected(false);
+		SelectionComponent->SetSecondarySelected(false);
+	}
 }
