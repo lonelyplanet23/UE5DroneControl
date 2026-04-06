@@ -21,6 +21,7 @@
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Components/MeshComponent.h"
 
 namespace
 {
@@ -225,18 +226,8 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: OnPrimaryClick"));
 	FVector WorldLocation = FVector::ZeroVector;
 
-	// 1) 优先使用光标下精确命中
+	// 只接受“射线精确命中无人机网格体”的点击
 	AActor* DroneActor = GetSelectableDroneUnderCursor(&WorldLocation);
-
-	// 2) 精确命中失败时，再用小范围屏幕邻近兜底（避免粘住当前已选中目标）
-	if (!DroneActor)
-	{
-		AActor* Candidate = FindNearestSelectableDroneOnScreen(140.0f);
-		if (Candidate)
-		{
-			DroneActor = Candidate;
-		}
-	}
 
 	if (GEngine)
 	{
@@ -585,25 +576,6 @@ bool ADroneOpsPlayerController::GetWorldLocationUnderCursor(FVector& OutLocation
 
 AActor* ADroneOpsPlayerController::GetSelectableDroneUnderCursor(FVector* OutFallbackWorldLocation) const
 {
-	FHitResult PawnHit;
-	if (GetHitResultUnderCursor(ECC_Pawn, false, PawnHit))
-	{
-		if (OutFallbackWorldLocation)
-		{
-			*OutFallbackWorldLocation = PawnHit.Location;
-		}
-
-		AActor* PawnActor = PawnHit.GetActor();
-		if (PawnActor)
-		{
-			UE_LOG(LogTemp, Log, TEXT("Cursor PawnHit: %s (%s)"), *PawnActor->GetName(), *PawnActor->GetClass()->GetName());
-		}
-		if (IsFr2ControllableDroneActor(PawnActor))
-		{
-			return PawnActor;
-		}
-	}
-
 	FHitResult VisibilityHit;
 	if (!GetHitResultUnderCursor(ECC_Visibility, false, VisibilityHit))
 	{
@@ -615,103 +587,31 @@ AActor* ADroneOpsPlayerController::GetSelectableDroneUnderCursor(FVector* OutFal
 		*OutFallbackWorldLocation = VisibilityHit.Location;
 	}
 
-	AActor* VisibleActor = VisibilityHit.GetActor();
-	if (VisibleActor)
-	{
-		UE_LOG(LogTemp, Log, TEXT("Cursor VisibilityHit: %s (%s)"), *VisibleActor->GetName(), *VisibleActor->GetClass()->GetName());
-	}
-	if (IsFr2ControllableDroneActor(VisibleActor))
-	{
-		return VisibleActor;
-	}
-
-	const float ClickRadius = 200.0f;
-	TArray<FOverlapResult> Overlaps;
-	FCollisionQueryParams QueryParams;
-	if (const APawn* PawnToIgnore = GetPawn())
-	{
-		QueryParams.AddIgnoredActor(static_cast<const AActor*>(PawnToIgnore));
-	}
-
-	if (!GetWorld()->OverlapMultiByChannel(
-		Overlaps,
-		VisibilityHit.Location,
-		FQuat::Identity,
-		ECC_Pawn,
-		FCollisionShape::MakeSphere(ClickRadius),
-		QueryParams))
+	AActor* HitActor = VisibilityHit.GetActor();
+	UPrimitiveComponent* HitComponent = VisibilityHit.GetComponent();
+	if (!HitActor || !HitComponent)
 	{
 		return nullptr;
 	}
 
-	float BestDist = ClickRadius + 1.0f;
-	AActor* ClosestDroneActor = nullptr;
-	for (const FOverlapResult& Overlap : Overlaps)
+	if (!IsFr2ControllableDroneActor(HitActor))
 	{
-		AActor* OverlapActor = Overlap.GetActor();
-		if (!IsFr2ControllableDroneActor(OverlapActor))
-		{
-			continue;
-		}
-
-		const float Dist = FVector::Dist(VisibilityHit.Location, OverlapActor->GetActorLocation());
-		if (Dist < BestDist)
-		{
-			BestDist = Dist;
-			ClosestDroneActor = OverlapActor;
-		}
+		return nullptr;
 	}
 
-	return ClosestDroneActor;
+	// 仅当射线命中“无人机网格体组件”时才算选中，避免点到空白区域也选中
+	if (!HitComponent->IsA<UMeshComponent>())
+	{
+		return nullptr;
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("Cursor MeshHit: %s.%s"), *HitActor->GetName(), *HitComponent->GetName());
+	return HitActor;
 }
 
 AActor* ADroneOpsPlayerController::FindNearestSelectableDroneOnScreen(float MaxScreenDistance) const
 {
-	if (!GetWorld())
-	{
-		return nullptr;
-	}
-
-	float CursorX = 0.0f;
-	float CursorY = 0.0f;
-	if (!GetMousePosition(CursorX, CursorY))
-	{
-		return nullptr;
-	}
-
-	AActor* BestActor = nullptr;
-	float BestDistanceSq = MaxScreenDistance * MaxScreenDistance;
-
-	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
-	{
-		AActor* Actor = *It;
-		if (!IsFr2ControllableDroneActor(Actor))
-		{
-			continue;
-		}
-
-		FVector2D ScreenPosition;
-		const bool bProjected = ProjectWorldLocationToScreen(Actor->GetActorLocation(), ScreenPosition, true);
-		if (!bProjected)
-		{
-			continue;
-		}
-
-		const float DistanceSq = FVector2D::DistSquared(ScreenPosition, FVector2D(CursorX, CursorY));
-		if (DistanceSq <= BestDistanceSq)
-		{
-			BestDistanceSq = DistanceSq;
-			BestActor = Actor;
-		}
-	}
-
-	if (BestActor)
-	{
-		UE_LOG(LogTemp, Log, TEXT("Nearest selectable actor: %s (%s) DistSq=%.1f"),
-			*BestActor->GetName(), *BestActor->GetClass()->GetName(), BestDistanceSq);
-	}
-
-	return BestActor;
+	return nullptr;
 }
 
 AActor* ADroneOpsPlayerController::ResolveDroneActorById(int32 DroneId) const
