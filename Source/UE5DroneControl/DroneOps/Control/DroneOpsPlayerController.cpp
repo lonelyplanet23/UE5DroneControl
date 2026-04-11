@@ -2,6 +2,7 @@
 
 #include "DroneOpsPlayerController.h"
 #include "InputCoreTypes.h"
+#include "Camera/CameraActor.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/ICoordinateService.h"
 #include "DroneOps/Interfaces/DroneSelectableInterface.h"
@@ -160,6 +161,9 @@ void ADroneOpsPlayerController::BeginPlay()
 		LastFollowViewTarget = InitialFollowTarget;
 	}
 
+	// FR-04: Spawn free camera actor
+	FreeCamActor = GetWorld()->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
+
 	// Create and add main HUD widget to viewport
 	if (DroneOpsHUDWidgetClass && IsLocalController())
 	{
@@ -197,7 +201,37 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// FR-04: Free camera control
+	if (CameraModeState.CameraMode == EDroneCameraMode::Free && FreeCamActor && IsValid(FreeCamActor))
+	{
+		// 鼠标旋转视角
+		float MouseX = 0.0f, MouseY = 0.0f;
+		GetInputMouseDelta(MouseX, MouseY);
+		if (MouseX != 0.0f || MouseY != 0.0f)
+		{
+			FreeCamRotation.Yaw += MouseX * FreeCamMouseSensitivity * 100.0f;
+			FreeCamRotation.Pitch = FMath::Clamp(FreeCamRotation.Pitch - MouseY * FreeCamMouseSensitivity * 100.0f, -89.0f, 89.0f);
+			FreeCamActor->SetActorRotation(FreeCamRotation);
+		}
 
+		// WASD/QE 移动（相对于当前视角方向）
+		FVector MoveDir = FVector::ZeroVector;
+		const FRotationMatrix RotMat(FreeCamRotation);
+		if (IsInputKeyDown(EKeys::W)) MoveDir += RotMat.GetScaledAxis(EAxis::X);
+		if (IsInputKeyDown(EKeys::S)) MoveDir -= RotMat.GetScaledAxis(EAxis::X);
+		if (IsInputKeyDown(EKeys::A)) MoveDir -= RotMat.GetScaledAxis(EAxis::Y);
+		if (IsInputKeyDown(EKeys::D)) MoveDir += RotMat.GetScaledAxis(EAxis::Y);
+		if (IsInputKeyDown(EKeys::Q)) MoveDir -= FVector::UpVector;
+		if (IsInputKeyDown(EKeys::E)) MoveDir += FVector::UpVector;
+
+		if (!MoveDir.IsNearlyZero())
+		{
+			MoveDir.Normalize();
+			FreeCamActor->AddActorWorldOffset(MoveDir * FreeCamMoveSpeed * DeltaTime);
+		}
+	}
+
+	// Hover detection
 	int32 NewHoveredId = 0;
 	AActor* HoveredActor = GetSelectableDroneUnderCursor();
 	if (HoveredActor)
@@ -374,38 +408,53 @@ void ADroneOpsPlayerController::OnFreeCamToggle()
 {
 	if (CameraModeState.CameraMode == EDroneCameraMode::Follow)
 	{
-		CameraModeState.CameraMode = EDroneCameraMode::Free;
-		AActor* CurrentViewTarget = GetViewTarget();
-		if (IsValid(CurrentViewTarget))
-		{
-			LastFollowViewTarget = CurrentViewTarget;
-			CameraModeState.LastFollowLocation = CurrentViewTarget->GetActorLocation();
-			CameraModeState.LastFollowRotation = CurrentViewTarget->GetActorRotation();
-		}
-
+		// 保存当前跟随目标
 		if (SelectedDroneId > 0)
-		{
 			CameraModeState.FollowDroneId = SelectedDroneId;
-		}
 		else if (DroneRegistry)
-		{
 			CameraModeState.FollowDroneId = DroneRegistry->GetPrimarySelectedDrone();
+
+		// 将 FreeCamActor 移动到当前相机位置
+		if (FreeCamActor && IsValid(FreeCamActor) && PlayerCameraManager)
+		{
+			const FVector CamLoc = PlayerCameraManager->GetCameraLocation();
+			const FRotator CamRot = PlayerCameraManager->GetCameraRotation();
+			FreeCamActor->SetActorLocationAndRotation(CamLoc, CamRot);
+			FreeCamRotation = CamRot;
 		}
 
+		CameraModeState.CameraMode = EDroneCameraMode::Free;
+		SetViewTargetWithBlend(FreeCamActor, 0.0f);
+
+		// 禁用 Pawn 输入，防止 WASD 继续控制无人机
 		if (APawn* ControlledPawn = GetPawn())
 		{
-			SetViewTargetWithBlend(ControlledPawn, 0.35f);
+			ControlledPawn->DisableInput(this);
 		}
 
-		CameraModeState.CameraMode = EDroneCameraMode::Free;
-		UE_LOG(LogTemp, Log, TEXT("Switched to Free Camera (FollowDroneId=%d, SavedView=%s)"),
-			CameraModeState.FollowDroneId,
-			IsValid(LastFollowViewTarget) ? *LastFollowViewTarget->GetName() : TEXT("None"));
+		// 隐藏光标，捕获鼠标用于视角旋转
+		bShowMouseCursor = false;
+		SetInputMode(FInputModeGameOnly());
+
+		UE_LOG(LogTemp, Log, TEXT("FR-04: Switched to Free Camera (FollowDroneId=%d)"), CameraModeState.FollowDroneId);
 	}
 	else
 	{
 		CameraModeState.CameraMode = EDroneCameraMode::Follow;
+
+		// 恢复 Pawn 输入
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			ControlledPawn->EnableInput(this);
+		}
+
+		// 恢复鼠标光标
+		bShowMouseCursor = true;
+		SetInputMode(FInputModeGameAndUI());
+
 		ApplyFollowViewTarget(CameraModeState.FollowDroneId);
+
+		UE_LOG(LogTemp, Log, TEXT("FR-04: Switched back to Follow Camera (DroneId=%d)"), CameraModeState.FollowDroneId);
 	}
 }
 
@@ -532,6 +581,18 @@ void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("Primary selected: %s (ID=%d)"), *DisplayName, ClickedDroneId);
+
+	// 跟随模式下，直接切换到点击的无人机Actor，不经过Registry查找（避免DroneId冲突导致视角错位）
+	if (CameraModeState.CameraMode == EDroneCameraMode::Follow)
+	{
+		LastFollowViewTarget = ClickedActor;
+		CameraModeState.FollowDroneId = ClickedDroneId;
+		CameraModeState.LastFollowLocation = ClickedActor->GetActorLocation();
+		CameraModeState.LastFollowRotation = ClickedActor->GetActorRotation();
+		SetViewTargetWithBlend(ClickedActor, 0.35f);
+		UE_LOG(LogTemp, Log, TEXT("Switched to Follow Camera (FollowDroneId=%d, Target=%s)"),
+			ClickedDroneId, *ClickedActor->GetName());
+	}
 }
 
 void ADroneOpsPlayerController::SendTargetCommand(int32 DroneId, const FVector& TargetWorldLocation)

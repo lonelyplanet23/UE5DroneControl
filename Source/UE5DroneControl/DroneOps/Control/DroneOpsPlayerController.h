@@ -6,6 +6,7 @@
 #include "GameFramework/PlayerController.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "Components/WidgetComponent.h"
+#include "Camera/CameraActor.h"
 #include "DroneOpsPlayerController.generated.h"
 
 class UDroneRegistrySubsystem;
@@ -95,6 +96,21 @@ private:
 	AActor* ResolveDroneActorById(int32 DroneId) const;
 	AActor* ResolveFollowViewTargetByDroneId(int32 DroneId) const;
 	void ApplyFollowViewTarget(int32 DroneId);
+
+	// FR-04: Free camera actor (spawned at runtime)
+	UPROPERTY()
+	TObjectPtr<ACameraActor> FreeCamActor;
+
+	// FR-04: Cached free camera rotation for smooth control
+	FRotator FreeCamRotation = FRotator::ZeroRotator;
+
+	// FR-04: Free camera movement speed (cm/s)
+	UPROPERTY(EditAnywhere, Category = "FreeCam")
+	float FreeCamMoveSpeed = 2000.0f;
+
+	// FR-04: Free camera mouse sensitivity
+	UPROPERTY(EditAnywhere, Category = "FreeCam")
+	float FreeCamMouseSensitivity = 0.05f;
 
 	/** Current open info panel, if any */
 	UPROPERTY()
