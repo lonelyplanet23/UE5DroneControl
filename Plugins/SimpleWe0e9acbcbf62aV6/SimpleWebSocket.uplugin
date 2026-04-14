@@ -1,0 +1,30 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "SimpleWebSocket",
+	"Description": "SimpleWebSocket is a lightweight plugin that allows you to use WebSocket directly in Blueprints. It supports multiple named connections, automatic reconnection on startup, message binding with Blueprint delegates, and convenient runtime management via GameInstanceSubsystem. Ideal for real-time data exchange and server communication in UE projects.",
+	"Category": "Other",
+	"CreatedBy": "mengzhishanghun",
+	"CreatedByURL": "",
+	"DocsURL": "https://github.com/MZSH-UEPlugins/UEPluginDocs/blob/main/SimpleWebSocket/README.md",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EngineVersion": "5.7.0",
+	"CanContainContent": true,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "SimpleWebSocket",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux",
+				"IOS",
+				"Android"
+			]
+		}
+	]
+}
