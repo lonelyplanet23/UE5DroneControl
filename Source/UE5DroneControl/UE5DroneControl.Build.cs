@@ -23,7 +23,11 @@ public class UE5DroneControl : ModuleRules
 			"Sockets",
             "Networking",
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"HTTP",
+			"WebSockets",
+			"Json",
+			"JsonUtilities"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
@@ -40,7 +44,8 @@ public class UE5DroneControl : ModuleRules
 			"UE5DroneControl/DroneOps/Core",
 			"UE5DroneControl/DroneOps/Control",
 			"UE5DroneControl/DroneOps/Drone",
-			"UE5DroneControl/DroneOps/Interfaces"
+			"UE5DroneControl/DroneOps/Interfaces",
+			"UE5DroneControl/DroneOps/Network"
 		});
 
 		// Uncomment if you are using Slate UI
