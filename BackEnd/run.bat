@@ -1,3 +1,5 @@
 @echo off
 cd /d %~dp0
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+if not exist data mkdir data
+if not exist logs mkdir logs
+cpp\drone_backend.exe config.yaml
