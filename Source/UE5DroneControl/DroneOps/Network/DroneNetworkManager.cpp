@@ -16,13 +16,15 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 	HttpClient->BaseUrl = BackendBaseUrl;
 
 	WsClient = NewObject<UDroneWebSocketClient>(this);
-	WsClient->ServerUrl = WebSocketUrl;
+	// Force correct port — property may carry a stale serialized value from the editor
+	WsClient->ServerUrl = TEXT("ws://127.0.0.1:8081/ws");
+	WebSocketUrl = WsClient->ServerUrl;
 	WsClient->OnMessage.AddDynamic(this, &UDroneNetworkManager::OnWsMessage);
 
 	StartPolling();
 	ConnectWebSocket();
 
-	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Initialized. Backend=%s"), *BackendBaseUrl);
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Initialized. Backend=%s  WS=%s"), *BackendBaseUrl, *WsClient->ServerUrl);
 }
 
 void UDroneNetworkManager::Deinitialize()

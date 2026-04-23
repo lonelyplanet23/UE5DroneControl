@@ -79,16 +79,28 @@ void ARealTimeDroneReceiver::BeginPlay()
 		Movement->SetMovementMode(MOVE_Flying);  // 切换到飞行模式，完全禁用重力
 	}
 
-	// === 1. 如果启用自动检测，则开始扫描端口 ===
-	if (bAutoDetectPort)
+	// === 1. WebSocket 模式：订阅 Registry 遥测事件，跳过 UDP ===
+	if (bUseWebSocket)
 	{
-		// UE_LOG(LogTemp, Warning, TEXT(">>> [RealTimeDrone] 启动自动端口检测，范围: %d - %d <<<"), PortScanStart, PortScanEnd);
-		AutoDetectPort();
-		return;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+			{
+				Registry->OnTelemetryUpdated.AddDynamic(this, &ARealTimeDroneReceiver::OnWebSocketTelemetry);
+				UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: WebSocket mode, subscribed to Registry telemetry"), *DroneName);
+			}
+		}
 	}
-
-	// === 1. 绑定到固定端口 ===
-	CreateAndBindSocket(ListenPort);
+	else
+	{
+		// === UDP 模式：绑定端口 ===
+		if (bAutoDetectPort)
+		{
+			AutoDetectPort();
+			return;
+		}
+		CreateAndBindSocket(ListenPort);
+	}
 
 	// === 2. Register with DroneRegistrySubsystem ===
 	if (UGameInstance* GI = GetGameInstance())
@@ -143,8 +155,8 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 	float TimeSinceLastUpdate = CurrentTime - LastUpdateTime;
 	float MinUpdateInterval = (MaxUpdateFrequency > 0.0f) ? (1.0f / MaxUpdateFrequency) : 0.0f;
 
-	// === 2. 主动轮询数据 ===
-	if (ListenSocket)
+	// === 2. 主动轮询 UDP 数据（仅 UDP 模式）===
+	if (!bUseWebSocket && ListenSocket)
 	{
 		uint32 Size;
 		while (ListenSocket->HasPendingData(Size))
@@ -213,8 +225,8 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 		}
 	}
 
-	// === 2.5 自动端口检测逻辑 ===
-	if (bAutoDetectPort && CurrentDetectedPort >= 0 && !bReceivedDataInAutoDetect)
+	// === 2.5 自动端口检测逻辑（仅 UDP 模式）===
+	if (!bUseWebSocket && bAutoDetectPort && CurrentDetectedPort >= 0 && !bReceivedDataInAutoDetect)
 	{
 		float ElapsedTime = GetWorld()->GetTimeSeconds() - AutoDetectStartTime;
 
@@ -772,4 +784,16 @@ void ARealTimeDroneReceiver::OnDeselected_Implementation()
 		SelectionComponent->SetPrimarySelected(false);
 		SelectionComponent->SetSecondarySelected(false);
 	}
+}
+
+void ARealTimeDroneReceiver::OnWebSocketTelemetry(int32 InDroneId, const FDroneTelemetrySnapshot& Snapshot)
+{
+	if (InDroneId != DroneId)
+	{
+		return;
+	}
+
+	// Snapshot.WorldLocation is the offset from anchor (cm). Use InitialLocation as anchor until GPS anchoring is implemented.
+	TargetLocation = InitialLocation + Snapshot.WorldLocation;
+	TargetRotation = Snapshot.Attitude;
 }

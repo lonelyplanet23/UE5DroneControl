@@ -140,8 +140,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
 	float RotationDeadZone = 0.5f;
 
+	// When true, drive position/attitude from WebSocket telemetry via Registry instead of UDP
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
+	bool bUseWebSocket = true;
+
 private:
 	FSocket* ListenSocket;
+
+	UFUNCTION()
+	void OnWebSocketTelemetry(int32 InDroneId, const FDroneTelemetrySnapshot& Snapshot);
 
 	FVector InitialLocation = FVector::ZeroVector;
 	FVector TargetLocation;

@@ -25,9 +25,9 @@ class UE5DRONECONTROL_API UDroneWebSocketClient : public UObject
 	GENERATED_BODY()
 
 public:
-	/** WebSocket server URL, e.g. "ws://127.0.0.1:8080/ws" */
+	/** WebSocket server URL, e.g. "ws://127.0.0.1:8081/ws" */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")
-	FString ServerUrl = TEXT("ws://127.0.0.1:8080/ws");
+	FString ServerUrl = TEXT("ws://127.0.0.1:8081/ws");
 
 	/** Seconds between reconnect attempts when disconnected */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")
