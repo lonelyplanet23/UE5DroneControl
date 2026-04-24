@@ -1,0 +1,98 @@
+# UE5到PX4无人机控制桥接配置
+# 此配置用于控制真实无人机跟随UE5仿真无人机
+
+# 重要：三架飞机的 MAVLink System ID 分别为:
+#   px4_1 -> target_system = 2
+#   px4_2 -> target_system = 3
+#   px4_3 -> target_system = 4
+# 注意：这不是ROS2话题prefix中的数字！
+
+# 无人机配置
+drone:
+  id: 2                          # PX4 MAVLink system ID (必须是2,3,4中的一个)
+  topic_prefix: "/px4_1"        # ROS2话题前缀
+  system_id: 2                  # PX4系统ID (用于VehicleCommand.target_system)
+
+# UDP网络配置
+udp:
+  host: "0.0.0.0"               # 监听地址 (0.0.0.0监听所有接口)
+  port: 8889                    # 接收UE5数据的端口
+  buffer_size: 1024             # UDP缓冲区大小 (字节)
+
+# 控制参数
+control:
+  rate_hz: 100                  # 控制频率 (Hz)
+  init_count: 20                # 进入OFFBOARD前发送的空消息次数
+  offboard_timeout: 0.5         # OFFBOARD模式超时时间 (秒)
+
+  # 控制模式设置
+  mode: "position"              # 控制模式: "position" 或 "velocity"
+  use_position_ctrl: true       # 使用位置控制
+  use_velocity_ctrl: false      # 使用速度控制
+
+# 安全限制
+safety:
+  max_velocity: 5.0             # 最大速度 (米/秒)
+  max_acceleration: 2.0         # 最大加速度 (米/秒²)
+  min_altitude: 1.0             # 最小高度 (米，离地面)
+  max_altitude: 10.0            # 最大高度 (米)
+  enable_limits: true           # 启用安全限制
+
+# 坐标转换
+coordinate:
+  # UE5厘米 ↔ NED米 转换比例
+  ue5_to_ned_scale: 0.01        # UE5厘米 → NED米: 乘以0.01
+  ned_to_ue5_scale: 100.0       # NED米 → UE5厘米: 乘以100.0
+
+  # 坐标系假设 (如果UE5地图的X轴不指向北，需要调整)
+  # UE5 X轴指向: "north" (北), "east" (东), "custom" (自定义)
+  ue5_x_axis: "north"
+
+  # 自定义旋转角度 (度)，如果ue5_x_axis为"custom"时使用
+  # UE5坐标系相对于NED坐标系的旋转角度 (绕Z轴)
+  rotation_angle: 0.0
+
+# 日志配置
+logging:
+  level: "INFO"                 # 日志级别: DEBUG, INFO, WARNING, ERROR
+  file: "ue_to_px4_bridge.log"  # 日志文件
+  console: true                 # 是否输出到控制台
+
+# ROS2配置
+ros2:
+  qos_history: "KEEP_LAST"      # QoS历史策略
+  qos_depth: 10                 # QoS深度
+  qos_reliability: "BEST_EFFORT" # QoS可靠性策略
+  qos_durability: "TRANSIENT_LOCAL" # QoS持久性策略
+
+# 心跳监测配置
+heartbeat:
+  enabled: true                 # 启用心跳监测
+  status_rate: 1.0              # 状态打印频率 (Hz)
+  detailed_report_interval: 10.0 # 详细报告间隔 (秒)
+  odometry_timeout_warn: 1.0    # Odometry超时警告 (秒)
+  odometry_timeout_error: 5.0   # Odometry超时错误 (秒)
+  udp_timeout_warn: 0.5         # UDP超时警告 (秒)
+  udp_timeout_error: 10.0       # UDP超时错误 (秒)
+  monitor_topics:               # 要监测的ROS2话题列表
+    - "/px4_1/fmu/out/vehicle_odometry"
+    - "/px4_1/fmu/in/offboard_control_mode"
+    - "/px4_1/fmu/in/trajectory_setpoint"
+
+# 调试选项
+debug:
+  print_udp_packets: false      # 是否打印每个UDP包
+  print_ros_messages: false     # 是否打印ROS消息
+  print_status_rate: 1.0        # 状态打印频率 (Hz)
+
+# 多无人机支持 (示例)
+# drones:
+#   - id: 1
+#     topic_prefix: "/px4_1"
+#     udp_port: 8889
+#   - id: 2
+#     topic_prefix: "/px4_2"
+#     udp_port: 8890
+#   - id: 3
+#     topic_prefix: "/px4_3"
+#     udp_port: 8891

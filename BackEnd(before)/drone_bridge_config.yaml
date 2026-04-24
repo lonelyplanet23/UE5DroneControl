@@ -1,0 +1,37 @@
+# 无人机数据接收与转发脚本配置
+
+# UE5 引擎接收配置
+ue5:
+  host: "127.0.0.1"      # UE5 主机地址（本机）
+  port: 8894             # UE5 接收GPS数据的端口 (新增)
+  odometry_port: 8888    # UE5 接收里程计的端口 (保持兼容)
+
+# 无人机 SSH 连接配置
+# 注意：三架飞机的实际IP: px4_1=192.168.30.104, px4_2=192.168.30.102, px4_3=192.168.30.103
+# 用户需要为每架飞机复制并修改此配置文件
+drone:
+  ssh_host: "192.168.30.104"    # 无人机地址
+  ssh_user: "jetson1"          # SSH 用户名
+  ssh_password: "123456"       # SSH 密码
+
+# WiFi 网络配置
+network:
+  ssid: "virtualUAV"           # WiFi 网络名称
+  password: "buaa123456"       # WiFi 密码
+  check_interval: 2            # 网络检查间隔（秒）
+  max_attempts: 60             # 最大检查次数
+
+# ROS 2 配置
+ros2:
+  # 可以同时订阅多个话题，用逗号分隔
+  # 建议订阅: vehicle_odometry (位置) + vehicle_global_position (GPS)
+  odometry_topic: "/px4_1/fmu/out/vehicle_odometry"
+  global_position_topic: "/px4_1/fmu/out/vehicle_global_position"
+
+# 是否启用全局位置同步
+enable_global_position: true
+  
+# 日志配置
+logging:
+  level: "INFO"               # 日志级别: DEBUG, INFO, WARNING, ERROR
+  file: "drone_bridge.log"    # 日志文件

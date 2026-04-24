@@ -1,0 +1,56 @@
+# 后端统一配置文件
+# 版本: v0.2
+
+server:
+  http_port: 8080           # HTTP REST 服务端口（监听 0.0.0.0）
+  ws_port: 8081             # WebSocket 服务端口（监听 0.0.0.0）
+  debug: true               # 是否启用测试接口 /api/debug/*
+
+drone:
+  max_count: 6              # 最大注册无人机数量
+  heartbeat_hz: 2           # 心跳发送频率（Hz），不得低于 2
+  lost_timeout_sec: 10      # 超时失联阈值（秒）
+  arrival_threshold_m: 1.0  # 到达航点的位置误差阈值（米）
+  assembly_timeout_sec: 60  # 集结超时阈值（秒）
+  avoidance_radius_m: 3.0   # 实时避障安全距离（米）
+  avoidance_lookahead_sec: 2.0
+  low_battery_threshold: 20 # 低电量告警阈值（%）
+
+# 编号与 UDP 端口的固定映射
+# 编号 1~6 由用户注册时手动指定，对应以下端口
+port_map:
+  1:
+    send_port: 8889
+    recv_port: 8888
+    ros_topic_prefix: "/px4_1"
+  2:
+    send_port: 8891
+    recv_port: 8890
+    ros_topic_prefix: "/px4_2"
+  3:
+    send_port: 8893
+    recv_port: 8892
+    ros_topic_prefix: "/px4_3"
+  4:
+    send_port: 8895
+    recv_port: 8894
+    ros_topic_prefix: "/px4_4"
+  5:
+    send_port: 8897
+    recv_port: 8896
+    ros_topic_prefix: "/px4_5"
+  6:
+    send_port: 8899
+    recv_port: 8898
+    ros_topic_prefix: "/px4_6"
+
+# Jetson 端转发配置（后端发送 UDP 的目标）
+jetson:
+  host: "192.168.30.104"    # Jetson 的局域网 IP
+
+storage:
+  path: "./data/drones.json"
+
+log:
+  level: "info"             # debug / info / warn / error
+  file: "./logs/backend.log"

@@ -1,0 +1,40 @@
+# 多无人机控制器配置
+
+# 无人机列表
+drones:
+  - name: "UAV1"
+    drone_id: 1                    # 内部ID (1-based)
+    topic_prefix: "/px4_1"         # ROS2话题前缀
+    control_port: 8889             # 发送到单机桥接的UDP端口
+    ssh_host: "192.168.30.104"     # SSH地址 (用于数据桥接)
+    ssh_user: "jetson1"
+    ssh_password: "123456"
+
+  - name: "UAV2"
+    drone_id: 2
+    topic_prefix: "/px4_2"
+    control_port: 8891
+    ssh_host: "192.168.30.102"
+    ssh_user: "jetson2"
+    ssh_password: "123456"
+
+  - name: "UAV3"
+    drone_id: 3
+    topic_prefix: "/px4_3"
+    control_port: 8893
+    ssh_host: "192.168.30.103"
+    ssh_user: "jetson3"
+    ssh_password: "123456"
+
+# 多机主控制器配置
+controller:
+  listen_port: 8899               # 从UE5接收指令的端口
+  safety_limits:
+    max_altitude: 100.0           # 最大高度 (米)
+    min_altitude: 1.0             # 最小高度 (米)
+    max_horizontal_distance: 500.0  # 最大水平距离 (米)
+
+# 日志配置
+logging:
+  level: "INFO"
+  file: "multi_controller.log"
