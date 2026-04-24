@@ -4,10 +4,22 @@
       "Bash(find \"d:/RedAlert/UE5DroneControl/BackEnd\\(before\\)\" -type f)",
       "Read(//c/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/**)",
       "Read(//c/Program Files/Microsoft Visual Studio/2022/**)",
-      "Read(//dev/**)"
+      "Read(//dev/**)",
+      "Bash(grep -iE \"\\\\.\\(ini|cpp|h|umap\\)$\")",
+      "Bash(xargs grep *)",
+      "Bash(grep -v \"^[^a-zA-Z]*$\")",
+      "Bash(grep -v \"^.$\\\\|^..$\")",
+      "Bash(grep -v \"^.$\\\\|^..$\\\\|^...$\")",
+      "Bash(grep -v \"^[^a-zA-Z/]*$\")",
+      "Bash(netstat -ano)",
+      "Bash(tasklist /FI \"PID eq 24664\")",
+      "Bash(tasklist)",
+      "Bash(grep -v \"//.*8080\\\\|//.*8081\")",
+      "Bash(sort -k6,7)"
     ],
     "additionalDirectories": [
       "\\tmp"
     ]
   }
 }
+

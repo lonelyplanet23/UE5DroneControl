@@ -37,6 +37,7 @@ protected:
 	void OnPrimaryClick();
 	void OnShowInfo();
 	void OnFreeCamToggle();
+	void OnPauseToggle();
 
 	// Click handling
 	void HandleMapClick(const FVector& WorldLocation);
@@ -119,6 +120,9 @@ private:
 	/** Last non-free camera target so F can restore it */
 	UPROPERTY()
 	TObjectPtr<AActor> LastFollowViewTarget = nullptr;
+
+	/** Tracks which drones are currently paused (toggled by P key) */
+	TSet<int32> PausedDroneIds;
 
 	/** Open drone info panel for given DroneId (C++ implementation) */
 	void OpenDroneInfoPanel(int32 DroneId);

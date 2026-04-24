@@ -8,6 +8,7 @@
 #include "DroneOps/Interfaces/DroneSelectableInterface.h"
 #include "DroneOps/Drone/DroneSelectionComponent.h"
 #include "DroneOps/Drone/DroneCommandSenderComponent.h"
+#include "DroneOps/Network/DroneNetworkManager.h"
 #include "MultiDroneCharacter.h"
 #include "RealTimeDroneReceiver.h"
 #include "MultiDroneManager.h"
@@ -189,6 +190,7 @@ void ADroneOpsPlayerController::SetupInputComponent()
 		InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ADroneOpsPlayerController::OnPrimaryClick);
 		InputComponent->BindKey(EKeys::MiddleMouseButton, IE_Pressed, this, &ADroneOpsPlayerController::OnShowInfo);
 		InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ADroneOpsPlayerController::OnFreeCamToggle);
+		InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ADroneOpsPlayerController::OnPauseToggle);
 		UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: Input bindings installed"));
 	}
 	else
@@ -602,26 +604,30 @@ void ADroneOpsPlayerController::SendTargetCommand(int32 DroneId, const FVector& 
 		return;
 	}
 
+	// WebSocket path: send move command via DroneNetworkManager
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetworkManager = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			if (NetworkManager->GetWebSocketClient() && NetworkManager->GetWebSocketClient()->IsConnected())
+			{
+				NetworkManager->SendMoveCommand(DroneId, TargetWorldLocation);
+				UE_LOG(LogTemp, Log, TEXT("Move command sent via WebSocket for Drone %d: (%.1f, %.1f, %.1f)"),
+					DroneId, TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z);
+				return;
+			}
+		}
+	}
+
+	// Fallback: UDP path via DroneCommandSenderComponent
 	TScriptInterface<ICoordinateService> CoordService = DroneRegistry->GetCoordinateService();
 	if (!CoordService.GetObject())
 	{
-		UE_LOG(LogTemp, Error, TEXT("No coordinate service available"));
+		UE_LOG(LogTemp, Warning, TEXT("SendTargetCommand: No coordinate service and no WebSocket, command dropped"));
 		return;
 	}
 
 	const FVector NedLocation = ICoordinateService::Execute_WorldToNed(CoordService.GetObject(), TargetWorldLocation);
-
-	FDroneTargetCommand Command;
-	Command.DroneId = DroneId;
-	Command.TargetWorldLocation = TargetWorldLocation;
-	Command.TargetNedLocation = NedLocation;
-	Command.Mode = 1;
-	Command.IssuedAt = GetWorld()->GetTimeSeconds();
-
-	UE_LOG(LogTemp, Log, TEXT("Target command for Drone %d: World=(%.1f, %.1f, %.1f) NED=(%.2f, %.2f, %.2f)"),
-		DroneId,
-		TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z,
-		NedLocation.X, NedLocation.Y, NedLocation.Z);
 
 	UDroneCommandSenderComponent* CommandSender = nullptr;
 	TArray<AActor*> Managers;
@@ -633,12 +639,9 @@ void ADroneOpsPlayerController::SendTargetCommand(int32 DroneId, const FVector& 
 
 	if (CommandSender)
 	{
-		CommandSender->SendSingleDroneCommand(DroneId, NedLocation, Command.Mode);
-		UE_LOG(LogTemp, Log, TEXT("Command dispatched via DroneCommandSenderComponent for Drone %d"), DroneId);
-		return;
+		CommandSender->SendSingleDroneCommand(DroneId, NedLocation, 1);
+		UE_LOG(LogTemp, Log, TEXT("Move command sent via UDP for Drone %d"), DroneId);
 	}
-
-	UE_LOG(LogTemp, Warning, TEXT("No command sender available for Drone %d"), DroneId);
 }
 
 AActor* ADroneOpsPlayerController::GetActorUnderCursor() const
@@ -772,4 +775,51 @@ void ADroneOpsPlayerController::ApplyFollowViewTarget(int32 DroneId)
 	UE_LOG(LogTemp, Log, TEXT("Switched to Follow Camera (FollowDroneId=%d, Target=%s)"),
 		CameraModeState.FollowDroneId,
 		*FollowTarget->GetName());
+}
+
+void ADroneOpsPlayerController::OnPauseToggle()
+{
+	if (SelectedDroneId <= 0)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange, TEXT("未选中无人机，无法暂停/恢复"));
+		}
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+
+	UDroneNetworkManager* NetworkManager = GI->GetSubsystem<UDroneNetworkManager>();
+	if (!NetworkManager || !NetworkManager->GetWebSocketClient() || !NetworkManager->GetWebSocketClient()->IsConnected())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("OnPauseToggle: WebSocket not connected"));
+		return;
+	}
+
+	const bool bCurrentlyPaused = PausedDroneIds.Contains(SelectedDroneId);
+	const bool bNewPaused = !bCurrentlyPaused;
+
+	NetworkManager->SendPauseCommand(SelectedDroneId, bNewPaused);
+
+	if (bNewPaused)
+	{
+		PausedDroneIds.Add(SelectedDroneId);
+	}
+	else
+	{
+		PausedDroneIds.Remove(SelectedDroneId);
+	}
+
+	const FString StatusText = bNewPaused ? TEXT("已暂停") : TEXT("已恢复");
+	UE_LOG(LogTemp, Log, TEXT("Drone %d %s"), SelectedDroneId, *StatusText);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
+			FString::Printf(TEXT("无人机 %d %s"), SelectedDroneId, *StatusText));
+	}
 }
