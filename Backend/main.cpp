@@ -3,9 +3,11 @@
 #include "core/types.h"
 #include "communication/udp_receiver.h"
 #include "communication/udp_sender.h"
+#include "communication/ws_manager.h"
 #include "drone/heartbeat_manager.h"
 #include "drone/drone_manager.h"
 #include "execution/assembly_controller.h"
+#include "http/http_server.h"
 #include <spdlog/spdlog.h>
 #include <csignal>
 #include <atomic>
@@ -24,7 +26,7 @@ void signal_handler(int)
 int main(int argc, char* argv[])
 {
     // 1. 加载配置
-    auto config = LoadConfig("config.yaml");
+    auto config = LoadConfig(argc > 1 ? argv[1] : "config.yaml");
 
     // 2. 验证配置
     ValidateConfig(config);
@@ -37,30 +39,36 @@ int main(int argc, char* argv[])
     spdlog::info("  HTTP :{}  WS :{}", config.http_port, config.ws_port);
     spdlog::info("============================================");
 
-    // 3. 初始化 Asio io_context
+    // 4. 信号处理（在线程启动前注册）
+    std::signal(SIGINT,  signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    // 5. 初始化 Asio io_context
     boost::asio::io_context io_context;
 
-    // 4. 创建各模块
+    // 6. 创建各模块
     UdpSender          udp_sender(io_context);
     HeartbeatManager   hb_manager(udp_sender);
     DroneManager       drone_mgr(hb_manager);
     AssemblyController assembly_ctrl(config.assembly_timeout_sec);
     UdpReceiver        udp_receiver(io_context);
+    WsManager          ws_manager;
+    HttpServer         http_server(config, drone_mgr, assembly_ctrl, ws_manager);
 
-    // 5. 配置 UDP 遥测接收
+    // 7. 配置 UDP 遥测接收
     for (const auto& [slot, mapping] : config.port_map) {
         udp_receiver.AddPort(slot, mapping.recv_port, slot);
     }
 
-    // 6. 信号处理（在线程启动前注册）
-    std::signal(SIGINT,  signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    // 8. 配置 UdpSender 目标（每个 slot → Jetson IP + send_port）
+    for (const auto& [slot, mapping] : config.port_map) {
+        udp_sender.SetTarget(slot, config.jetson_host, mapping.send_port);
+    }
 
-    // 7. 遥测回调 → DroneManager
+    // 9. 遥测回调 → DroneManager
     udp_receiver.SetCallback([&](int drone_id, const TelemetryData& tel) {
         drone_mgr.OnTelemetryReceived(drone_id, tel);
 
-        // 同时更新集结进度（如果在集结中）
         if (assembly_ctrl.GetState() == AssemblyState::Assembling) {
             assembly_ctrl.UpdateDronePosition(
                 drone_id,
@@ -70,24 +78,10 @@ int main(int argc, char* argv[])
         }
     });
 
-    // 7. 注册示例无人机（实际由 HTTP 注册接口调用）
-    // 默认添加 3 架，端口按 slot 配置
-    for (int i = 1; i <= 3; ++i) {
-        if (config.port_map.find(i) == config.port_map.end()) continue;
-        drone_mgr.AddDrone(i, i, "UAV" + std::to_string(i));
-    }
-
-    // 8. 集结进度回调
-    assembly_ctrl.SetProgressCallback([&](const AssemblyProgress& progress) {
-        spdlog::info("[AssemblyCB] {}: {}/{} ready",
-                     progress.array_id, progress.ready_count, progress.total_count);
-        // TODO: 实际项目中通过 WS 推送
-    });
-
-    // 9. 启动 UDP 接收
+    // 10. 启动 UDP 接收
     udp_receiver.Start();
 
-    // 10. 启动 Asio worker 线程（处理 UDP 异步收发）
+    // 11. 启动 Asio worker 线程
     auto asio_worker = std::thread([&]() {
         while (g_running) {
             try {
@@ -96,14 +90,17 @@ int main(int argc, char* argv[])
         }
     });
 
-    // 11. 主循环
+    // 12. 启动 HTTP/WS 服务器（后台线程）
+    auto server_thread = std::thread([&]() {
+        http_server.Run();
+    });
+
+    // 13. 主循环（超时检查）
     spdlog::info("Backend started. Press Ctrl+C to stop.");
 
     while (g_running) {
-        // 超时检查（每秒）
         drone_mgr.CheckTimeouts(config.lost_timeout_sec);
 
-        // 集结超时检查
         if (assembly_ctrl.CheckTimeout()) {
             auto p = assembly_ctrl.GetProgress();
             spdlog::warn("[Main] Assembly timeout! {}/{}", p.ready_count, p.total_count);
@@ -115,10 +112,12 @@ int main(int argc, char* argv[])
     spdlog::info("Shutting down...");
 
     // 清理
+    http_server.Stop();
     udp_receiver.Stop();
     hb_manager.StopAll();
 
-    if (asio_worker.joinable()) asio_worker.join();
+    if (asio_worker.joinable())  asio_worker.join();
+    if (server_thread.joinable()) server_thread.join();
 
     spdlog::info("Backend shutdown complete.");
     return 0;

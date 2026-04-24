@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"d:/RedAlert/UE5DroneControl/BackEnd\\(before\\)\" -type f)",
+      "Read(//c/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/**)",
+      "Read(//c/Program Files/Microsoft Visual Studio/2022/**)",
+      "Read(//dev/**)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

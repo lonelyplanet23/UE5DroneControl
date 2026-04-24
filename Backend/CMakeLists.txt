@@ -7,8 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ============================================================
 # Find packages (installed via vcpkg)
 # ============================================================
-find_package(httplib CONFIG REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
+find_package(Boost REQUIRED COMPONENTS system json beast)
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
@@ -29,6 +28,8 @@ set(SOURCES
     drone/state_machine.cpp
     drone/heartbeat_manager.cpp
     drone/drone_manager.cpp
+    execution/assembly_controller.cpp
+    http/http_server.cpp
 )
 
 set(HEADERS
@@ -40,11 +41,14 @@ set(HEADERS
     conversion/gps_anchor_manager.h
     communication/udp_receiver.h
     communication/udp_sender.h
+    communication/ws_manager.h
     drone/command_queue.h
     drone/state_machine.h
     drone/heartbeat_manager.h
     drone/drone_context.h
     drone/drone_manager.h
+    execution/assembly_controller.h
+    http/http_server.h
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
@@ -52,12 +56,17 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    httplib::httplib
     Boost::system
+    Boost::json
+    Boost::beast
     yaml-cpp
     nlohmann_json::nlohmann_json
     spdlog::spdlog
 )
+
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 wsock32)
+endif()
 
 # ============================================================
 # Unit tests
