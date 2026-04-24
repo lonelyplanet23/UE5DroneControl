@@ -1,0 +1,28 @@
+{
+  "array_id": "mock-patrol-1",
+  "mode": "patrol",
+  "paths": [
+    {
+      "pathId": 1,
+      "drone_id": "d1",
+      "bClosedLoop": true,
+      "waypoints": [
+        {
+          "location": { "x": 0, "y": 0, "z": 0 },
+          "segmentSpeed": 0,
+          "waitTime": 0
+        },
+        {
+          "location": { "x": 500, "y": 0, "z": 150 },
+          "segmentSpeed": 2,
+          "waitTime": 0
+        },
+        {
+          "location": { "x": 500, "y": 500, "z": 150 },
+          "segmentSpeed": 2,
+          "waitTime": 0
+        }
+      ]
+    }
+  ]
+}
