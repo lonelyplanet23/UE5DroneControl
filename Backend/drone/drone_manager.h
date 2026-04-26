@@ -34,7 +34,11 @@ public:
     // 无人机管理（由 HTTP 注册接口调用）
     // ========================================================
     /// 添加无人机
-    bool AddDrone(int drone_id, int slot, const std::string& name);
+    bool AddDrone(int drone_id,
+                  int slot,
+                  const std::string& name,
+                  const std::string& jetson_ip = "",
+                  int send_port = 0);
 
     /// 移除无人机
     bool RemoveDrone(int drone_id);
@@ -73,6 +77,11 @@ public:
     DroneConnectionState GetConnectionState(int drone_id) const;
     TelemetryData GetLatestTelemetry(int drone_id) const;
     GpsAnchor GetAnchor(int drone_id) const;
+    bool HasDrone(int drone_id) const;
+    bool GetQueueDebugInfo(int drone_id,
+                           size_t& queue_size,
+                           bool& paused,
+                           DroneControlPacket* next_cmd = nullptr) const;
 
     // ========================================================
     // 超时检查（由监控线程每秒调用）

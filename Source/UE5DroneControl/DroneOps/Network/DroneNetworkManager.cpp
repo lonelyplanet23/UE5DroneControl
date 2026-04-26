@@ -5,8 +5,38 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+
+namespace
+{
+bool ParseDroneIdString(const FString& RawId, int32& OutId)
+{
+	FString IdText = RawId;
+	if (IdText.StartsWith(TEXT("d")) || IdText.StartsWith(TEXT("D")))
+	{
+		IdText.RightChopInline(1, EAllowShrinking::No);
+	}
+	return !IdText.IsEmpty() && IdText.IsNumeric() && LexTryParseString(OutId, *IdText) && OutId > 0;
+}
+
+bool ParseDroneIdField(const TSharedPtr<FJsonObject>& Object, const FString& FieldName, int32& OutId)
+{
+	if (!Object.IsValid())
+	{
+		return false;
+	}
+
+	if (Object->TryGetNumberField(FieldName, OutId) && OutId > 0)
+	{
+		return true;
+	}
+
+	FString RawId;
+	return Object->TryGetStringField(FieldName, RawId) && ParseDroneIdString(RawId, OutId);
+}
+}
 
 void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -16,8 +46,7 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 	HttpClient->BaseUrl = BackendBaseUrl;
 
 	WsClient = NewObject<UDroneWebSocketClient>(this);
-	// Force correct port — property may carry a stale serialized value from the editor
-	WsClient->ServerUrl = TEXT("ws://127.0.0.1:8081/ws");
+	WsClient->ServerUrl = WebSocketUrl.IsEmpty() ? TEXT("ws://127.0.0.1:8081/") : WebSocketUrl;
 	WebSocketUrl = WsClient->ServerUrl;
 	WsClient->OnMessage.AddDynamic(this, &UDroneNetworkManager::OnWsMessage);
 
@@ -81,7 +110,8 @@ void UDroneNetworkManager::OnDroneListResponse(bool bSuccess, const FString& Bod
 		return;
 	}
 
-	// Parse JSON array
+	// Parse JSON object: { "drones": [...] }.
+	// Keep backward compatibility with the old top-level array shape.
 	TSharedPtr<FJsonValue> RootValue;
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Body);
 	if (!FJsonSerializer::Deserialize(Reader, RootValue) || !RootValue.IsValid())
@@ -91,9 +121,20 @@ void UDroneNetworkManager::OnDroneListResponse(bool bSuccess, const FString& Bod
 	}
 
 	const TArray<TSharedPtr<FJsonValue>>* DroneArray;
-	if (!RootValue->TryGetArray(DroneArray))
+	TSharedPtr<FJsonObject> RootObject = RootValue->Type == EJson::Object
+		? RootValue->AsObject()
+		: nullptr;
+	if (RootObject.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] Drone list JSON is not an array"));
+		if (!RootObject->TryGetArrayField(TEXT("drones"), DroneArray))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] Drone list JSON has no 'drones' array"));
+			return;
+		}
+	}
+	else if (!RootValue->TryGetArray(DroneArray))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] Drone list JSON is neither object nor array"));
 		return;
 	}
 
@@ -120,17 +161,20 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 		return;
 	}
 
+	TSet<int32> SeenDroneIds;
+
 	for (const TSharedPtr<FJsonObject>& Obj : DroneObjects)
 	{
 		FDroneDescriptor Desc;
 
 		// Required: id
 		int32 Id = 0;
-		if (!Obj->TryGetNumberField(TEXT("id"), Id) || Id <= 0)
+		if (!ParseDroneIdField(Obj, TEXT("id"), Id))
 		{
 			continue;
 		}
 		Desc.DroneId = Id;
+		SeenDroneIds.Add(Id);
 
 		// Optional fields — use defaults if absent
 		FString Name;
@@ -148,11 +192,27 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 		{
 			Desc.MavlinkSystemId = MavId;
 		}
+		else
+		{
+			Desc.MavlinkSystemId = Id;
+		}
 
 		int32 BitIdx = 0;
 		if (Obj->TryGetNumberField(TEXT("bit_index"), BitIdx))
 		{
 			Desc.BitIndex = BitIdx;
+		}
+		else
+		{
+			int32 Slot = 0;
+			if (Obj->TryGetNumberField(TEXT("slot"), Slot) && Slot > 0)
+			{
+				Desc.BitIndex = Slot - 1;
+			}
+			else
+			{
+				Desc.BitIndex = Id - 1;
+			}
 		}
 
 		int32 Port = 0;
@@ -167,11 +227,16 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 			Desc.TopicPrefix = Prefix;
 		}
 
-		// Register (or update) in the local registry
-		if (!Registry->IsDroneRegistered(Id))
+		Registry->RegisterDrone(Desc);
+		UE_LOG(LogTemp, Verbose, TEXT("[DroneNetworkManager] Synced drone %d (%s)"), Id, *Desc.Name);
+	}
+
+	for (const FDroneDescriptor& ExistingDesc : Registry->GetAllDroneDescriptors())
+	{
+		if (!SeenDroneIds.Contains(ExistingDesc.DroneId))
 		{
-			Registry->RegisterDrone(Desc);
-			UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Registered drone %d (%s)"), Id, *Desc.Name);
+			Registry->UnregisterDrone(ExistingDesc.DroneId);
+			UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Unregistered stale drone %d"), ExistingDesc.DroneId);
 		}
 	}
 }
@@ -202,7 +267,7 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		return;
 	}
 
-	// Telemetry push: { "type": "telemetry", "drone_id": N, "data": {...} }
+	// Telemetry push: doc format is flat, legacy format nests fields in "data".
 	if (MsgType == TEXT("telemetry"))
 	{
 		UDroneRegistrySubsystem* Registry = GetGameInstance()
@@ -215,35 +280,73 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		}
 
 		int32 DroneId = 0;
-		Root->TryGetNumberField(TEXT("drone_id"), DroneId);
-
-		const TSharedPtr<FJsonObject>* DataObj;
-		if (!Root->TryGetObjectField(TEXT("data"), DataObj))
+		if (!ParseDroneIdField(Root, TEXT("drone_id"), DroneId))
 		{
 			return;
 		}
+
+		const TSharedPtr<FJsonObject>* NestedData = nullptr;
+		const TSharedPtr<FJsonObject> DataObject = Root->TryGetObjectField(TEXT("data"), NestedData)
+			? *NestedData
+			: Root;
 
 		FDroneTelemetrySnapshot Snap;
 		Snap.DroneId = DroneId;
 
 		// Position (UE world coords, cm)
 		double X = 0, Y = 0, Z = 0;
-		(*DataObj)->TryGetNumberField(TEXT("x"), X);
-		(*DataObj)->TryGetNumberField(TEXT("y"), Y);
-		(*DataObj)->TryGetNumberField(TEXT("z"), Z);
+		DataObject->TryGetNumberField(TEXT("x"), X);
+		DataObject->TryGetNumberField(TEXT("y"), Y);
+		DataObject->TryGetNumberField(TEXT("z"), Z);
 		Snap.WorldLocation = FVector(X, Y, Z);
 
 		// Attitude (degrees)
 		double Pitch = 0, Yaw = 0, Roll = 0;
-		(*DataObj)->TryGetNumberField(TEXT("pitch"), Pitch);
-		(*DataObj)->TryGetNumberField(TEXT("yaw"), Yaw);
-		(*DataObj)->TryGetNumberField(TEXT("roll"), Roll);
+		DataObject->TryGetNumberField(TEXT("pitch"), Pitch);
+		DataObject->TryGetNumberField(TEXT("yaw"), Yaw);
+		DataObject->TryGetNumberField(TEXT("roll"), Roll);
 		Snap.Attitude = FRotator(Pitch, Yaw, Roll);
 
 		Snap.LastUpdateTime = FPlatformTime::Seconds();
 		Snap.Availability = EDroneAvailability::Online;
 
 		Registry->UpdateTelemetry(DroneId, Snap);
+		return;
+	}
+
+	if (MsgType == TEXT("event"))
+	{
+		UDroneRegistrySubsystem* Registry = GetGameInstance()
+			? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+			: nullptr;
+		if (!Registry)
+		{
+			return;
+		}
+
+		int32 DroneId = 0;
+		if (!ParseDroneIdField(Root, TEXT("drone_id"), DroneId))
+		{
+			return;
+		}
+
+		FString EventName;
+		if (!Root->TryGetStringField(TEXT("event"), EventName))
+		{
+			return;
+		}
+
+		FDroneTelemetrySnapshot Snapshot;
+		if (!Registry->GetTelemetry(DroneId, Snapshot))
+		{
+			Snapshot.DroneId = DroneId;
+		}
+
+		Snapshot.LastUpdateTime = FPlatformTime::Seconds();
+		Snapshot.Availability = (EventName == TEXT("lost_connection"))
+			? EDroneAvailability::Lost
+			: EDroneAvailability::Online;
+		Registry->UpdateTelemetry(DroneId, Snapshot);
 	}
 }
 
@@ -257,9 +360,9 @@ void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetW
 		return;
 	}
 
-	// { "type": "move", "drone_id": N, "x": ..., "y": ..., "z": ... }
+	// { "type": "move", "drone_id": "d1", "x": ..., "y": ..., "z": ... }
 	const FString Json = FString::Printf(
-		TEXT("{\"type\":\"move\",\"drone_id\":%d,\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}"),
+		TEXT("{\"type\":\"move\",\"drone_id\":\"d%d\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}"),
 		DroneId,
 		TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z);
 
@@ -276,7 +379,7 @@ void UDroneNetworkManager::SendPauseCommand(int32 DroneId, bool bPause)
 
 	const FString Type = bPause ? TEXT("pause") : TEXT("resume");
 	const FString Json = FString::Printf(
-		TEXT("{\"type\":\"%s\",\"drone_id\":%d}"), *Type, DroneId);
+		TEXT("{\"type\":\"%s\",\"drone_id\":\"d%d\"}"), *Type, DroneId);
 
 	WsClient->SendMessage(Json);
 }

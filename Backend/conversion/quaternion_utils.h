@@ -19,12 +19,12 @@ public:
     /// 输入: 四元数 [w, x, y, z]（来自 PX4 / YAML 顺序）
     /// 转换步骤:
     ///   1. 重排为 FQuat(x, y, -z, w) —— Z 分量取反适配左手系
-    ///   2. UE Yaw = -NED Yaw —— Yaw 取反
+    ///   2. 按标准公式输出 UE 欧拉角（翻转后的四元数已体现 Yaw 方向变化）
     ///
     /// @param qw, qx, qy, qz  输入四元数（YAML 顺序: w, x, y, z）
     /// @param[out] roll        横滚角（度）
     /// @param[out] pitch       俯仰角（度）
-    /// @param[out] yaw         偏航角（度，已翻转）
+    /// @param[out] yaw         偏航角（度，已转换为 UE 方向）
     static void QuatToEuler(double qw, double qx, double qy, double qz,
                             double& roll, double& pitch, double& yaw);
 

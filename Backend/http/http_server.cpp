@@ -1,7 +1,10 @@
 #include "http/http_server.h"
 #include "conversion/coordinate_converter.h"
+#include "conversion/quaternion_utils.h"
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include <cmath>
+#include <chrono>
 #include <fstream>
 #include <sstream>
 
@@ -19,11 +22,20 @@ HttpServer::HttpServer(const AppConfig& config,
 {
     // 注册 DroneManager 回调 → WS 推送
     drone_mgr_.SetTelemetryCallback([this](int drone_id, const TelemetryData& tel) {
-        // 构建遥测 JSON
         double ux, uy, uz;
         CoordinateConverter::NedToUeOffset(
             tel.position_ned[0], tel.position_ned[1], tel.position_ned[2],
             ux, uy, uz);
+
+        double roll, pitch, yaw;
+        QuaternionUtils::QuatToEuler(
+            tel.quaternion[0], tel.quaternion[1], tel.quaternion[2], tel.quaternion[3],
+            roll, pitch, yaw);
+
+        double speed = std::sqrt(
+            tel.velocity[0]*tel.velocity[0] +
+            tel.velocity[1]*tel.velocity[1] +
+            tel.velocity[2]*tel.velocity[2]);
 
         auto msg = boost::json::object{
             {"type",     "telemetry"},
@@ -31,9 +43,11 @@ HttpServer::HttpServer(const AppConfig& config,
             {"x",        ux},
             {"y",        uy},
             {"z",        uz},
+            {"pitch",    pitch},
+            {"yaw",      yaw},
+            {"roll",     roll},
+            {"speed",    speed},
             {"battery",  tel.battery},
-            {"armed",    tel.IsArmed()},
-            {"offboard", tel.IsOffboard()},
         };
         ws_manager_.broadcast(json_stringify(msg));
     });
@@ -60,10 +74,10 @@ HttpServer::HttpServer(const AppConfig& config,
 
     drone_mgr_.SetAlertCallback([this](int drone_id, const std::string& alert_type, int value) {
         auto msg = boost::json::object{
-            {"type",       "alert"},
-            {"drone_id",   "d" + std::to_string(drone_id)},
-            {"alert_type", alert_type},
-            {"value",      value},
+            {"type",     "alert"},
+            {"drone_id", "d" + std::to_string(drone_id)},
+            {"alert",    alert_type},
+            {"value",    value},
         };
         ws_manager_.broadcast(json_stringify(msg));
     });
@@ -160,6 +174,20 @@ static boost::json::value parse_body(const http::request<http::string_body>& req
     }
 }
 
+static double json_number_to_double(const boost::json::value& value, const char* field_name) {
+    if (value.is_double()) return value.as_double();
+    if (value.is_int64())  return static_cast<double>(value.as_int64());
+    if (value.is_uint64()) return static_cast<double>(value.as_uint64());
+    throw ApiError(400, std::string("field must be numeric: ") + field_name);
+}
+
+static int json_number_to_int(const boost::json::value& value, const char* field_name) {
+    if (value.is_int64())  return static_cast<int>(value.as_int64());
+    if (value.is_uint64()) return static_cast<int>(value.as_uint64());
+    if (value.is_double()) return static_cast<int>(value.as_double());
+    throw ApiError(400, std::string("field must be numeric: ") + field_name);
+}
+
 // ============================================================
 // HTTP 路由
 // ============================================================
@@ -250,36 +278,58 @@ boost::json::value HttpServer::ApiListDrones() {
     std::lock_guard<std::mutex> lock(records_mutex_);
     boost::json::array arr;
     for (const auto& rec : drone_records_) {
-        auto status = drone_mgr_.GetStatus(drone_id_from_string(rec.id));
+        int drone_id = drone_id_from_string(rec.id);
+        auto status = drone_mgr_.GetStatus(drone_id);
+
+        int ue_recv_port = 0;
+        std::string topic_prefix;
+        auto pm_it = config_.port_map.find(rec.slot);
+        if (pm_it != config_.port_map.end()) {
+            ue_recv_port  = pm_it->second.recv_port;
+            topic_prefix  = pm_it->second.ros_topic_prefix;
+        }
+
         arr.push_back(boost::json::object{
-            {"id",         rec.id},
-            {"name",       rec.name},
-            {"model",      rec.model},
-            {"slot",       rec.slot},
-            {"ip",         rec.ip},
-            {"port",       rec.port},
-            {"video_url",  rec.video_url},
-            {"status",     status.connection_state},
-            {"battery",    status.battery},
+            {"id",                rec.id},
+            {"name",              rec.name},
+            {"model",             rec.model},
+            {"slot",              rec.slot},
+            {"ip",                rec.ip},
+            {"port",              rec.port},
+            {"video_url",         rec.video_url},
+            {"status",            status.connection_state},
+            {"battery",           status.battery},
+            {"mavlink_system_id", rec.slot},
+            {"bit_index",         rec.slot - 1},
+            {"ue_receive_port",   ue_recv_port},
+            {"topic_prefix",      topic_prefix},
         });
     }
-    return arr;
+    return boost::json::object{{"drones", arr}};
 }
 
 boost::json::value HttpServer::ApiRegisterDrone(const boost::json::object& body) {
     std::lock_guard<std::mutex> lock(records_mutex_);
 
     if (static_cast<int>(drone_records_.size()) >= config_.max_count)
-        throw ApiError(400, "max drone count reached");
+        throw ApiError(507, "max drone count reached");
 
     DroneRecord rec;
     rec.id        = "d" + std::to_string(next_drone_seq_++);
     rec.name      = body.contains("name")      ? std::string(body.at("name").as_string())      : rec.id;
     rec.model     = body.contains("model")     ? std::string(body.at("model").as_string())     : "";
-    rec.slot      = body.contains("slot_number") ? static_cast<int>(body.at("slot_number").as_int64()) : next_drone_seq_ - 1;
+    rec.slot      = body.contains("slot")      ? static_cast<int>(body.at("slot").as_int64())  : next_drone_seq_ - 1;
     rec.ip        = body.contains("ip")        ? std::string(body.at("ip").as_string())        : "";
     rec.port      = body.contains("port")      ? static_cast<int>(body.at("port").as_int64())  : 0;
     rec.video_url = body.contains("video_url") ? std::string(body.at("video_url").as_string()) : "";
+
+    // duplicate name / slot check
+    for (const auto& existing : drone_records_) {
+        if (existing.name == rec.name)
+            throw ApiError(409, "name already in use: " + rec.name);
+        if (existing.slot == rec.slot)
+            throw ApiError(409, "slot already in use: " + std::to_string(rec.slot));
+    }
 
     int drone_id = drone_id_from_string(rec.id);
 
@@ -288,7 +338,12 @@ boost::json::value HttpServer::ApiRegisterDrone(const boost::json::object& body)
     if (it == config_.port_map.end())
         throw ApiError(400, "slot " + std::to_string(rec.slot) + " not in port_map");
 
-    drone_mgr_.AddDrone(drone_id, rec.slot, rec.name);
+    drone_mgr_.AddDrone(
+        drone_id,
+        rec.slot,
+        rec.name,
+        config_.jetson_host,
+        it->second.send_port);
     drone_records_.push_back(rec);
     SaveDrones();
 
@@ -304,7 +359,7 @@ boost::json::value HttpServer::ApiUpdateDrone(const std::string& id, const boost
         if (body.contains("model"))     rec.model     = std::string(body.at("model").as_string());
         if (body.contains("video_url")) rec.video_url = std::string(body.at("video_url").as_string());
         SaveDrones();
-        return boost::json::object{{"id", rec.id}, {"name", rec.name}};
+        return boost::json::object{{"id", rec.id}, {"updated", true}};
     }
     throw ApiError(404, "drone not found: " + id);
 }
@@ -316,20 +371,23 @@ boost::json::value HttpServer::ApiDeleteDrone(const std::string& id) {
         drone_mgr_.RemoveDrone(drone_id_from_string(id));
         drone_records_.erase(it);
         SaveDrones();
-        return boost::json::object{{"deleted", id}};
+        return boost::json::object{{"id", id}, {"deleted", true}};
     }
     throw ApiError(404, "drone not found: " + id);
 }
 
 boost::json::value HttpServer::ApiGetAnchor(const std::string& id) {
     int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id))
+        throw ApiError(404, "drone not found: " + id);
     auto anchor = drone_mgr_.GetAnchor(drone_id);
+    if (!anchor.valid)
+        throw ApiError(425, "drone not yet powered on");
     return boost::json::object{
         {"drone_id",  id},
         {"gps_lat",   anchor.latitude},
         {"gps_lon",   anchor.longitude},
         {"gps_alt",   anchor.altitude},
-        {"valid",     anchor.valid},
     };
 }
 
@@ -343,20 +401,33 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
             if (!p.is_object()) continue;
             const auto& po = p.as_object();
             AssemblyConfig::Path path;
-            path.path_id    = po.contains("path_id")    ? static_cast<int>(po.at("path_id").as_int64()) : 0;
-            path.drone_id   = po.contains("drone_id")   ? std::string(po.at("drone_id").as_string())    : "";
-            path.closed_loop = po.contains("closed_loop") && po.at("closed_loop").as_bool();
+            // support both camelCase (API doc) and snake_case
+            if (po.contains("pathId"))   path.path_id = static_cast<int>(po.at("pathId").as_int64());
+            else if (po.contains("path_id")) path.path_id = static_cast<int>(po.at("path_id").as_int64());
+            path.drone_id = po.contains("drone_id") ? std::string(po.at("drone_id").as_string()) : "";
+            if (po.contains("bClosedLoop"))  path.closed_loop = po.at("bClosedLoop").as_bool();
+            else if (po.contains("closed_loop")) path.closed_loop = po.at("closed_loop").as_bool();
 
             if (po.contains("waypoints") && po.at("waypoints").is_array()) {
                 for (const auto& w : po.at("waypoints").as_array()) {
                     if (!w.is_object()) continue;
                     const auto& wo = w.as_object();
                     AssemblyConfig::Path::Waypoint wp;
-                    wp.x = wo.contains("x") ? wo.at("x").as_double() : 0.0;
-                    wp.y = wo.contains("y") ? wo.at("y").as_double() : 0.0;
-                    wp.z = wo.contains("z") ? wo.at("z").as_double() : 0.0;
-                    wp.segment_speed = wo.contains("segment_speed") ? static_cast<float>(wo.at("segment_speed").as_double()) : 0.0f;
-                    wp.wait_time     = wo.contains("wait_time")     ? static_cast<float>(wo.at("wait_time").as_double())     : 0.0f;
+                    // location.{x,y,z} (API doc) or flat x/y/z (legacy)
+                    if (wo.contains("location") && wo.at("location").is_object()) {
+                        const auto& loc = wo.at("location").as_object();
+                        wp.x = loc.contains("x") ? json_number_to_double(loc.at("x"), "location.x") : 0.0;
+                        wp.y = loc.contains("y") ? json_number_to_double(loc.at("y"), "location.y") : 0.0;
+                        wp.z = loc.contains("z") ? json_number_to_double(loc.at("z"), "location.z") : 0.0;
+                    } else {
+                        wp.x = wo.contains("x") ? json_number_to_double(wo.at("x"), "x") : 0.0;
+                        wp.y = wo.contains("y") ? json_number_to_double(wo.at("y"), "y") : 0.0;
+                        wp.z = wo.contains("z") ? json_number_to_double(wo.at("z"), "z") : 0.0;
+                    }
+                    if (wo.contains("segmentSpeed"))      wp.segment_speed = static_cast<float>(json_number_to_double(wo.at("segmentSpeed"), "segmentSpeed"));
+                    else if (wo.contains("segment_speed")) wp.segment_speed = static_cast<float>(json_number_to_double(wo.at("segment_speed"), "segment_speed"));
+                    if (wo.contains("waitTime"))      wp.wait_time = static_cast<float>(json_number_to_double(wo.at("waitTime"), "waitTime"));
+                    else if (wo.contains("wait_time")) wp.wait_time = static_cast<float>(json_number_to_double(wo.at("wait_time"), "wait_time"));
                     path.waypoints.push_back(wp);
                 }
             }
@@ -391,7 +462,30 @@ boost::json::value HttpServer::DebugDroneState(const std::string& id) {
 }
 
 boost::json::value HttpServer::DebugDroneQueue(const std::string& id) {
-    return boost::json::object{{"id", id}, {"queue_size", 0}};
+    int drone_id = drone_id_from_string(id);
+    size_t queue_size = 0;
+    bool paused = false;
+    DroneControlPacket next_cmd{};
+    if (!drone_mgr_.GetQueueDebugInfo(drone_id, queue_size, paused, &next_cmd))
+        throw ApiError(404, "drone not found: " + id);
+
+    boost::json::object result{
+        {"id", id},
+        {"queue_size", static_cast<std::uint64_t>(queue_size)},
+        {"paused", paused},
+    };
+
+    if (queue_size > 0) {
+        result["next_command"] = boost::json::object{
+            {"timestamp", next_cmd.timestamp},
+            {"x", next_cmd.x},
+            {"y", next_cmd.y},
+            {"z", next_cmd.z},
+            {"mode", next_cmd.mode},
+        };
+    }
+
+    return result;
 }
 
 boost::json::value HttpServer::DebugHeartbeat(const std::string& id) {
@@ -400,26 +494,82 @@ boost::json::value HttpServer::DebugHeartbeat(const std::string& id) {
 
 boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const boost::json::object& body) {
     int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id))
+        throw ApiError(404, "drone not found: " + id);
     TelemetryData tel{};
+    tel.battery = -1;
+    tel.quaternion[0] = 1.0;
+
+    auto read_vec3 = [](const boost::json::object& obj,
+                        const char* key,
+                        double out[3]) {
+        if (!obj.contains(key) || !obj.at(key).is_array()) return;
+        const auto& arr = obj.at(key).as_array();
+        if (arr.size() >= 3) {
+            out[0] = json_number_to_double(arr[0], key);
+            out[1] = json_number_to_double(arr[1], key);
+            out[2] = json_number_to_double(arr[2], key);
+        }
+    };
+
     if (body.contains("position") && body.at("position").is_array()) {
         const auto& pos = body.at("position").as_array();
         if (pos.size() >= 3) {
-            tel.position_ned[0] = pos[0].as_double();
-            tel.position_ned[1] = pos[1].as_double();
-            tel.position_ned[2] = pos[2].as_double();
+            tel.position_ned[0] = json_number_to_double(pos[0], "position[0]");
+            tel.position_ned[1] = json_number_to_double(pos[1], "position[1]");
+            tel.position_ned[2] = json_number_to_double(pos[2], "position[2]");
         }
     }
-    tel.battery = body.contains("battery") ? static_cast<int>(body.at("battery").as_int64()) : -1;
-    tel.gps_fix = false;
+    if (body.contains("q") && body.at("q").is_array()) {
+        const auto& q = body.at("q").as_array();
+        if (q.size() >= 4) {
+            tel.quaternion[0] = json_number_to_double(q[0], "q[0]");
+            tel.quaternion[1] = json_number_to_double(q[1], "q[1]");
+            tel.quaternion[2] = json_number_to_double(q[2], "q[2]");
+            tel.quaternion[3] = json_number_to_double(q[3], "q[3]");
+        }
+    }
+    read_vec3(body, "velocity", tel.velocity);
+    read_vec3(body, "angular_velocity", tel.angular_velocity);
+    read_vec3(body, "local_position", tel.local_position);
+
+    tel.battery = body.contains("battery") ? json_number_to_int(body.at("battery"), "battery") : -1;
+    if (body.contains("timestamp")) {
+        if (body.at("timestamp").is_int64()) {
+            tel.timestamp = static_cast<uint64_t>(body.at("timestamp").as_int64());
+        } else if (body.at("timestamp").is_uint64()) {
+            tel.timestamp = body.at("timestamp").as_uint64();
+        }
+    }
+    if (body.contains("gps_lat")) tel.gps_lat = json_number_to_double(body.at("gps_lat"), "gps_lat");
+    if (body.contains("gps_lon")) tel.gps_lon = json_number_to_double(body.at("gps_lon"), "gps_lon");
+    if (body.contains("gps_alt")) tel.gps_alt = json_number_to_double(body.at("gps_alt"), "gps_alt");
+    tel.gps_fix = body.contains("gps_fix")
+        ? body.at("gps_fix").as_bool()
+        : (body.contains("gps_lat") && body.contains("gps_lon") && body.contains("gps_alt"));
+    if (body.contains("arming_state")) {
+        tel.arming_state = static_cast<uint8_t>(json_number_to_int(body.at("arming_state"), "arming_state"));
+    }
+    if (body.contains("nav_state")) {
+        tel.nav_state = static_cast<uint8_t>(json_number_to_int(body.at("nav_state"), "nav_state"));
+    }
+
     drone_mgr_.OnTelemetryReceived(drone_id, tel);
+    if (assembly_ctrl_.GetState() == AssemblyState::Assembling) {
+        assembly_ctrl_.UpdateDronePosition(
+            drone_id,
+            tel.position_ned[0],
+            tel.position_ned[1],
+            tel.position_ned[2]);
+    }
     return boost::json::object{{"injected", id}};
 }
 
 boost::json::value HttpServer::DebugMove(const std::string& id, const boost::json::object& body) {
     int drone_id = drone_id_from_string(id);
-    double x = body.contains("x") ? body.at("x").as_double() : 0.0;
-    double y = body.contains("y") ? body.at("y").as_double() : 0.0;
-    double z = body.contains("z") ? body.at("z").as_double() : 0.0;
+    double x = body.contains("x") ? json_number_to_double(body.at("x"), "x") : 0.0;
+    double y = body.contains("y") ? json_number_to_double(body.at("y"), "y") : 0.0;
+    double z = body.contains("z") ? json_number_to_double(body.at("z"), "z") : 0.0;
     if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z))
         throw ApiError(404, "drone not found: " + id);
     return boost::json::object{{"moved", id}, {"x", x}, {"y", y}, {"z", z}};
@@ -458,6 +608,15 @@ boost::json::value HttpServer::DebugArrayState(const std::string& id) {
 // ============================================================
 // WebSocket 命令处理
 // ============================================================
+static int ws_drone_id(const boost::json::object& msg) {
+    if (!msg.contains("drone_id")) return 0;
+    const auto& v = msg.at("drone_id");
+    if (v.is_int64())  return static_cast<int>(v.as_int64());
+    if (v.is_uint64()) return static_cast<int>(v.as_uint64());
+    if (v.is_string()) return drone_id_from_string(std::string(v.as_string()));
+    return 0;
+}
+
 void HttpServer::HandleWsCommand(const boost::json::object& msg,
                                   const std::shared_ptr<WsSession>& session)
 {
@@ -470,11 +629,10 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     std::string type = std::string(msg.at("type").as_string());
 
     if (type == "move") {
-        std::string drone_id_str = msg.contains("drone_id") ? std::string(msg.at("drone_id").as_string()) : "";
-        double x = msg.contains("x") ? msg.at("x").as_double() : 0.0;
-        double y = msg.contains("y") ? msg.at("y").as_double() : 0.0;
-        double z = msg.contains("z") ? msg.at("z").as_double() : 0.0;
-        int drone_id = drone_id_from_string(drone_id_str);
+        int drone_id = ws_drone_id(msg);
+        double x = msg.contains("x") ? json_number_to_double(msg.at("x"), "x") : 0.0;
+        double y = msg.contains("y") ? json_number_to_double(msg.at("y"), "y") : 0.0;
+        double z = msg.contains("z") ? json_number_to_double(msg.at("z"), "z") : 0.0;
         if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z)) {
             ws_manager_.send(session, json_stringify(boost::json::object{
                 {"type", "error"}, {"code", 404}, {"message", "drone not found"}}));
@@ -483,14 +641,28 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     }
 
     if (type == "pause") {
-        std::string drone_id_str = msg.contains("drone_id") ? std::string(msg.at("drone_id").as_string()) : "";
-        drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
+        if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            for (const auto& v : msg.at("drone_ids").as_array()) {
+                int did = v.is_string() ? drone_id_from_string(std::string(v.as_string()))
+                                        : static_cast<int>(v.as_int64());
+                drone_mgr_.ProcessPauseCommand(did);
+            }
+        } else {
+            drone_mgr_.ProcessPauseCommand(ws_drone_id(msg));
+        }
         return;
     }
 
     if (type == "resume") {
-        std::string drone_id_str = msg.contains("drone_id") ? std::string(msg.at("drone_id").as_string()) : "";
-        drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
+        if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            for (const auto& v : msg.at("drone_ids").as_array()) {
+                int did = v.is_string() ? drone_id_from_string(std::string(v.as_string()))
+                                        : static_cast<int>(v.as_int64());
+                drone_mgr_.ProcessResumeCommand(did);
+            }
+        } else {
+            drone_mgr_.ProcessResumeCommand(ws_drone_id(msg));
+        }
         return;
     }
 
@@ -595,11 +767,24 @@ void HttpServer::RunHttpServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.http_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[HTTP] Listening on 0.0.0.0:{}", config_.http_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec == net::error::would_block || ec == net::error::try_again) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+        if (ec) {
+            if (running_) {
+                spdlog::warn("[HTTP] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            continue;
+        }
         std::thread(HandleHttpConnection, std::move(socket), this).detach();
     }
 }
@@ -609,11 +794,24 @@ void HttpServer::RunWsServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.ws_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[WS] Listening on 0.0.0.0:{}", config_.ws_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec == net::error::would_block || ec == net::error::try_again) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+        if (ec) {
+            if (running_) {
+                spdlog::warn("[WS] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            continue;
+        }
         std::thread(HandleWsConnection, std::move(socket), this).detach();
     }
 }
@@ -669,7 +867,18 @@ void HttpServer::LoadDrones() {
             if (rec.id.empty()) continue;
 
             int drone_id = drone_id_from_string(rec.id);
-            drone_mgr_.AddDrone(drone_id, rec.slot, rec.name);
+            int send_port = 0;
+            auto mapping_it = config_.port_map.find(rec.slot);
+            if (mapping_it != config_.port_map.end()) {
+                send_port = mapping_it->second.send_port;
+            }
+
+            drone_mgr_.AddDrone(
+                drone_id,
+                rec.slot,
+                rec.name,
+                config_.jetson_host,
+                send_port);
             drone_records_.push_back(rec);
 
             // 更新序号

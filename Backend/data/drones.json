@@ -1,0 +1,11 @@
+[
+  {
+    "id": "d1",
+    "ip": "127.0.0.1",
+    "model": "PX4-SITL",
+    "name": "ps-test-1",
+    "port": 8889,
+    "slot": 1,
+    "video_url": ""
+  }
+]

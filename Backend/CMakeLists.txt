@@ -3,11 +3,20 @@ project(DroneBackend VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+enable_testing()
+
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
+if(WIN32)
+    add_compile_definitions(_WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN)
+endif()
 
 # ============================================================
 # Find packages (installed via vcpkg)
 # ============================================================
-find_package(Boost REQUIRED COMPONENTS system json beast)
+find_package(Boost CONFIG REQUIRED COMPONENTS system json beast)
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
@@ -59,7 +68,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Boost::system
     Boost::json
     Boost::beast
-    yaml-cpp
+    yaml-cpp::yaml-cpp
     nlohmann_json::nlohmann_json
     spdlog::spdlog
 )
@@ -78,6 +87,11 @@ set(TEST_SOURCES
     tests/test_gps_anchor_manager.cpp
     tests/test_command_queue.cpp
     tests/test_state_machine.cpp
+    conversion/coordinate_converter.cpp
+    conversion/quaternion_utils.cpp
+    conversion/gps_anchor_manager.cpp
+    drone/command_queue.cpp
+    drone/state_machine.cpp
 )
 
 add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES} ${HEADERS})
@@ -85,12 +99,14 @@ add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES} ${HEADERS})
 target_include_directories(${PROJECT_NAME}_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(${PROJECT_NAME}_tests PRIVATE
-    yaml-cpp
+    yaml-cpp::yaml-cpp
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     GTest::gtest_main
     GTest::gmock
 )
+
+add_test(NAME ${PROJECT_NAME}_tests COMMAND ${PROJECT_NAME}_tests)
 
 # ============================================================
 # Copy config.yaml to build directory

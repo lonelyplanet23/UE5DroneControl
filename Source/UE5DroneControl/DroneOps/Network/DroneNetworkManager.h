@@ -30,9 +30,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")
 	FString BackendBaseUrl = TEXT("http://127.0.0.1:8080");
 
-	/** WebSocket URL, e.g. "ws://127.0.0.1:8081/ws" */
+	/** WebSocket URL, e.g. "ws://127.0.0.1:8081/" */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")
-	FString WebSocketUrl = TEXT("ws://127.0.0.1:8081/ws");
+	FString WebSocketUrl = TEXT("ws://127.0.0.1:8081/");
 
 	/** How often (seconds) to poll GET /api/drones */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")

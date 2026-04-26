@@ -104,6 +104,12 @@ int main(int argc, char* argv[])
         if (assembly_ctrl.CheckTimeout()) {
             auto p = assembly_ctrl.GetProgress();
             spdlog::warn("[Main] Assembly timeout! {}/{}", p.ready_count, p.total_count);
+            ws_manager.broadcast(json_stringify(boost::json::object{
+                {"type", "assembly_timeout"},
+                {"array_id", p.array_id},
+                {"ready_count", p.ready_count},
+                {"total_count", p.total_count},
+            }));
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(1));

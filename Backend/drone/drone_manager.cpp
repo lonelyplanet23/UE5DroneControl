@@ -38,7 +38,11 @@ void DroneManager::SetAssemblyCallback(AssemblyCallback cb)
 // ========================================================
 // 无人机管理
 // ========================================================
-bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name)
+bool DroneManager::AddDrone(int drone_id,
+                            int slot,
+                            const std::string& name,
+                            const std::string& jetson_ip,
+                            int send_port)
 {
     if (drones_.find(drone_id) != drones_.end()) {
         spdlog::warn("Drone {} already exists", drone_id);
@@ -46,6 +50,12 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name)
     }
 
     auto ctx = std::make_unique<DroneContext>(drone_id, slot, name);
+    if (!jetson_ip.empty()) {
+        ctx->jetson_ip = jetson_ip;
+    }
+    if (send_port > 0) {
+        ctx->send_port = send_port;
+    }
 
     // 状态变更回调 → 起停心跳 + WS 推送
     // 注意：start_heartbeat/stop_hbard 通过 hb_manager 执行
@@ -170,14 +180,15 @@ void DroneManager::OnTelemetryReceived(int drone_id, const TelemetryData& data)
     hb_manager_.UpdateLastPosition(drone_id,
         data.position_ned[0], data.position_ned[1], data.position_ned[2]);
 
-    // 3. 状态机推进（可能触发 PowerOn / Reconnect / LostConnection）
-    ctx->state_machine->OnTelemetryReceived();
-
-    // 4. 如果 GPS 有效，记录锚点（事件推送由 StateMachine 回调统一处理）
+    // 3. 如果 GPS 有效，先记录锚点，再推进状态机。
+    // 这样首包 power_on / reconnect 事件才能带上最新 anchor。
     if (data.gps_fix) {
         anchor_manager_.SetAnchor(
             drone_id, data.gps_lat, data.gps_lon, data.gps_alt);
     }
+
+    // 4. 状态机推进（可能触发 PowerOn / Reconnect / LostConnection）
+    ctx->state_machine->OnTelemetryReceived();
 
     // 5. 低电量告警
     if (data.battery >= 0 && data.battery <= 20 && alert_cb_) {
@@ -281,6 +292,37 @@ TelemetryData DroneManager::GetLatestTelemetry(int drone_id) const
 GpsAnchor DroneManager::GetAnchor(int drone_id) const
 {
     return anchor_manager_.GetAnchor(drone_id);
+}
+
+bool DroneManager::HasDrone(int drone_id) const
+{
+    return drones_.find(drone_id) != drones_.end();
+}
+
+bool DroneManager::GetQueueDebugInfo(int drone_id,
+                                     size_t& queue_size,
+                                     bool& paused,
+                                     DroneControlPacket* next_cmd) const
+{
+    auto it = drones_.find(drone_id);
+    if (it == drones_.end() || !it->second || !it->second->command_queue) {
+        return false;
+    }
+
+    const auto& queue = it->second->command_queue;
+    queue_size = queue->Size();
+    paused = queue->IsPaused();
+
+    if (next_cmd) {
+        DroneControlPacket peeked{};
+        if (queue->Peek(peeked)) {
+            *next_cmd = peeked;
+        } else {
+            *next_cmd = DroneControlPacket{};
+        }
+    }
+
+    return true;
 }
 
 // ========================================================

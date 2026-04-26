@@ -18,7 +18,7 @@ void UdpSender::SetTarget(int drone_id, const std::string& host, int port)
     target->host = host;
     target->port = port;
     target->endpoint = boost::asio::ip::udp::endpoint(
-        boost::asio::ip::address::from_string(host), port);
+        boost::asio::ip::make_address(host), port);
     target->initialized = true;
 
     targets_[drone_id] = std::move(target);
