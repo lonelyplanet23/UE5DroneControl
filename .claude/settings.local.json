@@ -15,11 +15,20 @@
       "Bash(tasklist /FI \"PID eq 24664\")",
       "Bash(tasklist)",
       "Bash(grep -v \"//.*8080\\\\|//.*8081\")",
-      "Bash(sort -k6,7)"
+      "Bash(sort -k6,7)",
+      "Bash(cp -r d:/RedAlert/UE5DroneControl/Source/DroneEdit/PathEditor d:/RedAlert/UE5DroneControl/Source/UE5DroneControl/PathEditor)",
+      "Bash(cp -r d:/RedAlert/UE5DroneControl/Source/DroneEdit/RuntimeInteraction d:/RedAlert/UE5DroneControl/Source/UE5DroneControl/RuntimeInteraction)",
+      "Bash(cp -r d:/RedAlert/UE5DroneControl/Source/DroneEdit/TaskSystem d:/RedAlert/UE5DroneControl/Source/UE5DroneControl/TaskSystem)",
+      "Bash(xargs sed:*)",
+      "Bash(wmic computersystem:*)",
+      "Bash(wmic pagefile:*)",
+      "Bash(systeminfo)",
+      "Bash(powershell -command \"Get-WmiObject Win32_PageFileUsage | Select-Object Name, AllocatedBaseSize, CurrentUsage, PeakUsage\")",
+      "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Source/Runtime/Core/Public/**)"
     ],
     "additionalDirectories": [
-      "\\tmp"
+      "\\tmp",
+      "C:\\Users\\VENTSDENYE5\\AppData\\Roaming\\Unreal Engine\\UnrealBuildTool"
     ]
   }
 }
-
