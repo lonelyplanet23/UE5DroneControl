@@ -49,12 +49,27 @@ public:
 	void SendMoveCommand(int32 DroneId, const FVector& TargetWorldLocation);
 
 	/**
-	 * Send pause or resume command for the given drone.
-	 * @param DroneId  Target drone id
-	 * @param bPause   true = pause, false = resume
+	 * Send pause or resume command for the selected drones.
+	 * @param DroneIds  Target drone ids
+	 * @param bPause    true = pause, false = resume
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
-	void SendPauseCommand(int32 DroneId, bool bPause);
+	void SendPauseCommand(const TArray<int32>& DroneIds, bool bPause);
+
+	// ---- Events ----
+
+	// Fired when a WebSocket "event" message arrives (power_on / reconnect / lost_connection).
+	// GpsLat/GpsLon/GpsAlt are only valid for power_on and reconnect.
+	DECLARE_MULTICAST_DELEGATE_FiveParams(FOnDroneWsEvent,
+		int32 /*DroneId*/, const FString& /*Event*/,
+		double /*GpsLat*/, double /*GpsLon*/, double /*GpsAlt*/);
+	FOnDroneWsEvent OnDroneWsEvent;
+
+	// Fired when a WebSocket "alert" message arrives (low_battery / lost_connection).
+	// Value is battery % for low_battery, 0 otherwise.
+	DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnDroneWsAlert,
+		int32 /*DroneId*/, const FString& /*Alert*/, int32 /*Value*/);
+	FOnDroneWsAlert OnDroneWsAlert;
 
 	// ---- Accessors ----
 

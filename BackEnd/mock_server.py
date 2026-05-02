@@ -76,11 +76,53 @@ def get_anchor(drone_id):
     print(f"[HTTP] GET /api/drones/{drone_id}/anchor")
     return jsonify({"drone_id": drone_id, "lat": 39.9, "lon": 116.3, "alt": 50.0})
 
+# ---- Test injection endpoints ----
+
+@app.route("/test/event", methods=["POST"])
+def test_event():
+    """Inject a WS event message. Body: {"drone_id":1,"event":"power_on","gps_lat":39.9,"gps_lon":116.3,"gps_alt":50}"""
+    data = request.get_json(force=True) or {}
+    msg = json.dumps({
+        "type": "event",
+        "drone_id": data.get("drone_id", 1),
+        "event": data.get("event", "power_on"),
+        "gps_lat": data.get("gps_lat", 39.9),
+        "gps_lon": data.get("gps_lon", 116.3),
+        "gps_alt": data.get("gps_alt", 50.0),
+    })
+    asyncio.run_coroutine_threadsafe(_broadcast(msg), _ws_loop)
+    print(f"[HTTP] POST /test/event -> {msg}")
+    return jsonify({"ok": True})
+
+@app.route("/test/alert", methods=["POST"])
+def test_alert():
+    """Inject a WS alert message. Body: {"drone_id":1,"alert":"low_battery","value":15}"""
+    data = request.get_json(force=True) or {}
+    msg = json.dumps({
+        "type": "alert",
+        "drone_id": data.get("drone_id", 1),
+        "alert": data.get("alert", "low_battery"),
+        "value": data.get("value", 15),
+    })
+    asyncio.run_coroutine_threadsafe(_broadcast(msg), _ws_loop)
+    print(f"[HTTP] POST /test/alert -> {msg}")
+    return jsonify({"ok": True})
+
 def run_http():
     app.run(host="127.0.0.1", port=8080, use_reloader=False)
 
 # ---- WebSocket server (websockets, port 8081) ----
 ws_clients = set()
+_ws_loop: asyncio.AbstractEventLoop | None = None
+
+async def _broadcast(msg: str):
+    dead = set()
+    for ws in ws_clients:
+        try:
+            await ws.send(msg)
+        except Exception:
+            dead.add(ws)
+    ws_clients.difference_update(dead)
 
 async def ws_handler(websocket):
     print("[WS] Client connected")
@@ -94,7 +136,7 @@ async def ws_handler(websocket):
                     print(f"[WS] MOVE  drone_id={data.get('drone_id')}  "
                           f"x={data.get('x'):.1f}  y={data.get('y'):.1f}  z={data.get('z'):.1f}")
                 elif msg_type in ("pause", "resume"):
-                    print(f"[WS] {msg_type.upper()}  drone_id={data.get('drone_id')}")
+                    print(f"[WS] {msg_type.upper()}  drone_ids={data.get('drone_ids')}")
                 else:
                     print(f"[WS] Received ({msg_type}): {msg}")
             except json.JSONDecodeError:
@@ -119,24 +161,20 @@ async def telemetry_push():
             msg = json.dumps({
                 "type": "telemetry",
                 "drone_id": did,
-                "data": {
-                    "x": round(radius * math.cos(t * 0.3 + did), 2),
-                    "y": round(radius * math.sin(t * 0.3 + did), 2),
-                    "z": round(500.0 + 100.0 * math.sin(t * 0.5), 2),
-                    "pitch": 0.0,
-                    "yaw": round(math.degrees(t * 0.3 + did) % 360, 1),
-                    "roll": 0.0,
-                }
+                "x": round(radius * math.cos(t * 0.3 + did), 2),
+                "y": round(radius * math.sin(t * 0.3 + did), 2),
+                "z": round(500.0 + 100.0 * math.sin(t * 0.5), 2),
+                "pitch": 0.0,
+                "yaw": round(math.degrees(t * 0.3 + did) % 360, 1),
+                "roll": 0.0,
+                "speed": round(radius * 0.3, 1),
+                "battery": 85,
             })
-            dead = set()
-            for ws in ws_clients:
-                try:
-                    await ws.send(msg)
-                except Exception:
-                    dead.add(ws)
-            ws_clients -= dead
+            await _broadcast(msg)
 
 async def run_ws():
+    global _ws_loop
+    _ws_loop = asyncio.get_running_loop()
     import websockets
     async with websockets.serve(ws_handler, "127.0.0.1", 8081):
         print("[WS] WebSocket server on ws://127.0.0.1:8081/ws")

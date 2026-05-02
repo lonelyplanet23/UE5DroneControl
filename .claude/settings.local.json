@@ -11,7 +11,10 @@
       "Bash(tasklist /FI \"PID eq 24664\")",
       "Bash(tasklist)",
       "Bash(grep -v \"//.*8080\\\\|//.*8081\")",
-      "Bash(sort -k6,7)"
+      "Bash(sort -k6,7)",
+      "Bash(\"/c/Program Files/Epic Games/UE_5.5/Engine/Build/BatchFiles/Build.bat\" UE5DroneControlEditor Win64 Development \"e:/code/UE5DroneControl/UE5DroneControl.uproject\" -NoHotReload)",
+      "Read(//c/Program Files/**)",
+      "Bash(reg query *)"
     ]
   }
 }

@@ -38,6 +38,8 @@ protected:
 	void OnShowInfo();
 	void OnFreeCamToggle();
 	void OnPauseToggle();
+	void OnShiftPressed()  { bShiftHeld = true; }
+	void OnShiftReleased() { bShiftHeld = false; }
 
 	// Click handling
 	void HandleMapClick(const FVector& WorldLocation);
@@ -123,6 +125,9 @@ private:
 
 	/** Tracks which drones are currently paused (toggled by P key) */
 	TSet<int32> PausedDroneIds;
+
+	/** Whether Shift is held — used for multi-select on click */
+	bool bShiftHeld = false;
 
 	/** Open drone info panel for given DroneId (C++ implementation) */
 	void OpenDroneInfoPanel(int32 DroneId);
