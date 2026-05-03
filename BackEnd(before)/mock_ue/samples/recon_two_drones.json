@@ -1,0 +1,40 @@
+{
+  "array_id": "mock-recon-2",
+  "mode": "recon",
+  "paths": [
+    {
+      "pathId": 1,
+      "drone_id": "d1",
+      "bClosedLoop": false,
+      "waypoints": [
+        {
+          "location": { "x": 0, "y": 0, "z": 0 },
+          "segmentSpeed": 0,
+          "waitTime": 0
+        },
+        {
+          "location": { "x": 200, "y": 0, "z": 100 },
+          "segmentSpeed": 1,
+          "waitTime": 0
+        }
+      ]
+    },
+    {
+      "pathId": 2,
+      "drone_id": "d2",
+      "bClosedLoop": false,
+      "waypoints": [
+        {
+          "location": { "x": 100, "y": 0, "z": 0 },
+          "segmentSpeed": 0,
+          "waitTime": 0
+        },
+        {
+          "location": { "x": 300, "y": 0, "z": 100 },
+          "segmentSpeed": 1,
+          "waitTime": 0
+        }
+      ]
+    }
+  ]
+}

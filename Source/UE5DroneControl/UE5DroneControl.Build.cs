@@ -7,6 +7,7 @@ public class UE5DroneControl : ModuleRules
 	public UE5DroneControl(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		bUseUnity = false;
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",
@@ -45,7 +46,10 @@ public class UE5DroneControl : ModuleRules
 			"UE5DroneControl/DroneOps/Control",
 			"UE5DroneControl/DroneOps/Drone",
 			"UE5DroneControl/DroneOps/Interfaces",
-			"UE5DroneControl/DroneOps/Network"
+			"UE5DroneControl/DroneOps/Network",
+			"UE5DroneControl/PathEditor",
+			"UE5DroneControl/RuntimeInteraction",
+			"UE5DroneControl/TaskSystem"
 		});
 
 		// Uncomment if you are using Slate UI

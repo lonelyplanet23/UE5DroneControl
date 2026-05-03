@@ -191,6 +191,8 @@ void ADroneOpsPlayerController::SetupInputComponent()
 		InputComponent->BindKey(EKeys::MiddleMouseButton, IE_Pressed, this, &ADroneOpsPlayerController::OnShowInfo);
 		InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ADroneOpsPlayerController::OnFreeCamToggle);
 		InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ADroneOpsPlayerController::OnPauseToggle);
+		InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &ADroneOpsPlayerController::OnSwitchToTopDown);
+		InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ADroneOpsPlayerController::OnSwitchToRealTimeDrone);
 		InputComponent->BindKey(EKeys::LeftShift, IE_Pressed, this, &ADroneOpsPlayerController::OnShiftPressed);
 		InputComponent->BindKey(EKeys::LeftShift, IE_Released, this, &ADroneOpsPlayerController::OnShiftReleased);
 		InputComponent->BindKey(EKeys::RightShift, IE_Pressed, this, &ADroneOpsPlayerController::OnShiftPressed);
@@ -458,7 +460,16 @@ void ADroneOpsPlayerController::OnFreeCamToggle()
 		bShowMouseCursor = true;
 		SetInputMode(FInputModeGameAndUI());
 
-		ApplyFollowViewTarget(CameraModeState.FollowDroneId);
+		// 优先跟随已选无人机，找不到时 fallback 到 RealTimeDrone
+		AActor* FollowTarget = ResolveFollowViewTargetByDroneId(CameraModeState.FollowDroneId);
+		if (!IsValid(FollowTarget) && IsValid(CachedRealTimeDrone))
+		{
+			FollowTarget = CachedRealTimeDrone;
+		}
+		if (IsValid(FollowTarget))
+		{
+			SetViewTargetWithBlend(FollowTarget, 0.35f);
+		}
 
 		UE_LOG(LogTemp, Log, TEXT("FR-04: Switched back to Follow Camera (DroneId=%d)"), CameraModeState.FollowDroneId);
 	}
@@ -856,4 +867,56 @@ void ADroneOpsPlayerController::OnPauseToggle()
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
 			FString::Printf(TEXT("无人机 %d %s"), SelectedDroneId, *StatusText));
 	}
+}
+
+void ADroneOpsPlayerController::OnSwitchToTopDown()
+{
+	TArray<AMultiDroneCharacter*> Actors;
+	for (TActorIterator<AMultiDroneCharacter> It(GetWorld()); It; ++It)
+	{
+		Actors.Add(*It);
+	}
+
+	if (Actors.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("OnSwitchToTopDown: No AMultiDroneCharacter found in level"));
+		return;
+	}
+
+	MultiDroneCharacterIndex = MultiDroneCharacterIndex % Actors.Num();
+	AMultiDroneCharacter* Target = Actors[MultiDroneCharacterIndex];
+	MultiDroneCharacterIndex = (MultiDroneCharacterIndex + 1) % Actors.Num();
+
+	CameraModeState.CameraMode = EDroneCameraMode::Follow;
+	bShowMouseCursor = true;
+	SetInputMode(FInputModeGameAndUI());
+	SetViewTargetWithBlend(Target, 0.35f);
+	UE_LOG(LogTemp, Log, TEXT("Camera switched to MultiDroneCharacter[%d]: %s (key 0)"),
+		MultiDroneCharacterIndex - 1, *Target->GetName());
+}
+
+void ADroneOpsPlayerController::OnSwitchToRealTimeDrone()
+{
+	TArray<ARealTimeDroneReceiver*> Actors;
+	for (TActorIterator<ARealTimeDroneReceiver> It(GetWorld()); It; ++It)
+	{
+		Actors.Add(*It);
+	}
+
+	if (Actors.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("OnSwitchToRealTimeDrone: No ARealTimeDroneReceiver found in level"));
+		return;
+	}
+
+	RealTimeDroneIndex = RealTimeDroneIndex % Actors.Num();
+	ARealTimeDroneReceiver* Target = Actors[RealTimeDroneIndex];
+	RealTimeDroneIndex = (RealTimeDroneIndex + 1) % Actors.Num();
+
+	CameraModeState.CameraMode = EDroneCameraMode::Follow;
+	bShowMouseCursor = true;
+	SetInputMode(FInputModeGameAndUI());
+	SetViewTargetWithBlend(Target, 0.35f);
+	UE_LOG(LogTemp, Log, TEXT("Camera switched to RealTimeDroneReceiver[%d]: %s (key 1)"),
+		RealTimeDroneIndex - 1, *Target->GetName());
 }

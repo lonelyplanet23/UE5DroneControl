@@ -38,6 +38,8 @@ protected:
 	void OnShowInfo();
 	void OnFreeCamToggle();
 	void OnPauseToggle();
+	void OnSwitchToTopDown();
+	void OnSwitchToRealTimeDrone();
 	void OnShiftPressed()  { bShiftHeld = true; }
 	void OnShiftReleased() { bShiftHeld = false; }
 
@@ -128,6 +130,16 @@ private:
 
 	/** Whether Shift is held — used for multi-select on click */
 	bool bShiftHeld = false;
+
+	/** Current index for cycling through AMultiDroneCharacter actors (key 0) */
+	int32 MultiDroneCharacterIndex = 0;
+
+	/** Current index for cycling through ARealTimeDroneReceiver actors (key 1) */
+	int32 RealTimeDroneIndex = 0;
+
+	/** Cached RealTimeDroneReceiver for 1-key camera switch */
+	UPROPERTY()
+	TObjectPtr<AActor> CachedRealTimeDrone = nullptr;
 
 	/** Open drone info panel for given DroneId (C++ implementation) */
 	void OpenDroneInfoPanel(int32 DroneId);

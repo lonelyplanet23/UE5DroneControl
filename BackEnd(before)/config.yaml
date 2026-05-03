@@ -1,0 +1,41 @@
+server:
+  http_port: 8080
+  ws_port: 8081
+  debug: true
+
+drone:
+  max_count: 6
+  heartbeat_hz: 2
+  lost_timeout_sec: 10
+  arrival_threshold_m: 1.0
+  assembly_timeout_sec: 60
+  avoidance_radius_m: 3.0
+  avoidance_lookahead_sec: 2.0
+  low_battery_threshold: 20
+
+port_map:
+  1:
+    send_port: 8889
+    recv_port: 8888
+  2:
+    send_port: 8891
+    recv_port: 8890
+  3:
+    send_port: 8893
+    recv_port: 8892
+  4:
+    send_port: 8895
+    recv_port: 8894
+  5:
+    send_port: 8897
+    recv_port: 8896
+  6:
+    send_port: 8899
+    recv_port: 8898
+
+storage:
+  path: "./data/drones.json"
+
+log:
+  level: "info"
+  file: "./logs/backend.log"
