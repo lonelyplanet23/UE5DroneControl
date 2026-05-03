@@ -50,4 +50,15 @@ private:
 	bool CanInteractWithWaypoint(const ADroneWaypointActor* WaypointActor) const;
 	void ClearSelectedWaypoint();
 	void SetActiveAxis(EGizmoAxis NewActiveAxis);
+
+	UPROPERTY()
+	TObjectPtr<ADroneWaypointActor> SelectedWaypoint = nullptr;
+
+	EGizmoAxis ActiveAxis = EGizmoAxis::None;
+
+	bool bIsDraggingWaypoint = false;
+
+	FVector2D LastMouseScreenPosition = FVector2D::ZeroVector;
+
+	float GizmoDragSensitivity = 1.0f;
 };
