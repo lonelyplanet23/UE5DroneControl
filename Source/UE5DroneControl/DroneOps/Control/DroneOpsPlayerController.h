@@ -40,6 +40,8 @@ protected:
 	void OnPauseToggle();
 	void OnSwitchToTopDown();
 	void OnSwitchToRealTimeDrone();
+	void OnShiftPressed()  { bShiftHeld = true; }
+	void OnShiftReleased() { bShiftHeld = false; }
 
 	// Click handling
 	void HandleMapClick(const FVector& WorldLocation);
@@ -125,6 +127,9 @@ private:
 
 	/** Tracks which drones are currently paused (toggled by P key) */
 	TSet<int32> PausedDroneIds;
+
+	/** Whether Shift is held — used for multi-select on click */
+	bool bShiftHeld = false;
 
 	/** Current index for cycling through AMultiDroneCharacter actors (key 0) */
 	int32 MultiDroneCharacterIndex = 0;

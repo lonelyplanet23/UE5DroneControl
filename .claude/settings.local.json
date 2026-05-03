@@ -28,7 +28,11 @@
     ],
     "additionalDirectories": [
       "\\tmp",
-      "C:\\Users\\VENTSDENYE5\\AppData\\Roaming\\Unreal Engine\\UnrealBuildTool"
+      "C:\\Users\\VENTSDENYE5\\AppData\\Roaming\\Unreal Engine\\UnrealBuildTool",
+      "Bash(sort -k6,7)",
+      "Bash(\"/c/Program Files/Epic Games/UE_5.5/Engine/Build/BatchFiles/Build.bat\" UE5DroneControlEditor Win64 Development \"e:/code/UE5DroneControl/UE5DroneControl.uproject\" -NoHotReload)",
+      "Read(//c/Program Files/**)",
+      "Bash(reg query *)"
     ]
   }
 }

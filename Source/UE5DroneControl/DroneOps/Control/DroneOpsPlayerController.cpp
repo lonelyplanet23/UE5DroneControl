@@ -193,6 +193,10 @@ void ADroneOpsPlayerController::SetupInputComponent()
 		InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ADroneOpsPlayerController::OnPauseToggle);
 		InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &ADroneOpsPlayerController::OnSwitchToTopDown);
 		InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ADroneOpsPlayerController::OnSwitchToRealTimeDrone);
+		InputComponent->BindKey(EKeys::LeftShift, IE_Pressed, this, &ADroneOpsPlayerController::OnShiftPressed);
+		InputComponent->BindKey(EKeys::LeftShift, IE_Released, this, &ADroneOpsPlayerController::OnShiftReleased);
+		InputComponent->BindKey(EKeys::RightShift, IE_Pressed, this, &ADroneOpsPlayerController::OnShiftPressed);
+		InputComponent->BindKey(EKeys::RightShift, IE_Released, this, &ADroneOpsPlayerController::OnShiftReleased);
 		UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: Input bindings installed"));
 	}
 	else
@@ -575,7 +579,7 @@ void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
 		return;
 	}
 
-	if (SelectedDroneActor && SelectedDroneActor != ClickedActor)
+	if (SelectedDroneActor && SelectedDroneActor != ClickedActor && !bShiftHeld)
 	{
 		SetDronePrimarySelectedState(SelectedDroneActor.Get(), false);
 	}
@@ -583,8 +587,34 @@ void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
 	SelectedDroneId = ClickedDroneId;
 	SelectedDroneActor = ClickedActor;
 
-	DroneRegistry->SetPrimarySelectedDrone(ClickedDroneId);
-	SetDronePrimarySelectedState(ClickedActor, true);
+	if (bShiftHeld && DroneRegistry)
+	{
+		// Shift+click: toggle this drone in the multi-selection
+		TArray<int32> CurrentMulti = DroneRegistry->GetMultiSelectedDrones();
+		if (CurrentMulti.Contains(ClickedDroneId))
+		{
+			CurrentMulti.Remove(ClickedDroneId);
+			SetDronePrimarySelectedState(ClickedActor, false);
+		}
+		else
+		{
+			CurrentMulti.Add(ClickedDroneId);
+			SetDronePrimarySelectedState(ClickedActor, true);
+		}
+		DroneRegistry->SetMultiSelectedDrones(CurrentMulti);
+
+		// Keep primary on the last clicked drone (or first remaining)
+		if (!CurrentMulti.IsEmpty())
+		{
+			DroneRegistry->SetPrimarySelectedDrone(CurrentMulti.Last());
+		}
+	}
+	else
+	{
+		// Normal click: clear multi-selection, select only this drone
+		DroneRegistry->SetPrimarySelectedDrone(ClickedDroneId);
+		SetDronePrimarySelectedState(ClickedActor, true);
+	}
 
 	FDroneDescriptor Desc;
 	FString DisplayName = FString::Printf(TEXT("Drone-%d"), ClickedDroneId);
@@ -815,15 +845,19 @@ void ADroneOpsPlayerController::OnPauseToggle()
 	const bool bCurrentlyPaused = PausedDroneIds.Contains(SelectedDroneId);
 	const bool bNewPaused = !bCurrentlyPaused;
 
-	NetworkManager->SendPauseCommand(SelectedDroneId, bNewPaused);
-
-	if (bNewPaused)
+	// Collect all multi-selected drones; fall back to primary if none
+	TArray<int32> TargetIds = DroneRegistry ? DroneRegistry->GetMultiSelectedDrones() : TArray<int32>();
+	if (TargetIds.IsEmpty())
 	{
-		PausedDroneIds.Add(SelectedDroneId);
+		TargetIds.Add(SelectedDroneId);
 	}
-	else
+
+	NetworkManager->SendPauseCommand(TargetIds, bNewPaused);
+
+	for (int32 Id : TargetIds)
 	{
-		PausedDroneIds.Remove(SelectedDroneId);
+		if (bNewPaused) PausedDroneIds.Add(Id);
+		else            PausedDroneIds.Remove(Id);
 	}
 
 	const FString StatusText = bNewPaused ? TEXT("已暂停") : TEXT("已恢复");

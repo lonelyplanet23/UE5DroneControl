@@ -202,7 +202,8 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		return;
 	}
 
-	// Telemetry push: { "type": "telemetry", "drone_id": N, "data": {...} }
+	// Telemetry push (flat): { "type": "telemetry", "drone_id": N, "x":..., "y":..., "z":...,
+	//                          "yaw":..., "pitch":..., "roll":..., "speed":..., "battery":... }
 	if (MsgType == TEXT("telemetry"))
 	{
 		UDroneRegistrySubsystem* Registry = GetGameInstance()
@@ -217,33 +218,75 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		int32 DroneId = 0;
 		Root->TryGetNumberField(TEXT("drone_id"), DroneId);
 
-		const TSharedPtr<FJsonObject>* DataObj;
-		if (!Root->TryGetObjectField(TEXT("data"), DataObj))
-		{
-			return;
-		}
-
 		FDroneTelemetrySnapshot Snap;
 		Snap.DroneId = DroneId;
 
-		// Position (UE world coords, cm)
 		double X = 0, Y = 0, Z = 0;
-		(*DataObj)->TryGetNumberField(TEXT("x"), X);
-		(*DataObj)->TryGetNumberField(TEXT("y"), Y);
-		(*DataObj)->TryGetNumberField(TEXT("z"), Z);
+		Root->TryGetNumberField(TEXT("x"), X);
+		Root->TryGetNumberField(TEXT("y"), Y);
+		Root->TryGetNumberField(TEXT("z"), Z);
 		Snap.WorldLocation = FVector(X, Y, Z);
 
-		// Attitude (degrees)
 		double Pitch = 0, Yaw = 0, Roll = 0;
-		(*DataObj)->TryGetNumberField(TEXT("pitch"), Pitch);
-		(*DataObj)->TryGetNumberField(TEXT("yaw"), Yaw);
-		(*DataObj)->TryGetNumberField(TEXT("roll"), Roll);
+		Root->TryGetNumberField(TEXT("pitch"), Pitch);
+		Root->TryGetNumberField(TEXT("yaw"), Yaw);
+		Root->TryGetNumberField(TEXT("roll"), Roll);
 		Snap.Attitude = FRotator(Pitch, Yaw, Roll);
+
+		double Speed = 0;
+		Root->TryGetNumberField(TEXT("speed"), Speed);
+		Snap.Velocity = FVector(Speed, 0, 0); // scalar speed stored in X component
+
+		int32 Battery = -1;
+		Root->TryGetNumberField(TEXT("battery"), Battery);
+		// Battery stored in GeographicLocation.Z as a convenient spare float field
+		Snap.GeographicLocation.Z = static_cast<double>(Battery);
 
 		Snap.LastUpdateTime = FPlatformTime::Seconds();
 		Snap.Availability = EDroneAvailability::Online;
 
 		Registry->UpdateTelemetry(DroneId, Snap);
+		return;
+	}
+
+	// State event: { "type": "event", "drone_id": N, "event": "...", "gps_lat":..., ... }
+	if (MsgType == TEXT("event"))
+	{
+		int32 DroneId = 0;
+		Root->TryGetNumberField(TEXT("drone_id"), DroneId);
+
+		FString Event;
+		Root->TryGetStringField(TEXT("event"), Event);
+
+		double GpsLat = 0, GpsLon = 0, GpsAlt = 0;
+		Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
+		Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
+		Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Event drone=%d type=%s lat=%.6f lon=%.6f alt=%.1f"),
+			DroneId, *Event, GpsLat, GpsLon, GpsAlt);
+
+		OnDroneWsEvent.Broadcast(DroneId, Event, GpsLat, GpsLon, GpsAlt);
+		return;
+	}
+
+	// Alert: { "type": "alert", "drone_id": N, "alert": "...", "value": N }
+	if (MsgType == TEXT("alert"))
+	{
+		int32 DroneId = 0;
+		Root->TryGetNumberField(TEXT("drone_id"), DroneId);
+
+		FString Alert;
+		Root->TryGetStringField(TEXT("alert"), Alert);
+
+		int32 Value = 0;
+		Root->TryGetNumberField(TEXT("value"), Value);
+
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] Alert drone=%d type=%s value=%d"),
+			DroneId, *Alert, Value);
+
+		OnDroneWsAlert.Broadcast(DroneId, Alert, Value);
+		return;
 	}
 }
 
@@ -257,16 +300,18 @@ void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetW
 		return;
 	}
 
-	// { "type": "move", "drone_id": N, "x": ..., "y": ..., "z": ... }
+	// { "type": "move", "drone_id": "N", "x": ..., "y": ..., "z": ... }
+	// Coordinates should be relative to the drone's anchor (AnchorWorldLocation).
+	// TODO: subtract AnchorWorldLocation once the Cesium anchor flow (柯垣丞) is ready.
 	const FString Json = FString::Printf(
-		TEXT("{\"type\":\"move\",\"drone_id\":%d,\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}"),
+		TEXT("{\"type\":\"move\",\"drone_id\":\"%d\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}"),
 		DroneId,
 		TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z);
 
 	WsClient->SendMessage(Json);
 }
 
-void UDroneNetworkManager::SendPauseCommand(int32 DroneId, bool bPause)
+void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool bPause)
 {
 	if (!WsClient || !WsClient->IsConnected())
 	{
@@ -274,9 +319,17 @@ void UDroneNetworkManager::SendPauseCommand(int32 DroneId, bool bPause)
 		return;
 	}
 
+	// Build drone_ids JSON array: ["1","2",...]
+	FString IdsArray;
+	for (int32 i = 0; i < DroneIds.Num(); ++i)
+	{
+		if (i > 0) IdsArray += TEXT(",");
+		IdsArray += FString::Printf(TEXT("\"%d\""), DroneIds[i]);
+	}
+
 	const FString Type = bPause ? TEXT("pause") : TEXT("resume");
 	const FString Json = FString::Printf(
-		TEXT("{\"type\":\"%s\",\"drone_id\":%d}"), *Type, DroneId);
+		TEXT("{\"type\":\"%s\",\"drone_ids\":[%s]}"), *Type, *IdsArray);
 
 	WsClient->SendMessage(Json);
 }
