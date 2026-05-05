@@ -124,6 +124,9 @@ bool AssemblyController::CheckTimeout()
         state_ = AssemblyState::Timeout;
         spdlog::warn("[Assembly] Timeout after {}s! {}/{} arrived",
                      elapsed, GetProgress().ready_count, GetProgress().total_count);
+        if (timeout_cb_) {
+            timeout_cb_(GetProgress());
+        }
         return true;
     }
 
@@ -151,4 +154,9 @@ AssemblyProgress AssemblyController::GetProgress() const
 void AssemblyController::SetProgressCallback(ProgressCallback cb)
 {
     progress_cb_ = std::move(cb);
+}
+
+void AssemblyController::SetTimeoutCallback(TimeoutCallback cb)
+{
+    timeout_cb_ = std::move(cb);
 }

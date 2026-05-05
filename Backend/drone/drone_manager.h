@@ -24,6 +24,7 @@ public:
     bool AddDrone(int drone_id, int slot, const std::string& name,
                   const std::string& jetson_ip = "", int send_port = 0);
     bool RemoveDrone(int drone_id);
+    bool HasDrone(int drone_id) const;
 
     std::vector<DroneStatus> GetAllStatus() const;
     DroneStatus GetStatus(int drone_id) const;

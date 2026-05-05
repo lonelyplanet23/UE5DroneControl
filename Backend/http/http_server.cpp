@@ -42,6 +42,14 @@ int get_int(const boost::json::object& obj, const char* key, int fallback = 0)
     return static_cast<int>(get_number(obj, key, fallback));
 }
 
+bool get_bool(const boost::json::object& obj, const char* key, bool fallback = false)
+{
+    if (!obj.contains(key)) return fallback;
+    const auto& value = obj.at(key);
+    if (value.is_bool()) return value.as_bool();
+    return fallback;
+}
+
 std::string get_string(const boost::json::object& obj, const char* key,
                        const std::string& fallback = "")
 {
@@ -148,6 +156,16 @@ HttpServer::HttpServer(const AppConfig& config,
             };
             ws_manager_.broadcast(json_stringify(done_msg));
         }
+    });
+
+    assembly_ctrl_.SetTimeoutCallback([this](const AssemblyProgress& progress) {
+        auto msg = boost::json::object{
+            {"type",        "assembly_timeout"},
+            {"array_id",    progress.array_id},
+            {"ready_count", progress.ready_count},
+            {"total_count", progress.total_count},
+        };
+        ws_manager_.broadcast(json_stringify(msg));
     });
 
     LoadDrones();
@@ -280,12 +298,12 @@ http::response<http::string_body> HttpServer::HandleHttp(
             return MakeResponse(req, 200, json_stringify(DebugPause(id, true)));
         if (method == "POST" && PathMatch(path, "/api/debug/cmd/", "/resume", id))
             return MakeResponse(req, 200, json_stringify(DebugPause(id, false)));
+        if (method == "POST" && path == "/api/debug/cmd/batch/array")
+            return MakeResponse(req, 200, json_stringify(DebugBatchArray(require_array(body, "body"))));
         if (method == "POST" && PathMatch(path, "/api/debug/cmd/", "/array", id))
             return MakeResponse(req, 200, json_stringify(DebugSingleArray(id, require_object(body, "body"))));
         if (method == "POST" && PathMatch(path, "/api/debug/cmd/", "/target", id))
             return MakeResponse(req, 200, json_stringify(DebugTarget(id, require_object(body, "body"))));
-        if (method == "POST" && path == "/api/debug/cmd/batch/array")
-            return MakeResponse(req, 200, json_stringify(DebugBatchArray(require_array(body, "body"))));
         if (method == "GET"  && PathMatch(path, "/api/debug/arrays/", "/state", id))
             return MakeResponse(req, 200, json_stringify(DebugArrayState(id)));
 
@@ -316,6 +334,11 @@ boost::json::value HttpServer::ApiListDrones() {
     for (const auto& rec : drone_records_) {
         int numeric_id = drone_id_from_string(rec.id);
         auto status = drone_mgr_.GetStatus(numeric_id);
+        auto mapping = config_.port_map.find(rec.slot);
+        const int recv_port = mapping != config_.port_map.end() ? mapping->second.recv_port : 0;
+        const std::string topic_prefix = mapping != config_.port_map.end()
+            ? mapping->second.ros_topic_prefix
+            : "/px4_" + std::to_string(rec.slot);
         arr.push_back(boost::json::object{
             {"id", numeric_id},
             {"id_str", rec.id},
@@ -333,8 +356,8 @@ boost::json::value HttpServer::ApiListDrones() {
             {"z", status.pos_z},
             {"yaw", status.yaw},
             {"speed", status.speed},
-            {"ue_receive_port", rec.slot > 0 ? 8888 + (rec.slot - 1) * 2 : 0},
-            {"topic_prefix", "/px4_" + std::to_string(rec.slot)},
+            {"ue_receive_port", recv_port},
+            {"topic_prefix", topic_prefix},
             {"bit_index", rec.slot > 0 ? rec.slot - 1 : 0},
             {"mavlink_system_id", rec.slot},
         });
@@ -449,8 +472,8 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
             if (path.drone_id.empty() && po.contains("droneId")) {
                 path.drone_id = get_string(po, "droneId", "");
             }
-            path.closed_loop = (po.contains("bClosedLoop") && po.at("bClosedLoop").as_bool()) ||
-                               (po.contains("closed_loop") && po.at("closed_loop").as_bool());
+            path.closed_loop = get_bool(po, "bClosedLoop", false) ||
+                               get_bool(po, "closed_loop", false);
 
             if (po.contains("waypoints") && po.at("waypoints").is_array()) {
                 for (const auto& w : po.at("waypoints").as_array()) {
@@ -493,6 +516,7 @@ boost::json::value HttpServer::ApiStopArray(const std::string& id) {
 // ============================================================
 boost::json::value HttpServer::DebugDroneState(const std::string& id) {
     int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) throw ApiError(404, "drone not found: " + id);
     auto status = drone_mgr_.GetStatus(drone_id);
     auto hb = drone_mgr_.GetHeartbeatStats(drone_id);
     return boost::json::object{
@@ -517,6 +541,7 @@ boost::json::value HttpServer::DebugDroneState(const std::string& id) {
 
 boost::json::value HttpServer::DebugDroneQueue(const std::string& id) {
     int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) throw ApiError(404, "drone not found: " + id);
     boost::json::array items;
     for (const auto& cmd : drone_mgr_.GetCommandQueueSnapshot(drone_id)) {
         items.push_back(boost::json::object{
@@ -538,6 +563,7 @@ boost::json::value HttpServer::DebugDroneQueue(const std::string& id) {
 
 boost::json::value HttpServer::DebugHeartbeat(const std::string& id) {
     int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) throw ApiError(404, "drone not found: " + id);
     auto hb = drone_mgr_.GetHeartbeatStats(drone_id);
     return boost::json::object{
         {"id", drone_id},
@@ -553,6 +579,7 @@ boost::json::value HttpServer::DebugHeartbeat(const std::string& id) {
 
 boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const boost::json::object& body) {
     int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) throw ApiError(404, "drone not found: " + id);
     TelemetryData tel{};
     if (body.contains("position") && body.at("position").is_array()) {
         const auto& pos = body.at("position").as_array();
@@ -589,14 +616,21 @@ boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const
     tel.arming_state = static_cast<uint8_t>(get_int(body, "arming_state", 0));
     tel.nav_state = static_cast<uint8_t>(get_int(body, "nav_state", 0));
     drone_mgr_.OnTelemetryReceived(drone_id, tel);
+    if (assembly_ctrl_.GetState() == AssemblyState::Assembling) {
+        assembly_ctrl_.UpdateDronePosition(
+            drone_id,
+            tel.position_ned[0],
+            tel.position_ned[1],
+            tel.position_ned[2]);
+    }
     return boost::json::object{{"injected", id}};
 }
 
 boost::json::value HttpServer::DebugMove(const std::string& id, const boost::json::object& body) {
     int drone_id = drone_id_from_string(id);
-    double x = body.contains("x") ? body.at("x").as_double() : 0.0;
-    double y = body.contains("y") ? body.at("y").as_double() : 0.0;
-    double z = body.contains("z") ? body.at("z").as_double() : 0.0;
+    double x = get_number(body, "x", 0.0);
+    double y = get_number(body, "y", 0.0);
+    double z = get_number(body, "z", 0.0);
     if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z))
         throw ApiError(404, "drone not found: " + id);
     return boost::json::object{{"moved", id}, {"x", x}, {"y", y}, {"z", z}};
@@ -619,7 +653,65 @@ boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::j
 }
 
 boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
-    return boost::json::object{{"status", "stub"}};
+    AssemblyConfig cfg;
+    cfg.array_id = "debug_batch";
+    cfg.mode = "recon";
+
+    int path_id = 1;
+    for (const auto& item : body) {
+        if (!item.is_object()) continue;
+        const auto& obj = item.as_object();
+
+        AssemblyConfig::Path path;
+        path.path_id = obj.contains("pathId") ? get_int(obj, "pathId")
+                                              : get_int(obj, "path_id", path_id++);
+        path.drone_id = get_string(obj, "drone_id", "");
+        path.closed_loop = get_bool(obj, "bClosedLoop", false) ||
+                           get_bool(obj, "closed_loop", false);
+        if (obj.contains("mode")) {
+            cfg.mode = get_string(obj, "mode", cfg.mode);
+        }
+
+        if (obj.contains("waypoints") && obj.at("waypoints").is_array()) {
+            for (const auto& wp_value : obj.at("waypoints").as_array()) {
+                if (!wp_value.is_object()) continue;
+                const auto& wp_obj = wp_value.as_object();
+                const boost::json::object* loc = &wp_obj;
+                if (wp_obj.contains("location") && wp_obj.at("location").is_object()) {
+                    loc = &wp_obj.at("location").as_object();
+                }
+
+                AssemblyConfig::Path::Waypoint wp;
+                wp.x = get_number(*loc, "x", 0.0);
+                wp.y = get_number(*loc, "y", 0.0);
+                wp.z = get_number(*loc, "z", 0.0);
+                wp.segment_speed = static_cast<float>(
+                    wp_obj.contains("segmentSpeed") ? get_number(wp_obj, "segmentSpeed", 0.0)
+                                                     : get_number(wp_obj, "segment_speed", 0.0));
+                wp.wait_time = static_cast<float>(
+                    wp_obj.contains("waitTime") ? get_number(wp_obj, "waitTime", 0.0)
+                                                : get_number(wp_obj, "wait_time", 0.0));
+                path.waypoints.push_back(wp);
+            }
+        }
+
+        if (!path.drone_id.empty() && !path.waypoints.empty()) {
+            cfg.paths.push_back(path);
+        }
+    }
+
+    if (cfg.paths.empty()) {
+        throw ApiError(400, "batch array requires at least one path with waypoints");
+    }
+    if (!assembly_ctrl_.Start(cfg)) {
+        throw ApiError(409, "assembly already in progress");
+    }
+
+    return boost::json::object{
+        {"array_id", cfg.array_id},
+        {"status", "assembling"},
+        {"path_count", static_cast<int64_t>(cfg.paths.size())},
+    };
 }
 
 boost::json::value HttpServer::DebugArrayState(const std::string& id) {
@@ -655,30 +747,62 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
         if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z)) {
             ws_manager_.send(session, json_stringify(boost::json::object{
                 {"type", "error"}, {"code", 404}, {"message", "drone not found"}}));
+        } else if (msg.contains("request_id")) {
+            ws_manager_.send(session, json_stringify(boost::json::object{
+                {"type", "command_ack"},
+                {"command", "move"},
+                {"request_id", value_to_string(msg.at("request_id"))},
+                {"drone_id", drone_id},
+                {"drone_id_str", drone_id_string(drone_id)},
+            }));
         }
         return;
     }
 
     if (type == "pause") {
+        bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
-                drone_mgr_.ProcessPauseCommand(drone_id_from_string(value_to_string(id_value)));
+                any_ok = drone_mgr_.ProcessPauseCommand(
+                    drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
-            drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
+            any_ok = drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
+        }
+        if (!any_ok) {
+            ws_manager_.send(session, json_stringify(boost::json::object{
+                {"type", "error"}, {"code", 404}, {"message", "no matching drone paused"}}));
+        } else if (msg.contains("request_id")) {
+            ws_manager_.send(session, json_stringify(boost::json::object{
+                {"type", "command_ack"},
+                {"command", "pause"},
+                {"request_id", value_to_string(msg.at("request_id"))},
+            }));
         }
         return;
     }
 
     if (type == "resume") {
+        bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
-                drone_mgr_.ProcessResumeCommand(drone_id_from_string(value_to_string(id_value)));
+                any_ok = drone_mgr_.ProcessResumeCommand(
+                    drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
-            drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
+            any_ok = drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
+        }
+        if (!any_ok) {
+            ws_manager_.send(session, json_stringify(boost::json::object{
+                {"type", "error"}, {"code", 404}, {"message", "no matching drone resumed"}}));
+        } else if (msg.contains("request_id")) {
+            ws_manager_.send(session, json_stringify(boost::json::object{
+                {"type", "command_ack"},
+                {"command", "resume"},
+                {"request_id", value_to_string(msg.at("request_id"))},
+            }));
         }
         return;
     }

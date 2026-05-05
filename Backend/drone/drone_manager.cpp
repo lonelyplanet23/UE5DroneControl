@@ -124,6 +124,11 @@ bool DroneManager::RemoveDrone(int drone_id)
     return true;
 }
 
+bool DroneManager::HasDrone(int drone_id) const
+{
+    return GetContext(drone_id) != nullptr;
+}
+
 std::vector<DroneStatus> DroneManager::GetAllStatus() const
 {
     std::vector<DroneStatus> result;
