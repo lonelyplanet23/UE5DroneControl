@@ -2,6 +2,10 @@
 #include "conversion/quaternion_utils.h"
 #include <cmath>
 
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+}
+
 // 速度计算: sqrt(vN² + vE² + vD²)
 TEST(QuaternionUtilsTest, SpeedFromVelocity)
 {
@@ -28,7 +32,7 @@ TEST(QuaternionUtilsTest, YawFlip)
 {
     // 绕 Z 轴旋转 30°: q = cos(15°) + sin(15°)*k
     // 四元数: [cos(15°), 0, 0, sin(15°)]
-    double deg15 = 15.0 * M_PI / 180.0;
+    double deg15 = 15.0 * kPi / 180.0;
     double qw = std::cos(deg15);
     double qz = std::sin(deg15);
 
@@ -43,7 +47,7 @@ TEST(QuaternionUtilsTest, YawFlip)
 
 TEST(QuaternionUtilsTest, GetUeYaw)
 {
-    double deg15 = 15.0 * M_PI / 180.0;
+    double deg15 = 15.0 * kPi / 180.0;
     double yaw = QuaternionUtils::GetUeYaw(std::cos(deg15), 0.0, 0.0, std::sin(deg15));
     EXPECT_NEAR(yaw, -30.0, 1e-3);
 }

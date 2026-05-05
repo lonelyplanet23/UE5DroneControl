@@ -1,9 +1,56 @@
 #include "http/http_server.h"
 #include "conversion/coordinate_converter.h"
+#include "conversion/quaternion_utils.h"
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
+
+namespace {
+
+boost::json::value get_number_or_string_id(int drone_id)
+{
+    return drone_id;
+}
+
+std::string drone_id_string(int drone_id)
+{
+    return "d" + std::to_string(drone_id);
+}
+
+std::string value_to_string(const boost::json::value& value)
+{
+    if (value.is_string()) return std::string(value.as_string());
+    if (value.is_int64()) return std::to_string(value.as_int64());
+    if (value.is_uint64()) return std::to_string(value.as_uint64());
+    if (value.is_double()) return std::to_string(static_cast<int>(value.as_double()));
+    return "";
+}
+
+double get_number(const boost::json::object& obj, const char* key, double fallback = 0.0)
+{
+    if (!obj.contains(key)) return fallback;
+    const auto& value = obj.at(key);
+    if (value.is_double()) return value.as_double();
+    if (value.is_int64()) return static_cast<double>(value.as_int64());
+    if (value.is_uint64()) return static_cast<double>(value.as_uint64());
+    return fallback;
+}
+
+int get_int(const boost::json::object& obj, const char* key, int fallback = 0)
+{
+    return static_cast<int>(get_number(obj, key, fallback));
+}
+
+std::string get_string(const boost::json::object& obj, const char* key,
+                       const std::string& fallback = "")
+{
+    if (!obj.contains(key)) return fallback;
+    auto value = value_to_string(obj.at(key));
+    return value.empty() ? fallback : value;
+}
+
+} // namespace
 
 // ============================================================
 // 构造 / 析构
@@ -27,14 +74,28 @@ HttpServer::HttpServer(const AppConfig& config,
 
         auto msg = boost::json::object{
             {"type",     "telemetry"},
-            {"drone_id", "d" + std::to_string(drone_id)},
+            {"drone_id", get_number_or_string_id(drone_id)},
+            {"drone_id_str", drone_id_string(drone_id)},
             {"x",        ux},
             {"y",        uy},
             {"z",        uz},
+            {"yaw",      0.0},
+            {"pitch",    0.0},
+            {"roll",     0.0},
+            {"speed",    0.0},
             {"battery",  tel.battery},
             {"armed",    tel.IsArmed()},
             {"offboard", tel.IsOffboard()},
         };
+        double roll, pitch, yaw;
+        QuaternionUtils::QuatToEuler(
+            tel.quaternion[0], tel.quaternion[1], tel.quaternion[2], tel.quaternion[3],
+            roll, pitch, yaw);
+        msg["roll"] = roll;
+        msg["pitch"] = pitch;
+        msg["yaw"] = yaw;
+        msg["speed"] = QuaternionUtils::SpeedFromVelocity(
+            tel.velocity[0], tel.velocity[1], tel.velocity[2]);
         ws_manager_.broadcast(json_stringify(msg));
     });
 
@@ -47,7 +108,8 @@ HttpServer::HttpServer(const AppConfig& config,
         }
         auto msg = boost::json::object{
             {"type",     "event"},
-            {"drone_id", "d" + std::to_string(drone_id)},
+            {"drone_id", get_number_or_string_id(drone_id)},
+            {"drone_id_str", drone_id_string(drone_id)},
             {"event",    type},
         };
         if (anchor.valid) {
@@ -61,7 +123,9 @@ HttpServer::HttpServer(const AppConfig& config,
     drone_mgr_.SetAlertCallback([this](int drone_id, const std::string& alert_type, int value) {
         auto msg = boost::json::object{
             {"type",       "alert"},
-            {"drone_id",   "d" + std::to_string(drone_id)},
+            {"drone_id",   get_number_or_string_id(drone_id)},
+            {"drone_id_str", drone_id_string(drone_id)},
+            {"alert",      alert_type},
             {"alert_type", alert_type},
             {"value",      value},
         };
@@ -250,17 +314,29 @@ boost::json::value HttpServer::ApiListDrones() {
     std::lock_guard<std::mutex> lock(records_mutex_);
     boost::json::array arr;
     for (const auto& rec : drone_records_) {
-        auto status = drone_mgr_.GetStatus(drone_id_from_string(rec.id));
+        int numeric_id = drone_id_from_string(rec.id);
+        auto status = drone_mgr_.GetStatus(numeric_id);
         arr.push_back(boost::json::object{
-            {"id",         rec.id},
-            {"name",       rec.name},
-            {"model",      rec.model},
-            {"slot",       rec.slot},
-            {"ip",         rec.ip},
-            {"port",       rec.port},
-            {"video_url",  rec.video_url},
-            {"status",     status.connection_state},
-            {"battery",    status.battery},
+            {"id", numeric_id},
+            {"id_str", rec.id},
+            {"name", rec.name},
+            {"model", rec.model},
+            {"slot", rec.slot},
+            {"slot_number", rec.slot},
+            {"ip", rec.ip},
+            {"port", rec.port},
+            {"video_url", rec.video_url},
+            {"status", status.connection_state},
+            {"battery", status.battery},
+            {"x", status.pos_x},
+            {"y", status.pos_y},
+            {"z", status.pos_z},
+            {"yaw", status.yaw},
+            {"speed", status.speed},
+            {"ue_receive_port", rec.slot > 0 ? 8888 + (rec.slot - 1) * 2 : 0},
+            {"topic_prefix", "/px4_" + std::to_string(rec.slot)},
+            {"bit_index", rec.slot > 0 ? rec.slot - 1 : 0},
+            {"mavlink_system_id", rec.slot},
         });
     }
     return arr;
@@ -270,16 +346,17 @@ boost::json::value HttpServer::ApiRegisterDrone(const boost::json::object& body)
     std::lock_guard<std::mutex> lock(records_mutex_);
 
     if (static_cast<int>(drone_records_.size()) >= config_.max_count)
-        throw ApiError(400, "max drone count reached");
+        throw ApiError(507, "max drone count reached");
 
     DroneRecord rec;
     rec.id        = "d" + std::to_string(next_drone_seq_++);
-    rec.name      = body.contains("name")      ? std::string(body.at("name").as_string())      : rec.id;
-    rec.model     = body.contains("model")     ? std::string(body.at("model").as_string())     : "";
-    rec.slot      = body.contains("slot_number") ? static_cast<int>(body.at("slot_number").as_int64()) : next_drone_seq_ - 1;
-    rec.ip        = body.contains("ip")        ? std::string(body.at("ip").as_string())        : "";
-    rec.port      = body.contains("port")      ? static_cast<int>(body.at("port").as_int64())  : 0;
-    rec.video_url = body.contains("video_url") ? std::string(body.at("video_url").as_string()) : "";
+    rec.name      = get_string(body, "name", rec.id);
+    rec.model     = get_string(body, "model", "");
+    rec.slot      = body.contains("slot") ? get_int(body, "slot")
+                                          : get_int(body, "slot_number", next_drone_seq_ - 1);
+    rec.ip        = get_string(body, "ip", config_.jetson_host);
+    rec.port      = get_int(body, "port", 0);
+    rec.video_url = get_string(body, "video_url", "");
 
     int drone_id = drone_id_from_string(rec.id);
 
@@ -288,35 +365,54 @@ boost::json::value HttpServer::ApiRegisterDrone(const boost::json::object& body)
     if (it == config_.port_map.end())
         throw ApiError(400, "slot " + std::to_string(rec.slot) + " not in port_map");
 
-    drone_mgr_.AddDrone(drone_id, rec.slot, rec.name);
+    for (const auto& existing : drone_records_) {
+        if (existing.name == rec.name) {
+            throw ApiError(409, "drone name already exists: " + rec.name);
+        }
+        if (existing.slot == rec.slot) {
+            throw ApiError(409, "slot already exists: " + std::to_string(rec.slot));
+        }
+    }
+
+    rec.port = rec.port > 0 ? rec.port : it->second.send_port;
+    if (!drone_mgr_.AddDrone(drone_id, rec.slot, rec.name,
+                             config_.jetson_host, it->second.send_port)) {
+        throw ApiError(409, "drone registration conflict");
+    }
     drone_records_.push_back(rec);
     SaveDrones();
 
     spdlog::info("[HTTP] Registered drone {} slot={}", rec.id, rec.slot);
-    return boost::json::object{{"id", rec.id}, {"slot", rec.slot}, {"name", rec.name}};
+    return boost::json::object{{"id", drone_id}, {"id_str", rec.id}, {"slot", rec.slot}, {"name", rec.name}};
 }
 
 boost::json::value HttpServer::ApiUpdateDrone(const std::string& id, const boost::json::object& body) {
     std::lock_guard<std::mutex> lock(records_mutex_);
+    const int numeric_id = drone_id_from_string(id);
+    const std::string canonical_id = drone_id_string(numeric_id);
     for (auto& rec : drone_records_) {
-        if (rec.id != id) continue;
-        if (body.contains("name"))      rec.name      = std::string(body.at("name").as_string());
-        if (body.contains("model"))     rec.model     = std::string(body.at("model").as_string());
-        if (body.contains("video_url")) rec.video_url = std::string(body.at("video_url").as_string());
+        if (rec.id != canonical_id) continue;
+        if (body.contains("name"))      rec.name      = get_string(body, "name", rec.name);
+        if (body.contains("model"))     rec.model     = get_string(body, "model", rec.model);
+        if (body.contains("ip"))        rec.ip        = get_string(body, "ip", rec.ip);
+        if (body.contains("port"))      rec.port      = get_int(body, "port", rec.port);
+        if (body.contains("video_url")) rec.video_url = get_string(body, "video_url", rec.video_url);
         SaveDrones();
-        return boost::json::object{{"id", rec.id}, {"name", rec.name}};
+        return boost::json::object{{"id", numeric_id}, {"id_str", rec.id}, {"updated", true}, {"name", rec.name}};
     }
     throw ApiError(404, "drone not found: " + id);
 }
 
 boost::json::value HttpServer::ApiDeleteDrone(const std::string& id) {
     std::lock_guard<std::mutex> lock(records_mutex_);
+    const int numeric_id = drone_id_from_string(id);
+    const std::string canonical_id = drone_id_string(numeric_id);
     for (auto it = drone_records_.begin(); it != drone_records_.end(); ++it) {
-        if (it->id != id) continue;
-        drone_mgr_.RemoveDrone(drone_id_from_string(id));
+        if (it->id != canonical_id) continue;
+        drone_mgr_.RemoveDrone(numeric_id);
         drone_records_.erase(it);
         SaveDrones();
-        return boost::json::object{{"deleted", id}};
+        return boost::json::object{{"id", numeric_id}, {"id_str", canonical_id}, {"deleted", true}};
     }
     throw ApiError(404, "drone not found: " + id);
 }
@@ -324,8 +420,12 @@ boost::json::value HttpServer::ApiDeleteDrone(const std::string& id) {
 boost::json::value HttpServer::ApiGetAnchor(const std::string& id) {
     int drone_id = drone_id_from_string(id);
     auto anchor = drone_mgr_.GetAnchor(drone_id);
+    if (!anchor.valid) {
+        throw ApiError(425, "anchor not available");
+    }
     return boost::json::object{
-        {"drone_id",  id},
+        {"drone_id",  drone_id},
+        {"drone_id_str", drone_id_string(drone_id)},
         {"gps_lat",   anchor.latitude},
         {"gps_lon",   anchor.longitude},
         {"gps_alt",   anchor.altitude},
@@ -343,20 +443,33 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
             if (!p.is_object()) continue;
             const auto& po = p.as_object();
             AssemblyConfig::Path path;
-            path.path_id    = po.contains("path_id")    ? static_cast<int>(po.at("path_id").as_int64()) : 0;
-            path.drone_id   = po.contains("drone_id")   ? std::string(po.at("drone_id").as_string())    : "";
-            path.closed_loop = po.contains("closed_loop") && po.at("closed_loop").as_bool();
+            path.path_id = po.contains("pathId") ? get_int(po, "pathId")
+                                                 : get_int(po, "path_id", 0);
+            path.drone_id = get_string(po, "drone_id", "");
+            if (path.drone_id.empty() && po.contains("droneId")) {
+                path.drone_id = get_string(po, "droneId", "");
+            }
+            path.closed_loop = (po.contains("bClosedLoop") && po.at("bClosedLoop").as_bool()) ||
+                               (po.contains("closed_loop") && po.at("closed_loop").as_bool());
 
             if (po.contains("waypoints") && po.at("waypoints").is_array()) {
                 for (const auto& w : po.at("waypoints").as_array()) {
                     if (!w.is_object()) continue;
                     const auto& wo = w.as_object();
                     AssemblyConfig::Path::Waypoint wp;
-                    wp.x = wo.contains("x") ? wo.at("x").as_double() : 0.0;
-                    wp.y = wo.contains("y") ? wo.at("y").as_double() : 0.0;
-                    wp.z = wo.contains("z") ? wo.at("z").as_double() : 0.0;
-                    wp.segment_speed = wo.contains("segment_speed") ? static_cast<float>(wo.at("segment_speed").as_double()) : 0.0f;
-                    wp.wait_time     = wo.contains("wait_time")     ? static_cast<float>(wo.at("wait_time").as_double())     : 0.0f;
+                    const boost::json::object* loc = &wo;
+                    if (wo.contains("location") && wo.at("location").is_object()) {
+                        loc = &wo.at("location").as_object();
+                    }
+                    wp.x = get_number(*loc, "x", 0.0);
+                    wp.y = get_number(*loc, "y", 0.0);
+                    wp.z = get_number(*loc, "z", 0.0);
+                    wp.segment_speed = static_cast<float>(
+                        wo.contains("segmentSpeed") ? get_number(wo, "segmentSpeed", 0.0)
+                                                    : get_number(wo, "segment_speed", 0.0));
+                    wp.wait_time = static_cast<float>(
+                        wo.contains("waitTime") ? get_number(wo, "waitTime", 0.0)
+                                                : get_number(wo, "wait_time", 0.0));
                     path.waypoints.push_back(wp);
                 }
             }
@@ -381,21 +494,61 @@ boost::json::value HttpServer::ApiStopArray(const std::string& id) {
 boost::json::value HttpServer::DebugDroneState(const std::string& id) {
     int drone_id = drone_id_from_string(id);
     auto status = drone_mgr_.GetStatus(drone_id);
+    auto hb = drone_mgr_.GetHeartbeatStats(drone_id);
     return boost::json::object{
-        {"id",     id},
+        {"id",     drone_id},
+        {"id_str", drone_id_string(drone_id)},
+        {"slot",   status.slot},
         {"status", status.connection_state},
         {"battery", status.battery},
         {"x", status.pos_x}, {"y", status.pos_y}, {"z", status.pos_z},
         {"yaw", status.yaw}, {"speed", status.speed},
+        {"queue_size", static_cast<int64_t>(drone_mgr_.GetCommandQueueSize(drone_id))},
+        {"queue_paused", drone_mgr_.IsCommandQueuePaused(drone_id)},
+        {"heartbeat_running", hb.running},
+        {"last_heartbeat_time", hb.last_sent_time},
+        {"heartbeat_count", static_cast<int64_t>(hb.sent_count)},
+        {"anchor_valid", status.anchor.valid},
+        {"gps_lat", status.anchor.latitude},
+        {"gps_lon", status.anchor.longitude},
+        {"gps_alt", status.anchor.altitude},
     };
 }
 
 boost::json::value HttpServer::DebugDroneQueue(const std::string& id) {
-    return boost::json::object{{"id", id}, {"queue_size", 0}};
+    int drone_id = drone_id_from_string(id);
+    boost::json::array items;
+    for (const auto& cmd : drone_mgr_.GetCommandQueueSnapshot(drone_id)) {
+        items.push_back(boost::json::object{
+            {"timestamp", cmd.timestamp},
+            {"x", cmd.x},
+            {"y", cmd.y},
+            {"z", cmd.z},
+            {"mode", cmd.mode},
+        });
+    }
+    return boost::json::object{
+        {"id", drone_id},
+        {"id_str", drone_id_string(drone_id)},
+        {"queue_size", static_cast<int64_t>(items.size())},
+        {"paused", drone_mgr_.IsCommandQueuePaused(drone_id)},
+        {"commands", items},
+    };
 }
 
 boost::json::value HttpServer::DebugHeartbeat(const std::string& id) {
-    return boost::json::object{{"id", id}, {"heartbeat", "ok"}};
+    int drone_id = drone_id_from_string(id);
+    auto hb = drone_mgr_.GetHeartbeatStats(drone_id);
+    return boost::json::object{
+        {"id", drone_id},
+        {"id_str", drone_id_string(drone_id)},
+        {"running", hb.running},
+        {"last_sent_time", hb.last_sent_time},
+        {"sent_count", static_cast<int64_t>(hb.sent_count)},
+        {"last_ned_x", hb.last_ned_x},
+        {"last_ned_y", hb.last_ned_y},
+        {"last_ned_z", hb.last_ned_z},
+    };
 }
 
 boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const boost::json::object& body) {
@@ -404,13 +557,37 @@ boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const
     if (body.contains("position") && body.at("position").is_array()) {
         const auto& pos = body.at("position").as_array();
         if (pos.size() >= 3) {
-            tel.position_ned[0] = pos[0].as_double();
-            tel.position_ned[1] = pos[1].as_double();
-            tel.position_ned[2] = pos[2].as_double();
+            tel.position_ned[0] = boost::json::value_to<double>(pos[0]);
+            tel.position_ned[1] = boost::json::value_to<double>(pos[1]);
+            tel.position_ned[2] = boost::json::value_to<double>(pos[2]);
         }
     }
-    tel.battery = body.contains("battery") ? static_cast<int>(body.at("battery").as_int64()) : -1;
-    tel.gps_fix = false;
+    if (body.contains("q") && body.at("q").is_array()) {
+        const auto& q = body.at("q").as_array();
+        if (q.size() >= 4) {
+            tel.quaternion[0] = boost::json::value_to<double>(q[0]);
+            tel.quaternion[1] = boost::json::value_to<double>(q[1]);
+            tel.quaternion[2] = boost::json::value_to<double>(q[2]);
+            tel.quaternion[3] = boost::json::value_to<double>(q[3]);
+        }
+    }
+    if (body.contains("velocity") && body.at("velocity").is_array()) {
+        const auto& vel = body.at("velocity").as_array();
+        if (vel.size() >= 3) {
+            tel.velocity[0] = boost::json::value_to<double>(vel[0]);
+            tel.velocity[1] = boost::json::value_to<double>(vel[1]);
+            tel.velocity[2] = boost::json::value_to<double>(vel[2]);
+        }
+    }
+    tel.battery = get_int(body, "battery", -1);
+    tel.gps_lat = get_number(body, "gps_lat", 0.0);
+    tel.gps_lon = get_number(body, "gps_lon", 0.0);
+    tel.gps_alt = get_number(body, "gps_alt", 0.0);
+    tel.gps_fix = (body.contains("gps_fix") && body.at("gps_fix").is_bool())
+        ? body.at("gps_fix").as_bool()
+        : (body.contains("gps_lat") && body.contains("gps_lon") && body.contains("gps_alt"));
+    tel.arming_state = static_cast<uint8_t>(get_int(body, "arming_state", 0));
+    tel.nav_state = static_cast<uint8_t>(get_int(body, "nav_state", 0));
     drone_mgr_.OnTelemetryReceived(drone_id, tel);
     return boost::json::object{{"injected", id}};
 }
@@ -470,10 +647,10 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     std::string type = std::string(msg.at("type").as_string());
 
     if (type == "move") {
-        std::string drone_id_str = msg.contains("drone_id") ? std::string(msg.at("drone_id").as_string()) : "";
-        double x = msg.contains("x") ? msg.at("x").as_double() : 0.0;
-        double y = msg.contains("y") ? msg.at("y").as_double() : 0.0;
-        double z = msg.contains("z") ? msg.at("z").as_double() : 0.0;
+        std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+        double x = get_number(msg, "x", 0.0);
+        double y = get_number(msg, "y", 0.0);
+        double z = get_number(msg, "z", 0.0);
         int drone_id = drone_id_from_string(drone_id_str);
         if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z)) {
             ws_manager_.send(session, json_stringify(boost::json::object{
@@ -483,14 +660,26 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     }
 
     if (type == "pause") {
-        std::string drone_id_str = msg.contains("drone_id") ? std::string(msg.at("drone_id").as_string()) : "";
-        drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
+        if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                drone_mgr_.ProcessPauseCommand(drone_id_from_string(value_to_string(id_value)));
+            }
+        } else {
+            std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
+        }
         return;
     }
 
     if (type == "resume") {
-        std::string drone_id_str = msg.contains("drone_id") ? std::string(msg.at("drone_id").as_string()) : "";
-        drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
+        if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                drone_mgr_.ProcessResumeCommand(drone_id_from_string(value_to_string(id_value)));
+            }
+        } else {
+            std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
+        }
         return;
     }
 
@@ -669,7 +858,10 @@ void HttpServer::LoadDrones() {
             if (rec.id.empty()) continue;
 
             int drone_id = drone_id_from_string(rec.id);
-            drone_mgr_.AddDrone(drone_id, rec.slot, rec.name);
+            auto mapping = config_.port_map.find(rec.slot);
+            int send_port = mapping != config_.port_map.end() ? mapping->second.send_port : rec.port;
+            if (rec.port == 0) rec.port = send_port;
+            drone_mgr_.AddDrone(drone_id, rec.slot, rec.name, config_.jetson_host, send_port);
             drone_records_.push_back(rec);
 
             // 更新序号

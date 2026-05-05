@@ -66,6 +66,8 @@ class BackendHttpClient:
 
     def get_drones(self) -> dict[str, Any]:
         result = self._request("GET", "/api/drones")
+        if isinstance(result, list):
+            return {"drones": result}
         return result if isinstance(result, dict) else {"drones": []}
 
     def register_drone(self, payload: dict[str, Any]) -> dict[str, Any]:

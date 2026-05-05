@@ -17,9 +17,15 @@ void UdpSender::SetTarget(int drone_id, const std::string& host, int port)
     auto target = std::make_unique<Target>(io_context_);
     target->host = host;
     target->port = port;
-    target->endpoint = boost::asio::ip::udp::endpoint(
-        boost::asio::ip::address::from_string(host), port);
-    target->initialized = true;
+    try {
+        target->endpoint = boost::asio::ip::udp::endpoint(
+            boost::asio::ip::make_address(host), static_cast<unsigned short>(port));
+        target->initialized = true;
+    } catch (const std::exception& e) {
+        spdlog::error("[UdpSender] Invalid target for drone {}: {}:{} ({})",
+                      drone_id, host, port, e.what());
+        target->initialized = false;
+    }
 
     targets_[drone_id] = std::move(target);
     spdlog::info("[UdpSender] Drone {} target set: {}:{}", drone_id, host, port);
