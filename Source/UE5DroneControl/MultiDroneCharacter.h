@@ -25,6 +25,7 @@ public:
 	AMultiDroneCharacter();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 
 	// ---- Identity ----
 
@@ -79,6 +80,36 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Selection UI")
 	FVector SelectionWidgetRelativeLocation = FVector(0.0f, 0.0f, 180.0f);
 
+	// ---- Assembly (集结) behavior ----
+
+	/**
+	 * Enter assembly mode: shadow drone stops independent movement and
+	 * follows the mirror drone (ARealTimeDroneReceiver with same DroneId).
+	 * Called when "assembling" WebSocket event is received.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Assembly")
+	void EnterAssemblyMode();
+
+	/**
+	 * Exit assembly mode: shadow drone resumes independent movement.
+	 * Called when "assembly_complete" or "assembly_timeout" WebSocket event is received.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Assembly")
+	void ExitAssemblyMode();
+
+	UFUNCTION(BlueprintPure, Category = "Assembly")
+	bool IsInAssemblyMode() const { return bInAssemblyMode; }
+
+	// ---- Delay metric ----
+
+	/**
+	 * Distance (cm) between this shadow drone and its mirror drone.
+	 * Updated every Tick when a mirror drone is registered.
+	 * Exposed to Blueprint for UI display.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
+	float MirrorDelayDistance = 0.0f;
+
 	// ---- IDroneSelectableInterface ----
 	virtual int32 GetDroneId_Implementation() const override { return DroneId; }
 	virtual void OnPrimarySelected_Implementation() override;
@@ -88,4 +119,20 @@ public:
 
 	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
 	virtual void StopClickTargetSending() override;
+
+private:
+	bool bInAssemblyMode = false;
+
+	// Smooth speed for following mirror drone position (cm/s interp speed)
+	UPROPERTY(EditAnywhere, Category = "Assembly", meta = (ClampMin = "1.0"))
+	float AssemblyFollowInterpSpeed = 8.0f;
+
+	// Cached registry reference (set in BeginPlay)
+	UPROPERTY()
+	TObjectPtr<class UDroneRegistrySubsystem> Registry;
+
+	void SubscribeToAssemblyEvents();
+	void OnAssemblingProgress(const FString& ArrayId, int32 ReadyCount, int32 TotalCount);
+	void OnAssemblyComplete(const FString& ArrayId);
+	void OnAssemblyTimeout(const FString& ArrayId, int32 ReadyCount, int32 TotalCount);
 };

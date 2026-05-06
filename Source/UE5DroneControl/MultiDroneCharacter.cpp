@@ -5,6 +5,7 @@
 #include "DroneOps/Drone/DroneCommandSenderComponent.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
+#include "DroneOps/Network/DroneNetworkManager.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "Components/WidgetComponent.h"
@@ -15,17 +16,17 @@
 
 AMultiDroneCharacter::AMultiDroneCharacter()
 {
+	PrimaryActorTick.bCanEverTick = true;
+
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
 
 	// 确保碰撞设置正确，支持鼠标悬停检测
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
-		// 保持 Pawn 配置，但确保 Visibility 通道阻塞（鼠标检测需要）
 		Capsule->SetCollisionProfileName(TEXT("Pawn"));
 		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-		// 【关键】确保 Visibility 通道阻塞 - 鼠标悬停检测需要
 		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 		Capsule->SetSimulatePhysics(false);
 	}
@@ -79,7 +80,7 @@ void AMultiDroneCharacter::BeginPlay()
 		return;
 	}
 
-	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
 	if (!Registry)
 	{
 		return;
@@ -100,6 +101,102 @@ void AMultiDroneCharacter::BeginPlay()
 
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter: Registered %s (ID=%d, BitIndex=%d)"),
 		*DroneName, DroneId, BitIndex);
+
+	SubscribeToAssemblyEvents();
+}
+
+void AMultiDroneCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!Registry)
+	{
+		return;
+	}
+
+	// Update mirror delay distance every tick
+	FDroneTelemetrySnapshot MirrorSnap;
+	if (Registry->GetTelemetry(DroneId, MirrorSnap))
+	{
+		MirrorDelayDistance = FVector::Dist(GetActorLocation(), MirrorSnap.WorldLocation);
+	}
+
+	// Assembly mode: follow mirror drone position
+	if (bInAssemblyMode && MirrorSnap.Availability == EDroneAvailability::Online)
+	{
+		const FVector TargetPos = MirrorSnap.WorldLocation;
+		const FVector NewPos = FMath::VInterpTo(GetActorLocation(), TargetPos, DeltaTime, AssemblyFollowInterpSpeed);
+		SetActorLocation(NewPos);
+	}
+}
+
+void AMultiDroneCharacter::EnterAssemblyMode()
+{
+	if (bInAssemblyMode)
+	{
+		return;
+	}
+
+	bInAssemblyMode = true;
+	bSendClickTarget = false; // stop any in-progress independent movement
+
+	if (Registry)
+	{
+		Registry->ApplyControlLock(DroneId, EDroneControlLockReason::FormationPlayback);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Entered assembly mode"), *DroneName);
+}
+
+void AMultiDroneCharacter::ExitAssemblyMode()
+{
+	if (!bInAssemblyMode)
+	{
+		return;
+	}
+
+	bInAssemblyMode = false;
+
+	if (Registry)
+	{
+		Registry->ReleaseControlLock(DroneId);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Exited assembly mode"), *DroneName);
+}
+
+void AMultiDroneCharacter::SubscribeToAssemblyEvents()
+{
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+
+	UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>();
+	if (!NetMgr)
+	{
+		return;
+	}
+
+	NetMgr->OnAssemblingProgress.AddUObject(this, &AMultiDroneCharacter::OnAssemblingProgress);
+	NetMgr->OnAssemblyComplete.AddUObject(this, &AMultiDroneCharacter::OnAssemblyComplete);
+	NetMgr->OnAssemblyTimeout.AddUObject(this, &AMultiDroneCharacter::OnAssemblyTimeout);
+}
+
+void AMultiDroneCharacter::OnAssemblingProgress(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
+{
+	EnterAssemblyMode();
+}
+
+void AMultiDroneCharacter::OnAssemblyComplete(const FString& ArrayId)
+{
+	ExitAssemblyMode();
+}
+
+void AMultiDroneCharacter::OnAssemblyTimeout(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
+{
+	ExitAssemblyMode();
 }
 
 void AMultiDroneCharacter::OnPrimarySelected_Implementation()
@@ -146,6 +243,12 @@ void AMultiDroneCharacter::OnDeselected_Implementation()
 
 void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 Mode)
 {
+	// Block movement commands while in assembly mode
+	if (bInAssemblyMode)
+	{
+		return;
+	}
+
 	ClickTargetLocation = TargetLocation;
 	ClickTargetMode = Mode;
 	bSendClickTarget = true;
