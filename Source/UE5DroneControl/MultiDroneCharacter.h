@@ -25,6 +25,7 @@ public:
 	AMultiDroneCharacter();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaTime) override;
 
 	// ---- Identity ----
@@ -121,6 +122,8 @@ public:
 	virtual void StopClickTargetSending() override;
 
 private:
+	// Called on power_on / reconnect to sync shadow drone position to mirror drone
+	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
 	bool bInAssemblyMode = false;
 
 	// Smooth speed for following mirror drone position (cm/s interp speed)

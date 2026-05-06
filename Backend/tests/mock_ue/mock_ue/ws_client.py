@@ -48,6 +48,9 @@ class WebSocketEventClient:
     def is_connected(self) -> bool:
         return self._connected.is_set()
 
+    def wait_connected(self, timeout: float = 3.0) -> bool:
+        return self._connected.wait(timeout=timeout)
+
     def send_json(self, payload: dict[str, Any]) -> None:
         if not self.is_connected() or self._loop is None or self._send_queue is None:
             raise RuntimeError("WebSocket 未连接")

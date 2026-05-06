@@ -16,7 +16,7 @@
 
 AMultiDroneCharacter::AMultiDroneCharacter()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = true;  // remote: Tick 需要
 
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
@@ -24,9 +24,11 @@ AMultiDroneCharacter::AMultiDroneCharacter()
 	// 确保碰撞设置正确，支持鼠标悬停检测
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
+		// 保持 Pawn 配置，但确保 Visibility 通道阻塞（鼠标检测需要）
 		Capsule->SetCollisionProfileName(TEXT("Pawn"));
 		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		// 【关键】确保 Visibility 通道阻塞 - 鼠标悬停检测需要
 		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 		Capsule->SetSimulatePhysics(false);
 	}
@@ -36,7 +38,6 @@ void AMultiDroneCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Sync selection component DroneId
 	if (SelectionComponent)
 	{
 		SelectionComponent->DroneId = DroneId;
@@ -73,20 +74,19 @@ void AMultiDroneCharacter::BeginPlay()
 		}
 	}
 
-	// Register with DroneRegistrySubsystem
 	UGameInstance* GI = GetGameInstance();
 	if (!GI)
 	{
 		return;
 	}
 
+	// remote: Registry 存为成员变量，供 Tick 使用
 	Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
 	if (!Registry)
 	{
 		return;
 	}
 
-	// Build descriptor and register
 	FDroneDescriptor Desc;
 	Desc.Name            = DroneName;
 	Desc.DroneId         = DroneId;
@@ -102,7 +102,28 @@ void AMultiDroneCharacter::BeginPlay()
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter: Registered %s (ID=%d, BitIndex=%d)"),
 		*DroneName, DroneId, BitIndex);
 
+	// remote: 订阅 assembly 事件
 	SubscribeToAssemblyEvents();
+
+	// local: 订阅 power_on/reconnect 事件，用于上电时位置对齐
+	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+	{
+		NetMgr->OnDroneWsEvent.AddUObject(this, &AMultiDroneCharacter::OnDroneWsEvent);
+	}
+}
+
+void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			NetMgr->OnDroneWsEvent.RemoveAll(this);
+			// 如果 assembly 事件也需要手动解绑，在这里补充
+		}
+	}
 }
 
 void AMultiDroneCharacter::Tick(float DeltaTime)
@@ -114,14 +135,12 @@ void AMultiDroneCharacter::Tick(float DeltaTime)
 		return;
 	}
 
-	// Update mirror delay distance every tick
 	FDroneTelemetrySnapshot MirrorSnap;
 	if (Registry->GetTelemetry(DroneId, MirrorSnap))
 	{
 		MirrorDelayDistance = FVector::Dist(GetActorLocation(), MirrorSnap.WorldLocation);
 	}
 
-	// Assembly mode: follow mirror drone position
 	if (bInAssemblyMode && MirrorSnap.Availability == EDroneAvailability::Online)
 	{
 		const FVector TargetPos = MirrorSnap.WorldLocation;
@@ -138,7 +157,7 @@ void AMultiDroneCharacter::EnterAssemblyMode()
 	}
 
 	bInAssemblyMode = true;
-	bSendClickTarget = false; // stop any in-progress independent movement
+	bSendClickTarget = false;
 
 	if (Registry)
 	{
@@ -243,7 +262,7 @@ void AMultiDroneCharacter::OnDeselected_Implementation()
 
 void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 Mode)
 {
-	// Block movement commands while in assembly mode
+	// remote: assembly 模式下屏蔽移动指令
 	if (bInAssemblyMode)
 	{
 		return;
@@ -258,4 +277,43 @@ void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 
 void AMultiDroneCharacter::StopClickTargetSending()
 {
 	bSendClickTarget = false;
+}
+
+void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt)
+{
+	if (InDroneId != DroneId)
+	{
+		return;
+	}
+
+	if (Event != TEXT("power_on") && Event != TEXT("reconnect"))
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+
+	UDroneRegistrySubsystem* LocalRegistry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	if (!LocalRegistry)
+	{
+		return;
+	}
+
+	AActor* Receiver = LocalRegistry->GetReceiverActor(DroneId);
+	if (!Receiver)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MultiDroneCharacter [%s]: '%s' event — no ReceiverActor registered for DroneId=%d"),
+			*DroneName, *Event, DroneId);
+		return;
+	}
+
+	FVector ReceiverLocation = Receiver->GetActorLocation();
+	SetActorLocation(ReceiverLocation);
+
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: '%s' event — synced to mirror drone at %s"),
+		*DroneName, *Event, *ReceiverLocation.ToString());
 }

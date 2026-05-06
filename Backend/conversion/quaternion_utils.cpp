@@ -1,6 +1,10 @@
 #include "quaternion_utils.h"
 #include <cmath>
 
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+}
+
 void QuaternionUtils::QuatToEuler(double qw, double qx, double qy, double qz,
                                    double& roll, double& pitch, double& yaw)
 {
@@ -17,7 +21,7 @@ void QuaternionUtils::QuatToEuler(double qw, double qx, double qy, double qz,
 
     double sin_p = 2.0 * (ue_qw * ue_qy - ue_qz * ue_qx);
     if (std::abs(sin_p) >= 1.0)
-        pitch = std::copysign(M_PI / 2.0, sin_p);
+        pitch = std::copysign(kPi / 2.0, sin_p);
     else
         pitch = std::asin(sin_p);
 
@@ -26,12 +30,12 @@ void QuaternionUtils::QuatToEuler(double qw, double qx, double qy, double qz,
     yaw = std::atan2(sin_y_cos_p, cos_y_cos_p);
 
     // 步骤3: Yaw 取反（右手系 → 左手系）
-    yaw = -yaw;
+    // The qz flip above already converts positive NED yaw to negative UE yaw.
 
     // 弧度 → 度
-    roll  *= (180.0 / M_PI);
-    pitch *= (180.0 / M_PI);
-    yaw   *= (180.0 / M_PI);
+    roll  *= (180.0 / kPi);
+    pitch *= (180.0 / kPi);
+    yaw   *= (180.0 / kPi);
 }
 
 double QuaternionUtils::GetUeYaw(double qw, double qx, double qy, double qz)

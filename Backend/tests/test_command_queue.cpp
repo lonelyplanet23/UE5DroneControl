@@ -94,8 +94,8 @@ TEST(CommandQueueTest, Clear)
 
 TEST(CommandQueueTest, ThreadSafety)
 {
-    CommandQueue q(1024);
     constexpr int N = 10000;
+    CommandQueue q(N);
 
     std::thread producer([&]() {
         for (int i = 0; i < N; ++i) {

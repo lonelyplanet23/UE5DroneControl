@@ -123,6 +123,25 @@ void HeartbeatManager::StopAll()
     spdlog::info("[Heartbeat] All stopped");
 }
 
+HeartbeatStats HeartbeatManager::GetStats(int drone_id) const
+{
+    HeartbeatStats stats;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = states_.find(drone_id);
+    if (it == states_.end() || !it->second) {
+        return stats;
+    }
+
+    const auto& state = *it->second;
+    stats.running = state.running.load();
+    stats.last_sent_time = state.last_sent_time.load();
+    stats.sent_count = state.sent_count.load();
+    stats.last_ned_x = state.last_ned_x.load();
+    stats.last_ned_y = state.last_ned_y.load();
+    stats.last_ned_z = state.last_ned_z.load();
+    return stats;
+}
+
 // ========================================================
 // 心跳循环（核心修复：#1 指令队列消费）
 // ========================================================
@@ -164,6 +183,8 @@ void HeartbeatManager::HeartbeatLoop(int drone_id)
         }
 
         sender_.Send(drone_id, pkt);
+        state->last_sent_time.store(ts);
+        state->sent_count.fetch_add(1);
 
         // 2Hz 心跳
         std::this_thread::sleep_for(std::chrono::milliseconds(500));

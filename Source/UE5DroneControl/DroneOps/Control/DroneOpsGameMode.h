@@ -37,7 +37,7 @@ protected:
 
 	// Use Cesium coordinate service (false = SimpleCoordinateService)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "DroneOps")
-	bool bUseCesiumCoordinates = false;
+	bool bUseCesiumCoordinates = true;
 
 private:
 	APawn* FindUnpossessedPlacedPawn(bool bLogDiscoveredPawns) const;

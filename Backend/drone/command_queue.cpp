@@ -56,6 +56,19 @@ size_t CommandQueue::Size() const
     return queue_.size();
 }
 
+std::vector<DroneControlPacket> CommandQueue::Snapshot() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::queue<DroneControlPacket> copy = queue_;
+    std::vector<DroneControlPacket> result;
+    result.reserve(copy.size());
+    while (!copy.empty()) {
+        result.push_back(copy.front());
+        copy.pop();
+    }
+    return result;
+}
+
 void CommandQueue::SetPaused(bool paused)
 {
     std::lock_guard<std::mutex> lock(mutex_);

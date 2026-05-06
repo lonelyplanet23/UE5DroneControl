@@ -139,6 +139,7 @@ class MockUEApp:
         return result
 
     def move(self, drone_id: str, x: float, y: float, z: float) -> None:
+        self.ws.wait_connected()
         self.ws.send_json({
             "type": "move",
             "drone_id": drone_id,
@@ -159,6 +160,7 @@ class MockUEApp:
         ids = list(drone_ids) if drone_ids else self.get_selected()
         if not ids:
             raise RuntimeError("pause 需要显式 drone_id，或先使用 select")
+        self.ws.wait_connected()
         self.ws.send_json({
             "type": "pause",
             "drone_ids": ids,
@@ -169,6 +171,7 @@ class MockUEApp:
         ids = list(drone_ids) if drone_ids else self.get_selected()
         if not ids:
             raise RuntimeError("resume 需要显式 drone_id，或先使用 select")
+        self.ws.wait_connected()
         self.ws.send_json({
             "type": "resume",
             "drone_ids": ids,

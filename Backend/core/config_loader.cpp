@@ -1,6 +1,7 @@
 #include "config_loader.h"
 #include <yaml-cpp/yaml.h>
 #include <spdlog/spdlog.h>
+#include <unordered_set>
 
 AppConfig LoadConfig(const std::string& path)
 {

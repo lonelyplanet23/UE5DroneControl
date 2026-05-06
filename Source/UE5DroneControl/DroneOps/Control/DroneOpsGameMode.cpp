@@ -3,6 +3,7 @@
 #include "DroneOpsGameMode.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/SimpleCoordinateService.h"
+#include "DroneOps/Core/CesiumCoordinateService.h"
 #include "DroneOpsPlayerController.h"
 #include "MultiDroneCharacter.h"
 #include "EngineUtils.h"
@@ -70,12 +71,22 @@ void ADroneOpsGameMode::InitializeCoordinateService()
 		return;
 	}
 
-	// For now, always use SimpleCoordinateService (Cesium will be added later)
-	USimpleCoordinateService* CoordService = NewObject<USimpleCoordinateService>(this);
-	if (CoordService)
+	// Choose coordinate service based on bUseCesiumCoordinates
+	if (bUseCesiumCoordinates)
 	{
+		UCesiumCoordinateService* CoordService = NewObject<UCesiumCoordinateService>(this);
+		CoordService->Initialize(GetWorld());
 		Registry->SetCoordinateService(CoordService);
-		UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: SimpleCoordinateService initialized"));
+		UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: CesiumCoordinateService initialized"));
+	}
+	else
+	{
+		USimpleCoordinateService* CoordService = NewObject<USimpleCoordinateService>(this);
+		if (CoordService)
+		{
+			Registry->SetCoordinateService(CoordService);
+			UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: SimpleCoordinateService initialized"));
+		}
 	}
 }
 

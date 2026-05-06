@@ -4,6 +4,10 @@ project(DroneBackend VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(WIN32)
+    add_compile_definitions(_WIN32_WINNT=0x0601)
+endif()
+
 # ============================================================
 # Find packages (installed via vcpkg)
 # ============================================================
@@ -78,6 +82,11 @@ set(TEST_SOURCES
     tests/test_gps_anchor_manager.cpp
     tests/test_command_queue.cpp
     tests/test_state_machine.cpp
+    conversion/coordinate_converter.cpp
+    conversion/quaternion_utils.cpp
+    conversion/gps_anchor_manager.cpp
+    drone/command_queue.cpp
+    drone/state_machine.cpp
 )
 
 add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES} ${HEADERS})
