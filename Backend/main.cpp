@@ -66,12 +66,13 @@ int main(int argc, char* argv[])
     }
 
     // 9. 遥测回调 → DroneManager
-    udp_receiver.SetCallback([&](int drone_id, const TelemetryData& tel) {
-        drone_mgr.OnTelemetryReceived(drone_id, tel);
+    udp_receiver.SetCallback([&](int slot, const TelemetryData& tel) {
+        drone_mgr.OnTelemetryReceivedBySlot(slot, tel);
 
         if (assembly_ctrl.GetState() == AssemblyState::Assembling) {
+            int drone_id = drone_mgr.ResolveDroneIdBySlot(slot);
             assembly_ctrl.UpdateDronePosition(
-                drone_id,
+                drone_id > 0 ? drone_id : slot,
                 tel.position_ned[0],
                 tel.position_ned[1],
                 tel.position_ned[2]);

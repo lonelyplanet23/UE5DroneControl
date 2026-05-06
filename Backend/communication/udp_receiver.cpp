@@ -156,7 +156,7 @@ void UdpReceiver::HandleReceive(PortListener& listener,
 
             // 回调通知
             if (callback_) {
-                callback_(listener.drone_id, tel);
+                callback_(listener.slot, tel);
             }
 
         } catch (const YAML::Exception& e) {

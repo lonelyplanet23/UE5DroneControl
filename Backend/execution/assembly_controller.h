@@ -49,6 +49,7 @@ struct AssemblyConfig {
 class AssemblyController {
 public:
     using ProgressCallback = std::function<void(const AssemblyProgress&)>;
+    using TimeoutCallback = std::function<void(const AssemblyProgress&)>;
 
     explicit AssemblyController(int timeout_sec = 60);
 
@@ -76,6 +77,7 @@ public:
 
     /// 注册进度回调
     void SetProgressCallback(ProgressCallback cb);
+    void SetTimeoutCallback(TimeoutCallback cb);
 
 private:
     AssemblyState state_ = AssemblyState::Idle;
@@ -92,4 +94,5 @@ private:
 
     std::chrono::steady_clock::time_point start_time_;
     ProgressCallback progress_cb_;
+    TimeoutCallback timeout_cb_;
 };

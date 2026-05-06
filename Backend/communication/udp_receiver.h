@@ -13,7 +13,7 @@
 /// 解析后通过回调通知 DroneManager
 class UdpReceiver {
 public:
-    using ReceiveCallback = std::function<void(int drone_id, const TelemetryData&)>;
+    using ReceiveCallback = std::function<void(int slot, const TelemetryData&)>;
 
     UdpReceiver(boost::asio::io_context& io_context);
     ~UdpReceiver();

@@ -1,0 +1,14 @@
+{
+  "name": "ue5-drone-control-backend",
+  "version-string": "1.0.0",
+  "builtin-baseline": "544a4c5c297e60e4ac4a5a1810df66748d908869",
+  "dependencies": [
+    "boost-system",
+    "boost-json",
+    "boost-beast",
+    "yaml-cpp",
+    "nlohmann-json",
+    "spdlog",
+    "gtest"
+  ]
+}

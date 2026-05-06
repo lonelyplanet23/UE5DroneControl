@@ -5,6 +5,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
+#include <vector>
 
 /// 每架无人机独立的 FIFO 线程安全指令队列
 ///
@@ -31,6 +32,7 @@ public:
 
     /// 当前队列大小
     size_t Size() const;
+    std::vector<DroneControlPacket> Snapshot() const;
 
     /// 暂停/恢复
     void SetPaused(bool paused);

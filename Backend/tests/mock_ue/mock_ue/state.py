@@ -39,7 +39,7 @@ class MockUEState:
                 if not isinstance(item, dict):
                     continue
 
-                drone_id = str(item.get("id", ""))
+                drone_id = str(item.get("id_str", item.get("drone_id_str", item.get("id", ""))))
                 if not drone_id:
                     continue
                 seen.add(drone_id)
@@ -85,7 +85,7 @@ class MockUEState:
         if not message_type:
             return None
 
-        drone_id = str(message.get("drone_id", ""))
+        drone_id = str(message.get("drone_id_str", message.get("drone_id", "")))
         with self._lock:
             if drone_id and drone_id not in self.drones:
                 self.drones[drone_id] = DroneState(drone_id=drone_id)
@@ -131,7 +131,7 @@ class MockUEState:
                 return text
 
             if message_type == "alert" and drone is not None:
-                alert_name = str(message.get("alert", ""))
+                alert_name = str(message.get("alert", message.get("alert_type", "")))
                 value = message.get("value")
                 drone.alerts[alert_name] = AlertState(
                     alert=alert_name,
