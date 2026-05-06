@@ -828,8 +828,9 @@ void ARealTimeDroneReceiver::OnWebSocketTelemetry(int32 InDroneId, const FDroneT
 		return;
 	}
 
-	// Snapshot.WorldLocation is the offset from anchor (cm). Use InitialLocation as anchor until GPS anchoring is implemented.
-	TargetLocation = InitialLocation + Snapshot.WorldLocation;
+	// Use GPS anchor if available, otherwise fall back to actor's spawn location
+	FVector Anchor = bHasGpsAnchor ? AnchorWorldLocation : InitialLocation;
+	TargetLocation = Anchor + Snapshot.WorldLocation;
 	TargetRotation = Snapshot.Attitude;
 }
 
