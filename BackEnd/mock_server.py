@@ -74,7 +74,7 @@ def delete_drone(drone_id):
 @app.route("/api/drones/<int:drone_id>/anchor", methods=["GET"])
 def get_anchor(drone_id):
     print(f"[HTTP] GET /api/drones/{drone_id}/anchor")
-    return jsonify({"drone_id": drone_id, "lat": 39.9, "lon": 116.3, "alt": 50.0})
+    return jsonify({"drone_id": drone_id, "lat": 39.9, "lon": 116.3, "alt": 200.0})
 
 # ---- Test injection endpoints ----
 
@@ -88,7 +88,7 @@ def test_event():
         "event": data.get("event", "power_on"),
         "gps_lat": data.get("gps_lat", 39.9),
         "gps_lon": data.get("gps_lon", 116.3),
-        "gps_alt": data.get("gps_alt", 50.0),
+        "gps_alt": data.get("gps_alt", 200.0),
     })
     asyncio.run_coroutine_threadsafe(_broadcast(msg), _ws_loop)
     print(f"[HTTP] POST /test/event -> {msg}")
@@ -169,6 +169,24 @@ async def telemetry_push():
                 "roll": 0.0,
                 "speed": round(radius * 0.3, 1),
                 "battery": 85,
+            })
+            await _broadcast(msg)
+
+async def telemetry_push_zero():
+    """Push zero-offset telemetry for anchor verification. Drones stay at anchor point."""
+    global ws_clients
+    while True:
+        await asyncio.sleep(0.1)
+        if not ws_clients:
+            continue
+        for drone in DRONES:
+            did = drone["id"]
+            msg = json.dumps({
+                "type": "telemetry",
+                "drone_id": did,
+                "x": 0.0, "y": 0.0, "z": 0.0,
+                "pitch": 0.0, "yaw": 0.0, "roll": 0.0,
+                "speed": 0.0, "battery": 100,
             })
             await _broadcast(msg)
 

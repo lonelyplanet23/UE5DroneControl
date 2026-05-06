@@ -3,6 +3,8 @@
 #include "DroneOps/Drone/DroneSelectionComponent.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
+#include "DroneOps/Core/ICoordinateService.h"
+#include "DroneOps/Network/DroneNetworkManager.h"
 #include "Engine/GameInstance.h"
 
 // --- 引入必要的底层头文件 ---
@@ -89,6 +91,13 @@ void ARealTimeDroneReceiver::BeginPlay()
 				Registry->OnTelemetryUpdated.AddDynamic(this, &ARealTimeDroneReceiver::OnWebSocketTelemetry);
 				UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: WebSocket mode, subscribed to Registry telemetry"), *DroneName);
 			}
+
+			// Subscribe to power_on / reconnect events for GPS anchoring
+			if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+			{
+				NetMgr->OnDroneWsEvent.AddUObject(this, &ARealTimeDroneReceiver::OnDroneWsEvent);
+				UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: Subscribed to WS events for GPS anchoring"), *DroneName);
+			}
 		}
 	}
 	else
@@ -137,6 +146,15 @@ void ARealTimeDroneReceiver::BeginPlay()
 void ARealTimeDroneReceiver::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
+
+	// Unsubscribe from WS events
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			NetMgr->OnDroneWsEvent.RemoveAll(this);
+		}
+	}
 
 	if (ListenSocket)
 	{
@@ -257,7 +275,7 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 	FVector NewLoc = FMath::VInterpTo(CurrentLoc, TargetLocation, DeltaTime, SmoothSpeed);
 
 	// 启用 Sweep 后，飞机移动时会进行碰撞检测
-	SetActorLocation(NewLoc, true);
+	SetActorLocation(NewLoc, false);
 
 	// === 4. 平滑旋转 ===
 	// 【优先级1】如果启用了"使用接收的旋转"，则使用无人机发送的姿态
@@ -793,7 +811,47 @@ void ARealTimeDroneReceiver::OnWebSocketTelemetry(int32 InDroneId, const FDroneT
 		return;
 	}
 
-	// Snapshot.WorldLocation is the offset from anchor (cm). Use InitialLocation as anchor until GPS anchoring is implemented.
-	TargetLocation = InitialLocation + Snapshot.WorldLocation;
+	// Use GPS anchor if available, otherwise fall back to actor's spawn location
+	FVector Anchor = bHasGpsAnchor ? AnchorWorldLocation : InitialLocation;
+	TargetLocation = Anchor + Snapshot.WorldLocation;
 	TargetRotation = Snapshot.Attitude;
+}
+
+void ARealTimeDroneReceiver::OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt)
+{
+	if (InDroneId != DroneId)
+	{
+		return;
+	}
+
+	if (Event != TEXT("power_on") && Event != TEXT("reconnect"))
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+
+	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	if (!Registry)
+	{
+		return;
+	}
+
+	TScriptInterface<ICoordinateService> CoordService = Registry->GetCoordinateService();
+	if (!CoordService || !ICoordinateService::Execute_IsGeographicSupported(CoordService.GetObject()))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RealTimeDroneReceiver [%s]: Received '%s' event but CoordinateService does not support GPS. "
+			"Enable bUseCesiumCoordinates in DroneOpsGameMode."), *DroneName, *Event);
+		return;
+	}
+
+	AnchorWorldLocation = ICoordinateService::Execute_GeographicToWorld(CoordService.GetObject(), GpsLat, GpsLon, GpsAlt);
+	bHasGpsAnchor = true;
+
+	UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: '%s' event — GPS anchor (%.6f, %.6f, %.1fm) → UE world %s"),
+		*DroneName, *Event, GpsLat, GpsLon, GpsAlt, *AnchorWorldLocation.ToString());
 }

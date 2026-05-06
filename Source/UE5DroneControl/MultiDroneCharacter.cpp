@@ -5,6 +5,7 @@
 #include "DroneOps/Drone/DroneCommandSenderComponent.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
+#include "DroneOps/Network/DroneNetworkManager.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "Components/WidgetComponent.h"
@@ -100,6 +101,25 @@ void AMultiDroneCharacter::BeginPlay()
 
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter: Registered %s (ID=%d, BitIndex=%d)"),
 		*DroneName, DroneId, BitIndex);
+
+	// Subscribe to power_on / reconnect events to sync position with mirror drone
+	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+	{
+		NetMgr->OnDroneWsEvent.AddUObject(this, &AMultiDroneCharacter::OnDroneWsEvent);
+	}
+}
+
+void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			NetMgr->OnDroneWsEvent.RemoveAll(this);
+		}
+	}
 }
 
 void AMultiDroneCharacter::OnPrimarySelected_Implementation()
@@ -155,4 +175,44 @@ void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 
 void AMultiDroneCharacter::StopClickTargetSending()
 {
 	bSendClickTarget = false;
+}
+
+void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt)
+{
+	if (InDroneId != DroneId)
+	{
+		return;
+	}
+
+	if (Event != TEXT("power_on") && Event != TEXT("reconnect"))
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+
+	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	if (!Registry)
+	{
+		return;
+	}
+
+	// Move shadow drone to the mirror drone's current world position
+	AActor* Receiver = Registry->GetReceiverActor(DroneId);
+	if (!Receiver)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MultiDroneCharacter [%s]: '%s' event — no ReceiverActor registered for DroneId=%d"),
+			*DroneName, *Event, DroneId);
+		return;
+	}
+
+	FVector ReceiverLocation = Receiver->GetActorLocation();
+	SetActorLocation(ReceiverLocation);
+
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: '%s' event — synced to mirror drone at %s"),
+		*DroneName, *Event, *ReceiverLocation.ToString());
 }

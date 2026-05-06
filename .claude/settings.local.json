@@ -24,7 +24,10 @@
       "Bash(wmic pagefile:*)",
       "Bash(systeminfo)",
       "Bash(powershell -command \"Get-WmiObject Win32_PageFileUsage | Select-Object Name, AllocatedBaseSize, CurrentUsage, PeakUsage\")",
-      "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Source/Runtime/Core/Public/**)"
+      "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Source/Runtime/Core/Public/**)",
+      "Bash(find /d/RedAlert/UE5DroneControl -name *Cesium* -o -name *cesium*)",
+      "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Plugins/Marketplace/Cesiumfo9eaf76ca58f3V10/Source/CesiumRuntime/Public/**)",
+      "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Plugins/Marketplace/Cesiumfo9eaf76ca58f3V10/Source/CesiumRuntime/**)"
     ],
     "additionalDirectories": [
       "\\tmp",

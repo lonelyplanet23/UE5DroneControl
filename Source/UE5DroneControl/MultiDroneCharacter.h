@@ -25,6 +25,7 @@ public:
 	AMultiDroneCharacter();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	// ---- Identity ----
 
@@ -88,4 +89,8 @@ public:
 
 	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
 	virtual void StopClickTargetSending() override;
+
+private:
+	// Called on power_on / reconnect to sync shadow drone position to mirror drone
+	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
 };

@@ -150,12 +150,19 @@ private:
 	UFUNCTION()
 	void OnWebSocketTelemetry(int32 InDroneId, const FDroneTelemetrySnapshot& Snapshot);
 
+	// Called when a power_on or reconnect event arrives from the backend
+	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
+
 	FVector InitialLocation = FVector::ZeroVector;
 	FVector TargetLocation;
 	FRotator TargetRotation;
 	FRotator LastRotation;
 	FVector ReferencePosition = FVector::ZeroVector;
 	bool bHasReceivedFirstData = false;
+
+	// GPS anchor (UE5 world coords, cm) set on power_on / reconnect
+	FVector AnchorWorldLocation = FVector::ZeroVector;
+	bool bHasGpsAnchor = false;
 
 	int32 CurrentDetectedPort = -1;
 	float AutoDetectStartTime = 0.0f;
