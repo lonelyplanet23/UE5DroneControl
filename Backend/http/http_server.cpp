@@ -254,6 +254,8 @@ http::response<http::string_body> HttpServer::HandleHttp(
         auto qpos = path.find('?');
         if (qpos != std::string::npos) path = path.substr(0, qpos);
 
+        spdlog::info("[HTTP] {} {}", method, path);
+
         if (method == "OPTIONS") return MakeResponse(req, 204, "");
 
         const auto body = parse_body(req);
@@ -744,6 +746,7 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
         double y = get_number(msg, "y", 0.0);
         double z = get_number(msg, "z", 0.0);
         int drone_id = drone_id_from_string(drone_id_str);
+        spdlog::info("[WS] MOVE  drone_id={}  x={:.1f}  y={:.1f}  z={:.1f}", drone_id, x, y, z);
         if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z)) {
             ws_manager_.send(session, json_stringify(boost::json::object{
                 {"type", "error"}, {"code", 404}, {"message", "drone not found"}}));
@@ -762,12 +765,19 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     if (type == "pause") {
         bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            std::string ids_str;
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                if (!ids_str.empty()) ids_str += ",";
+                ids_str += value_to_string(id_value);
+            }
+            spdlog::info("[WS] PAUSE  drone_ids=[{}]", ids_str);
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
                 any_ok = drone_mgr_.ProcessPauseCommand(
                     drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            spdlog::info("[WS] PAUSE  drone_id={}", drone_id_str);
             any_ok = drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
         }
         if (!any_ok) {
@@ -786,12 +796,19 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     if (type == "resume") {
         bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            std::string ids_str;
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                if (!ids_str.empty()) ids_str += ",";
+                ids_str += value_to_string(id_value);
+            }
+            spdlog::info("[WS] RESUME  drone_ids=[{}]", ids_str);
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
                 any_ok = drone_mgr_.ProcessResumeCommand(
                     drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            spdlog::info("[WS] RESUME  drone_id={}", drone_id_str);
             any_ok = drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
         }
         if (!any_ok) {
@@ -830,6 +847,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
     }
 
     auto session = ws_manager_.add(&ws);
+    spdlog::info("[WS] Client connected. Active sessions: {}", ws_manager_.count());
     beast::flat_buffer buf;
 
     while (true) {
@@ -867,6 +885,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
 
     session->alive = false;
     ws_manager_.remove(&ws);
+    spdlog::info("[WS] Client disconnected. Active sessions: {}", ws_manager_.count());
 }
 
 // ============================================================

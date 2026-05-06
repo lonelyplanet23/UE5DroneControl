@@ -236,7 +236,7 @@ bool DroneManager::ProcessMoveCommand(int drone_id, double ue_x, double ue_y, do
     hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
 
     ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
-    spdlog::debug("MoveCommand drone={}: NED({:.2f}, {:.2f}, {:.2f})",
+    spdlog::info("MoveCommand drone={}: NED({:.2f}, {:.2f}, {:.2f})",
                   drone_id, ned_n, ned_e, ned_d);
     return true;
 }
