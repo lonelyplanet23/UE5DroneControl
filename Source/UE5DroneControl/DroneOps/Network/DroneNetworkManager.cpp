@@ -1,12 +1,15 @@
 #include "DroneOps/Network/DroneNetworkManager.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
+#include "PathEditor/DronePathActor.h"
+#include "PathEditor/DroneWaypointTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -288,6 +291,52 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		OnDroneWsAlert.Broadcast(DroneId, Alert, Value);
 		return;
 	}
+
+	// Assembly progress: { "type": "assembling", "array_id": "a1", "ready_count": N, "total_count": N }
+	if (MsgType == TEXT("assembling"))
+	{
+		FString ArrayId;
+		Root->TryGetStringField(TEXT("array_id"), ArrayId);
+
+		int32 ReadyCount = 0, TotalCount = 0;
+		Root->TryGetNumberField(TEXT("ready_count"), ReadyCount);
+		Root->TryGetNumberField(TEXT("total_count"), TotalCount);
+
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Assembling array=%s %d/%d"),
+			*ArrayId, ReadyCount, TotalCount);
+
+		OnAssemblingProgress.Broadcast(ArrayId, ReadyCount, TotalCount);
+		return;
+	}
+
+	// Assembly complete: { "type": "assembly_complete", "array_id": "a1" }
+	if (MsgType == TEXT("assembly_complete"))
+	{
+		FString ArrayId;
+		Root->TryGetStringField(TEXT("array_id"), ArrayId);
+
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Assembly complete array=%s"), *ArrayId);
+
+		OnAssemblyComplete.Broadcast(ArrayId);
+		return;
+	}
+
+	// Assembly timeout: { "type": "assembly_timeout", "array_id": "a1", "ready_count": N, "total_count": N }
+	if (MsgType == TEXT("assembly_timeout"))
+	{
+		FString ArrayId;
+		Root->TryGetStringField(TEXT("array_id"), ArrayId);
+
+		int32 ReadyCount = 0, TotalCount = 0;
+		Root->TryGetNumberField(TEXT("ready_count"), ReadyCount);
+		Root->TryGetNumberField(TEXT("total_count"), TotalCount);
+
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] Assembly timeout array=%s %d/%d"),
+			*ArrayId, ReadyCount, TotalCount);
+
+		OnAssemblyTimeout.Broadcast(ArrayId, ReadyCount, TotalCount);
+		return;
+	}
 }
 
 // ---- Control commands ----
@@ -332,4 +381,66 @@ void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool 
 		TEXT("{\"type\":\"%s\",\"drone_ids\":[%s]}"), *Type, *IdsArray);
 
 	WsClient->SendMessage(Json);
+}
+
+void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, FOnHttpResponse OnComplete)
+{
+	if (!HttpClient)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] SendArrayTask: HttpClient not ready"));
+		return;
+	}
+
+	// Build JSON body:
+	// { "paths": [ { "pathId": N, "drone_id": "N", "bClosedLoop": bool,
+	//                "waypoints": [ { "location": {"x":..,"y":..,"z":..},
+	//                                 "segmentSpeed": .., "waitTime": .. } ] } ] }
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> PathsArray;
+
+	for (const TPair<int32, ADronePathActor*>& Pair : PathMap)
+	{
+		const int32 DroneId = Pair.Key;
+		const ADronePathActor* Path = Pair.Value;
+		if (!IsValid(Path))
+		{
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> PathObj = MakeShared<FJsonObject>();
+		PathObj->SetNumberField(TEXT("pathId"), Path->GetPathNumericId());
+		PathObj->SetStringField(TEXT("drone_id"), FString::FromInt(DroneId));
+		PathObj->SetBoolField(TEXT("bClosedLoop"), Path->bClosedLoop);
+
+		TArray<TSharedPtr<FJsonValue>> WaypointsArray;
+		for (const FDroneWaypoint& Wp : Path->Waypoints)
+		{
+			TSharedPtr<FJsonObject> WpObj = MakeShared<FJsonObject>();
+
+			// location is stored in path-local space; convert to world for the backend
+			const FVector WorldLoc = Path->GetActorTransform().TransformPosition(Wp.Location);
+			TSharedPtr<FJsonObject> LocObj = MakeShared<FJsonObject>();
+			LocObj->SetNumberField(TEXT("x"), WorldLoc.X);
+			LocObj->SetNumberField(TEXT("y"), WorldLoc.Y);
+			LocObj->SetNumberField(TEXT("z"), WorldLoc.Z);
+			WpObj->SetObjectField(TEXT("location"), LocObj);
+
+			WpObj->SetNumberField(TEXT("segmentSpeed"), Wp.SegmentSpeed);
+			WpObj->SetNumberField(TEXT("waitTime"), Wp.WaitTime);
+
+			WaypointsArray.Add(MakeShared<FJsonValueObject>(WpObj));
+		}
+
+		PathObj->SetArrayField(TEXT("waypoints"), WaypointsArray);
+		PathsArray.Add(MakeShared<FJsonValueObject>(PathObj));
+	}
+
+	Root->SetArrayField(TEXT("paths"), PathsArray);
+
+	FString Body;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTask: POST /api/arrays, %d paths"), PathMap.Num());
+	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
 }

@@ -16,6 +16,8 @@
 
 AMultiDroneCharacter::AMultiDroneCharacter()
 {
+	PrimaryActorTick.bCanEverTick = true;  // remote: Tick 需要
+
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
 
@@ -36,7 +38,6 @@ void AMultiDroneCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Sync selection component DroneId
 	if (SelectionComponent)
 	{
 		SelectionComponent->DroneId = DroneId;
@@ -73,20 +74,19 @@ void AMultiDroneCharacter::BeginPlay()
 		}
 	}
 
-	// Register with DroneRegistrySubsystem
 	UGameInstance* GI = GetGameInstance();
 	if (!GI)
 	{
 		return;
 	}
 
-	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	// remote: Registry 存为成员变量，供 Tick 使用
+	Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
 	if (!Registry)
 	{
 		return;
 	}
 
-	// Build descriptor and register
 	FDroneDescriptor Desc;
 	Desc.Name            = DroneName;
 	Desc.DroneId         = DroneId;
@@ -102,7 +102,10 @@ void AMultiDroneCharacter::BeginPlay()
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter: Registered %s (ID=%d, BitIndex=%d)"),
 		*DroneName, DroneId, BitIndex);
 
-	// Subscribe to power_on / reconnect events to sync position with mirror drone
+	// remote: 订阅 assembly 事件
+	SubscribeToAssemblyEvents();
+
+	// local: 订阅 power_on/reconnect 事件，用于上电时位置对齐
 	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 	{
 		NetMgr->OnDroneWsEvent.AddUObject(this, &AMultiDroneCharacter::OnDroneWsEvent);
@@ -118,8 +121,101 @@ void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 		{
 			NetMgr->OnDroneWsEvent.RemoveAll(this);
+			// 如果 assembly 事件也需要手动解绑，在这里补充
 		}
 	}
+}
+
+void AMultiDroneCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!Registry)
+	{
+		return;
+	}
+
+	FDroneTelemetrySnapshot MirrorSnap;
+	if (Registry->GetTelemetry(DroneId, MirrorSnap))
+	{
+		MirrorDelayDistance = FVector::Dist(GetActorLocation(), MirrorSnap.WorldLocation);
+	}
+
+	if (bInAssemblyMode && MirrorSnap.Availability == EDroneAvailability::Online)
+	{
+		const FVector TargetPos = MirrorSnap.WorldLocation;
+		const FVector NewPos = FMath::VInterpTo(GetActorLocation(), TargetPos, DeltaTime, AssemblyFollowInterpSpeed);
+		SetActorLocation(NewPos);
+	}
+}
+
+void AMultiDroneCharacter::EnterAssemblyMode()
+{
+	if (bInAssemblyMode)
+	{
+		return;
+	}
+
+	bInAssemblyMode = true;
+	bSendClickTarget = false;
+
+	if (Registry)
+	{
+		Registry->ApplyControlLock(DroneId, EDroneControlLockReason::FormationPlayback);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Entered assembly mode"), *DroneName);
+}
+
+void AMultiDroneCharacter::ExitAssemblyMode()
+{
+	if (!bInAssemblyMode)
+	{
+		return;
+	}
+
+	bInAssemblyMode = false;
+
+	if (Registry)
+	{
+		Registry->ReleaseControlLock(DroneId);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Exited assembly mode"), *DroneName);
+}
+
+void AMultiDroneCharacter::SubscribeToAssemblyEvents()
+{
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+
+	UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>();
+	if (!NetMgr)
+	{
+		return;
+	}
+
+	NetMgr->OnAssemblingProgress.AddUObject(this, &AMultiDroneCharacter::OnAssemblingProgress);
+	NetMgr->OnAssemblyComplete.AddUObject(this, &AMultiDroneCharacter::OnAssemblyComplete);
+	NetMgr->OnAssemblyTimeout.AddUObject(this, &AMultiDroneCharacter::OnAssemblyTimeout);
+}
+
+void AMultiDroneCharacter::OnAssemblingProgress(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
+{
+	EnterAssemblyMode();
+}
+
+void AMultiDroneCharacter::OnAssemblyComplete(const FString& ArrayId)
+{
+	ExitAssemblyMode();
+}
+
+void AMultiDroneCharacter::OnAssemblyTimeout(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
+{
+	ExitAssemblyMode();
 }
 
 void AMultiDroneCharacter::OnPrimarySelected_Implementation()
@@ -166,6 +262,12 @@ void AMultiDroneCharacter::OnDeselected_Implementation()
 
 void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 Mode)
 {
+	// remote: assembly 模式下屏蔽移动指令
+	if (bInAssemblyMode)
+	{
+		return;
+	}
+
 	ClickTargetLocation = TargetLocation;
 	ClickTargetMode = Mode;
 	bSendClickTarget = true;
@@ -195,14 +297,13 @@ void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event,
 		return;
 	}
 
-	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
-	if (!Registry)
+	UDroneRegistrySubsystem* LocalRegistry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	if (!LocalRegistry)
 	{
 		return;
 	}
 
-	// Move shadow drone to the mirror drone's current world position
-	AActor* Receiver = Registry->GetReceiverActor(DroneId);
+	AActor* Receiver = LocalRegistry->GetReceiverActor(DroneId);
 	if (!Receiver)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("MultiDroneCharacter [%s]: '%s' event — no ReceiverActor registered for DroneId=%d"),

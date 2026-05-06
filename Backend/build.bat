@@ -24,8 +24,8 @@ set VCPKG_TOOLCHAIN=
 if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg\scripts\buildsystems\vcpkg.cmake" (
     set VCPKG_TOOLCHAIN=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg\scripts\buildsystems\vcpkg.cmake
 )
-REM 如果有独立安装的 vcpkg，取消下面这行的注释并修改路径：
-REM set VCPKG_TOOLCHAIN=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+REM 独立安装的 vcpkg 路径（修改为你实际的 vcpkg 安装目录）
+set VCPKG_TOOLCHAIN=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake
 
 if "%VCPKG_TOOLCHAIN%"=="" (
     echo [ERROR] vcpkg toolchain not found. Please set VCPKG_TOOLCHAIN manually.
