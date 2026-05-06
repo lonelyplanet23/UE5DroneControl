@@ -1,0 +1,103 @@
+[2026-05-06 17:38:48.727] [info] [:] Logger initialized. Level=info, File=./logs/backend.log
+[2026-05-06 17:38:48.727] [info] [:] ============================================
+[2026-05-06 17:38:48.728] [info] [:]   Drone Backend v1.0.0
+[2026-05-06 17:38:48.728] [info] [:]   HTTP :8080  WS :8081
+[2026-05-06 17:38:48.729] [info] [:] ============================================
+[2026-05-06 17:38:48.729] [info] [:] DroneManager created
+[2026-05-06 17:38:48.730] [info] [:] [UdpReceiver] Slot 1: listening port 8888 for drone 1
+[2026-05-06 17:38:48.731] [info] [:] [UdpReceiver] Slot 2: listening port 8890 for drone 2
+[2026-05-06 17:38:48.731] [info] [:] [UdpReceiver] Slot 3: listening port 8892 for drone 3
+[2026-05-06 17:38:48.732] [info] [:] [UdpReceiver] Slot 4: listening port 8894 for drone 4
+[2026-05-06 17:38:48.733] [info] [:] [UdpReceiver] Slot 5: listening port 8896 for drone 5
+[2026-05-06 17:38:48.734] [info] [:] [UdpReceiver] Slot 6: listening port 8898 for drone 6
+[2026-05-06 17:38:48.738] [info] [:] [UdpSender] Drone 1 target set: 192.168.30.104:8889
+[2026-05-06 17:38:48.740] [info] [:] [UdpSender] Drone 2 target set: 192.168.30.104:8891
+[2026-05-06 17:38:48.740] [info] [:] [UdpSender] Drone 3 target set: 192.168.30.104:8893
+[2026-05-06 17:38:48.741] [info] [:] [UdpSender] Drone 4 target set: 192.168.30.104:8895
+[2026-05-06 17:38:48.742] [info] [:] [UdpSender] Drone 5 target set: 192.168.30.104:8897
+[2026-05-06 17:38:48.742] [info] [:] [UdpSender] Drone 6 target set: 192.168.30.104:8899
+[2026-05-06 17:38:48.743] [info] [:] [UdpReceiver] Listening on port 8888
+[2026-05-06 17:38:48.744] [info] [:] [UdpReceiver] Listening on port 8890
+[2026-05-06 17:38:48.746] [info] [:] [UdpReceiver] Listening on port 8892
+[2026-05-06 17:38:48.748] [info] [:] [UdpReceiver] Listening on port 8894
+[2026-05-06 17:38:48.750] [info] [:] [UdpReceiver] Listening on port 8896
+[2026-05-06 17:38:48.750] [info] [:] [UdpReceiver] Listening on port 8898
+[2026-05-06 17:38:48.751] [info] [:] Backend started. Press Ctrl+C to stop.
+[2026-05-06 17:38:48.755] [info] [:] [HTTP] Listening on 0.0.0.0:8080
+[2026-05-06 17:38:48.755] [info] [:] [WS] Listening on 0.0.0.0:8081
+[2026-05-06 17:38:58.018] [info] [:] [WS] Client connected. Active sessions: 1
+[2026-05-06 17:38:59.043] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:01.843] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:05.002] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:07.993] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:10.901] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:13.120] [info] [:] [WS] MOVE  drone_id=1  x=19385.8  y=5380.4  z=-6287.9
+[2026-05-06 17:39:13.861] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:16.917] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:18.130] [info] [:] [WS] MOVE  drone_id=1  x=19857.1  y=4271.7  z=-6287.9
+[2026-05-06 17:39:19.885] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:22.131] [info] [:] [WS] MOVE  drone_id=1  x=21639.5  y=4972.5  z=-6287.9
+[2026-05-06 17:39:22.870] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:25.861] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:27.082] [info] [:] [WS] MOVE  drone_id=1  x=21320.4  y=4355.4  z=-6287.9
+[2026-05-06 17:39:28.783] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:30.621] [info] [:] [WS] PAUSE  drone_ids=[1]
+[2026-05-06 17:39:31.958] [info] [:] [WS] RESUME  drone_ids=[1]
+[2026-05-06 17:39:31.961] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:32.849] [info] [:] [WS] PAUSE  drone_ids=[1]
+[2026-05-06 17:39:33.301] [info] [:] [WS] RESUME  drone_ids=[1]
+[2026-05-06 17:39:33.518] [info] [:] [WS] PAUSE  drone_ids=[1]
+[2026-05-06 17:39:34.868] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:36.010] [info] [:] [WS] RESUME  drone_ids=[1]
+[2026-05-06 17:39:37.538] [info] [:] [WS] PAUSE  drone_ids=[1]
+[2026-05-06 17:39:37.973] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:40.829] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:43.812] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:46.909] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:49.892] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:52.912] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:55.938] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:39:58.954] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:01.828] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:04.906] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:07.873] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:10.840] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:13.910] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:16.867] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:19.842] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:22.960] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:25.837] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:28.799] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:31.936] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:34.885] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:37.878] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:40.909] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:43.855] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:46.866] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:49.813] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:52.802] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:55.938] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:40:58.894] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:01.768] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:02.588] [info] [:] [WS] RESUME  drone_ids=[1]
+[2026-05-06 17:41:04.810] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:06.026] [info] [:] [WS] PAUSE  drone_ids=[1]
+[2026-05-06 17:41:07.453] [info] [:] [WS] RESUME  drone_ids=[1]
+[2026-05-06 17:41:07.856] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:10.841] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:11.266] [info] [:] [WS] MOVE  drone_id=1  x=21310.3  y=4394.8  z=-6287.9
+[2026-05-06 17:41:13.900] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:14.776] [info] [:] [WS] MOVE  drone_id=1  x=22545.9  y=5407.7  z=-6287.9
+[2026-05-06 17:41:16.821] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:19.474] [info] [:] [WS] PAUSE  drone_ids=[1]
+[2026-05-06 17:41:19.906] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:20.966] [info] [:] [WS] MOVE  drone_id=1  x=22498.4  y=5290.7  z=-6287.9
+[2026-05-06 17:41:22.050] [info] [:] [WS] MOVE  drone_id=1  x=22358.4  y=4994.0  z=-6287.9
+[2026-05-06 17:41:22.923] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:23.997] [info] [:] [WS] MOVE  drone_id=1  x=22105.4  y=4247.2  z=-6287.9
+[2026-05-06 17:41:25.791] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:28.817] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:32.073] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:34.885] [info] [:] [HTTP] GET /api/drones
+[2026-05-06 17:41:37.578] [info] [:] [WS] session closed: The WebSocket stream was gracefully closed at both endpoints [boost.beast.websocket:1 at F:/UE5DroneControl/BackEnd/build/vcpkg_installed/x64-windows/include\boost/beast/websocket/impl/stream.hpp:377:9 in function 'void __cdecl boost::beast::websocket::stream<class boost::asio::basic_stream_socket<class boost::asio::ip::tcp,class boost::asio::any_io_executor>,1>::do_fail(unsigned short,class boost::system::error_code,class boost::system::error_code &)']
+[2026-05-06 17:41:37.578] [info] [:] [WS] Client disconnected. Active sessions: 0
