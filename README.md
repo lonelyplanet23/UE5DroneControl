@@ -1323,3 +1323,73 @@ python ue_to_px4_bridge.py --drone-id 3 --topic-prefix /px4_3 --udp-port 8893
 - **网络抓包**：Wireshark过滤UDP端口
 - **ROS2工具**：`ros2 topic list`、`ros2 topic echo`
 
+---
+
+## 12. C++ 后端（第三周起）
+
+从第三周起，项目引入 C++ 后端服务（`BackEnd/`），替代原有 Python 桥接脚本，提供统一的 HTTP REST + WebSocket 接口供 UE5 调用，并通过 UDP 与 Jetson 伴飞计算机通信。
+
+### 12.1 当前后端完成状态
+
+| 周次 | 模块 | 状态 |
+|------|------|------|
+| 第一周 | 项目骨架、配置加载、注册管理 | ✅ 完成 |
+| 第二周 | UDP 收发、坐标转换、GPS 锚点、心跳维持 | ✅ 完成 |
+| 第三周 | 连接状态机、WebSocket 服务器、move/pause/resume、遥测推送、调试接口 | ✅ 完成 |
+| 第四周 | 集结流程（含集结指令发送）、执行引擎（侦察/巡逻/攻击）、多机并发调度、实时避障（基础版） | ✅ 完成 |
+
+### 12.2 快速启动后端
+
+```powershell
+cd BackEnd
+.\build.bat                          # 编译（首次约 5 分钟）
+.\build\Release\DroneBackend.exe     # 启动
+```
+
+正常输出：
+```
+[info] HTTP :8080  WS :8081
+[info] [HTTP] Listening on 0.0.0.0:8080
+[info] [WS]  Listening on 0.0.0.0:8081
+[info] Backend started. Press Ctrl+C to stop.
+```
+
+### 12.3 与 UE5 联调
+
+1. 后端与 UE5 机器在同一局域网，后端监听 `0.0.0.0`
+2. UE5 配置：
+   - HTTP 地址：`http://<后端IP>:8080`
+   - WebSocket 地址：`ws://<后端IP>:8081`
+3. UE5 启动后调用 `GET /api/drones` 获取已注册无人机列表
+4. UE5 连接 WebSocket，订阅遥测推送（10 Hz）
+5. UE5 通过 WebSocket 发送 `move` / `pause` / `resume` 指令
+
+### 12.4 无 Jetson 时的测试方法
+
+使用 `/api/debug/drone/{id}/inject` 接口注入模拟遥测，完整替代真实无人机：
+
+```bash
+# 1. 注册无人机
+curl -X POST http://localhost:8080/api/drones -d '{"name":"UAV1","slot":1}'
+
+# 2. 注入遥测（触发 power_on 事件）
+curl -X POST http://localhost:8080/api/debug/drone/1/inject \
+  -d '{"position":[0,0,-10],"q":[1,0,0,0],"velocity":[0,0,0],"battery":85,"gps_lat":39.9,"gps_lon":116.3,"gps_alt":50}'
+
+# 3. 发送移动指令
+curl -X POST http://localhost:8080/api/debug/cmd/1/move -d '{"x":1000,"y":0,"z":-500}'
+
+# 4. 下发阵列任务（集结 + 执行）
+curl -X POST http://localhost:8080/api/arrays \
+  -d '{"array_id":"a1","mode":"recon","paths":[{"drone_id":"d1","waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}]}'
+```
+
+详细测试步骤见 [BackEnd/README.md](BackEnd/README.md#测试指南无-ue5--无-jetson)。
+
+### 12.5 与真实 Jetson 联调
+
+1. 确认 `BackEnd/config.yaml` 中 `jetson.host` 设为 Jetson 实际 IP（默认 `192.168.30.104`）
+2. 在 Jetson 上启动 `Jetson/jetson_bridge.py`（需 ROS2 + PX4 环境）
+3. 后端启动后，Jetson 发来的 UDP 遥测将自动触发 `power_on` 事件并开始推送遥测
+4. 后端发出的 24 字节控制包由 Jetson 转发为 ROS2 `TrajectorySetpoint`
+

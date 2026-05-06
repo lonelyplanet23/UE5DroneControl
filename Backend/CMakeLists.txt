@@ -33,6 +33,7 @@ set(SOURCES
     drone/heartbeat_manager.cpp
     drone/drone_manager.cpp
     execution/assembly_controller.cpp
+    execution/execution_engine.cpp
     http/http_server.cpp
 )
 
@@ -52,6 +53,7 @@ set(HEADERS
     drone/drone_context.h
     drone/drone_manager.h
     execution/assembly_controller.h
+    execution/execution_engine.h
     http/http_server.h
 )
 

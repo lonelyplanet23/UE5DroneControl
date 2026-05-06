@@ -16,6 +16,8 @@ enum class AssemblyState : uint8_t {
     Timeout
 };
 
+using MoveCommandCallback = std::function<void(int drone_id, double ned_n, double ned_e, double ned_d)>;
+
 /// 集结任务配置
 struct AssemblyConfig {
     std::string array_id;
@@ -51,7 +53,7 @@ public:
     using ProgressCallback = std::function<void(const AssemblyProgress&)>;
     using TimeoutCallback = std::function<void(const AssemblyProgress&)>;
 
-    explicit AssemblyController(int timeout_sec = 60);
+    explicit AssemblyController(int timeout_sec = 60, double arrival_threshold_m = 1.0);
 
     /// 开始集结
     /// @param config  集结任务配置
@@ -72,16 +74,21 @@ public:
     /// 获取当前集结状态
     AssemblyState GetState() const { return state_; }
 
+    /// 获取集结任务配置（用于执行引擎）
+    const AssemblyConfig& GetConfig() const { return config_; }
+
     /// 获取集结进度
     AssemblyProgress GetProgress() const;
 
     /// 注册进度回调
     void SetProgressCallback(ProgressCallback cb);
     void SetTimeoutCallback(TimeoutCallback cb);
+    void SetMoveCommandCallback(MoveCommandCallback cb);
 
 private:
     AssemblyState state_ = AssemblyState::Idle;
     int timeout_sec_ = 60;
+    double arrival_threshold_m_ = 1.0;
     AssemblyConfig config_;
 
     // 每架无人机的到位状态
@@ -95,4 +102,5 @@ private:
     std::chrono::steady_clock::time_point start_time_;
     ProgressCallback progress_cb_;
     TimeoutCallback timeout_cb_;
+    MoveCommandCallback move_cmd_cb_;
 };

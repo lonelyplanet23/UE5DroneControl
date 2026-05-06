@@ -66,10 +66,12 @@ std::string get_string(const boost::json::object& obj, const char* key,
 HttpServer::HttpServer(const AppConfig& config,
                        DroneManager& drone_mgr,
                        AssemblyController& assembly_ctrl,
+                       ExecutionEngine& exec_engine,
                        WsManager& ws_manager)
     : config_(config)
     , drone_mgr_(drone_mgr)
     , assembly_ctrl_(assembly_ctrl)
+    , exec_engine_(exec_engine)
     , ws_manager_(ws_manager)
 {
     // 注册 DroneManager 回调 → WS 推送
@@ -155,6 +157,9 @@ HttpServer::HttpServer(const AppConfig& config,
                 {"array_id", progress.array_id},
             };
             ws_manager_.broadcast(json_stringify(done_msg));
+
+            // 集结完成 → 启动执行引擎
+            exec_engine_.StartTasks(assembly_ctrl_.GetConfig());
         }
     });
 
@@ -510,6 +515,7 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
 
 boost::json::value HttpServer::ApiStopArray(const std::string& id) {
     assembly_ctrl_.Stop();
+    exec_engine_.StopAll();
     return boost::json::object{{"array_id", id}, {"status", "stopped"}};
 }
 
@@ -625,6 +631,9 @@ boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const
             tel.position_ned[1],
             tel.position_ned[2]);
     }
+    if (exec_engine_.IsRunning()) {
+        exec_engine_.OnTelemetry(drone_id, tel);
+    }
     return boost::json::object{{"injected", id}};
 }
 
@@ -647,11 +656,52 @@ boost::json::value HttpServer::DebugPause(const std::string& id, bool pause) {
 }
 
 boost::json::value HttpServer::DebugSingleArray(const std::string& id, const boost::json::object& body) {
-    return ApiCreateArray(body);
+    // 单机调试：直接启动执行引擎（跳过集结流程）
+    AssemblyConfig cfg;
+    cfg.array_id = "debug_" + id;
+    cfg.mode = get_string(body, "mode", "recon");
+
+    AssemblyConfig::Path path;
+    path.drone_id = id;
+    path.closed_loop = get_bool(body, "loop", false);
+
+    if (body.contains("waypoints") && body.at("waypoints").is_array()) {
+        for (const auto& w : body.at("waypoints").as_array()) {
+            if (!w.is_object()) continue;
+            const auto& wo = w.as_object();
+            AssemblyConfig::Path::Waypoint wp;
+            wp.x = get_number(wo, "x", 0.0);
+            wp.y = get_number(wo, "y", 0.0);
+            wp.z = get_number(wo, "z", 0.0);
+            wp.segment_speed = static_cast<float>(get_number(wo, "segment_speed", 0.0));
+            wp.wait_time = static_cast<float>(get_number(wo, "wait_time", 0.0));
+            path.waypoints.push_back(wp);
+        }
+    }
+
+    if (path.waypoints.empty())
+        throw ApiError(400, "waypoints required");
+
+    cfg.paths.push_back(path);
+    exec_engine_.StartTasks(cfg);
+
+    return boost::json::object{
+        {"array_id", cfg.array_id},
+        {"drone_id", id},
+        {"mode", cfg.mode},
+        {"waypoint_count", static_cast<int64_t>(path.waypoints.size())},
+        {"status", "executing"},
+    };
 }
 
 boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::json::object& body) {
-    return DebugMove(id, body);
+    int drone_id = drone_id_from_string(id);
+    double x = get_number(body, "x", 0.0);
+    double y = get_number(body, "y", 0.0);
+    double z = get_number(body, "z", 0.0);
+    exec_engine_.InjectTarget(drone_id, x, y, z);
+    return boost::json::object{{"drone_id", id}, {"target_injected", true},
+                               {"x", x}, {"y", y}, {"z", z}};
 }
 
 boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
@@ -719,10 +769,11 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
 boost::json::value HttpServer::DebugArrayState(const std::string& id) {
     auto progress = assembly_ctrl_.GetProgress();
     return boost::json::object{
-        {"array_id",    progress.array_id},
-        {"ready_count", progress.ready_count},
-        {"total_count", progress.total_count},
-        {"state",       static_cast<int>(assembly_ctrl_.GetState())},
+        {"array_id",       progress.array_id},
+        {"ready_count",    progress.ready_count},
+        {"total_count",    progress.total_count},
+        {"assembly_state", static_cast<int>(assembly_ctrl_.GetState())},
+        {"exec_running",   exec_engine_.IsRunning()},
     };
 }
 

@@ -39,6 +39,7 @@ public:
     int ResolveDroneIdBySlot(int slot) const;
 
     bool ProcessMoveCommand(int drone_id, double ue_x, double ue_y, double ue_z);
+    bool ProcessMoveCommandNed(int drone_id, double ned_n, double ned_e, double ned_d);
     bool ProcessPauseCommand(int drone_id);
     bool ProcessResumeCommand(int drone_id);
 

@@ -24,8 +24,9 @@ int parse_drone_id(const std::string& raw)
 
 } // namespace
 
-AssemblyController::AssemblyController(int timeout_sec)
+AssemblyController::AssemblyController(int timeout_sec, double arrival_threshold_m)
     : timeout_sec_(timeout_sec)
+    , arrival_threshold_m_(arrival_threshold_m)
 {
 }
 
@@ -57,6 +58,11 @@ bool AssemblyController::Start(const AssemblyConfig& config)
         });
         spdlog::info("[Assembly] Drone {} target: NED({:.2f}, {:.2f}, {:.2f})",
                      drone_id, ned_n, ned_e, ned_d);
+
+        // 向无人机发送集结目标点
+        if (move_cmd_cb_) {
+            move_cmd_cb_(drone_id, ned_n, ned_e, ned_d);
+        }
     }
 
     if (arrivals_.empty()) {
@@ -91,8 +97,7 @@ void AssemblyController::UpdateDronePosition(int drone_id, double ned_x, double 
         const double dz = ned_z - arrival.target_ned_z;
         const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-        constexpr double threshold = 1.0;
-        if (dist < threshold) {
+        if (dist < arrival_threshold_m_) {
             arrival.arrived = true;
             any_changed = true;
             spdlog::info("[Assembly] Drone {} arrived at slot (dist={:.2f}m)",
@@ -151,12 +156,6 @@ AssemblyProgress AssemblyController::GetProgress() const
     return progress;
 }
 
-void AssemblyController::SetProgressCallback(ProgressCallback cb)
-{
-    progress_cb_ = std::move(cb);
-}
-
-void AssemblyController::SetTimeoutCallback(TimeoutCallback cb)
-{
-    timeout_cb_ = std::move(cb);
-}
+void AssemblyController::SetProgressCallback(ProgressCallback cb) { progress_cb_ = std::move(cb); }
+void AssemblyController::SetTimeoutCallback(TimeoutCallback cb)   { timeout_cb_  = std::move(cb); }
+void AssemblyController::SetMoveCommandCallback(MoveCommandCallback cb) { move_cmd_cb_ = std::move(cb); }

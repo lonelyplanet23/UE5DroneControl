@@ -241,6 +241,22 @@ bool DroneManager::ProcessMoveCommand(int drone_id, double ue_x, double ue_y, do
     return true;
 }
 
+bool DroneManager::ProcessMoveCommandNed(int drone_id, double ned_n, double ned_e, double ned_d)
+{
+    auto* ctx = GetContext(drone_id);
+    if (!ctx) return false;
+
+    ctx->last_ned_x = ned_n;
+    ctx->last_ned_y = ned_e;
+    ctx->last_ned_z = ned_d;
+    hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
+
+    ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
+    spdlog::info("MoveCommandNed drone={}: NED({:.2f}, {:.2f}, {:.2f})",
+                  drone_id, ned_n, ned_e, ned_d);
+    return true;
+}
+
 bool DroneManager::ProcessPauseCommand(int drone_id)
 {
     auto* ctx = GetContext(drone_id);
