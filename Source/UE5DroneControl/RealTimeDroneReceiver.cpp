@@ -148,6 +148,12 @@ void ARealTimeDroneReceiver::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ARealTimeDroneReceiver::Tick(float DeltaTime)
 {
+	// Block parent's local-move logic while paused
+	if (bIsPaused)
+	{
+		bSendClickTarget = false;
+	}
+
 	Super::Tick(DeltaTime);
 
 	// === 【新增】频率限制逻辑 ===
@@ -254,6 +260,12 @@ void ARealTimeDroneReceiver::Tick(float DeltaTime)
 
 	// === 3. 平滑移动 ===
 	FVector CurrentLoc = GetActorLocation();
+
+	if (bIsPaused)
+	{
+		return;
+	}
+
 	FVector NewLoc = FMath::VInterpTo(CurrentLoc, TargetLocation, DeltaTime, SmoothSpeed);
 
 	// 启用 Sweep 后，飞机移动时会进行碰撞检测
@@ -793,7 +805,32 @@ void ARealTimeDroneReceiver::OnWebSocketTelemetry(int32 InDroneId, const FDroneT
 		return;
 	}
 
+	if (bIsPaused)
+	{
+		return;
+	}
+
 	// Snapshot.WorldLocation is the offset from anchor (cm). Use InitialLocation as anchor until GPS anchoring is implemented.
 	TargetLocation = InitialLocation + Snapshot.WorldLocation;
 	TargetRotation = Snapshot.Attitude;
+}
+
+void ARealTimeDroneReceiver::SetPaused(bool bPause)
+{
+	bIsPaused = bPause;
+	if (bPause)
+	{
+		// Immediately cancel any in-progress local move
+		bSendClickTarget = false;
+		TargetLocation = GetActorLocation();
+	}
+}
+
+void ARealTimeDroneReceiver::SetClickTargetLocation(FVector InTargetLocation, int32 Mode)
+{
+	if (bIsPaused)
+	{
+		return;
+	}
+	Super::SetClickTargetLocation(InTargetLocation, Mode);
 }

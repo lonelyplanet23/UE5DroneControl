@@ -144,7 +144,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
 	bool bUseWebSocket = true;
 
+	// Freeze local movement (set by P-key pause; does not affect incoming telemetry parsing)
+	UFUNCTION(BlueprintCallable, Category = "RealTime Config")
+	void SetPaused(bool bPause);
+
+	UFUNCTION(BlueprintPure, Category = "RealTime Config")
+	bool IsPaused() const { return bIsPaused; }
+
+	// Override to block SetClickTargetLocation while paused
+	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
+
 private:
+	bool bIsPaused = false;
 	FSocket* ListenSocket;
 
 	UFUNCTION()
