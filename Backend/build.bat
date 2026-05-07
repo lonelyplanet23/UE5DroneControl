@@ -6,8 +6,15 @@ for /f "usebackq tokens=*" %%i in (`"%VS_WHERE%" -latest -products * -requires M
   set "VS_PATH=%%i"
 )
 
+REM --- 解决冲突后的部分：保留动态路径，确保 VS_BAT 被定义 ---
 set "VS_BAT=%VS_PATH%\Common7\Tools\VsDevCmd.bat"
+
+REM 如果你的 vcpkg 是随 VS 安装的，保留这一行：
 set "VCPKG_TOOLCHAIN=%VS_PATH%\VC\vcpkg\scripts\buildsystems\vcpkg.cmake"
+
+REM 如果你使用了独立安装的 vcpkg (比如在 C:\dev\vcpkg)，请取消下面这行的注释并修改路径：
+REM set "VCPKG_TOOLCHAIN=C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake"
+REM -------------------------------------------------------
 
 echo [INFO] 使用 VS 路径: "%VS_PATH%"
 

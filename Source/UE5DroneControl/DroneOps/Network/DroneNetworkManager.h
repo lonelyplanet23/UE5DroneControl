@@ -6,6 +6,8 @@
 #include "DroneOps/Network/DroneWebSocketClient.h"
 #include "DroneNetworkManager.generated.h"
 
+class ADronePathActor;
+
 /**
  * GameInstance-level subsystem that owns the HTTP and WebSocket clients.
  *
@@ -56,6 +58,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void SendPauseCommand(const TArray<int32>& DroneIds, bool bPause);
 
+	/**
+	 * Submit an array task to the backend via HTTP POST /api/arrays.
+	 * PathMap maps drone id -> ADronePathActor.
+	 * OnComplete is called with (bSuccess, ResponseBody).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Network")
+	void SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, FOnHttpResponse OnComplete);
+
 	// ---- Events ----
 
 	// Fired when a WebSocket "event" message arrives (power_on / reconnect / lost_connection).
@@ -70,6 +80,21 @@ public:
 	DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnDroneWsAlert,
 		int32 /*DroneId*/, const FString& /*Alert*/, int32 /*Value*/);
 	FOnDroneWsAlert OnDroneWsAlert;
+
+	// Fired when assembling progress is pushed: { "type": "assembling", ... }
+	// ReadyCount / TotalCount reflect current assembly progress.
+	DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnAssemblingProgress,
+		const FString& /*ArrayId*/, int32 /*ReadyCount*/, int32 /*TotalCount*/);
+	FOnAssemblingProgress OnAssemblingProgress;
+
+	// Fired when assembly completes: { "type": "assembly_complete", ... }
+	DECLARE_MULTICAST_DELEGATE_OneParam(FOnAssemblyComplete, const FString& /*ArrayId*/);
+	FOnAssemblyComplete OnAssemblyComplete;
+
+	// Fired when assembly times out: { "type": "assembly_timeout", ... }
+	DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnAssemblyTimeout,
+		const FString& /*ArrayId*/, int32 /*ReadyCount*/, int32 /*TotalCount*/);
+	FOnAssemblyTimeout OnAssemblyTimeout;
 
 	// ---- Accessors ----
 

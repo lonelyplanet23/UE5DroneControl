@@ -858,6 +858,15 @@ void ADroneOpsPlayerController::OnPauseToggle()
 	{
 		if (bNewPaused) PausedDroneIds.Add(Id);
 		else            PausedDroneIds.Remove(Id);
+
+		// Freeze / unfreeze the local drone actor so it stops interpolating
+		if (AActor* ReceiverActor = DroneRegistry ? DroneRegistry->GetReceiverActor(Id) : nullptr)
+		{
+			if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(ReceiverActor))
+			{
+				Receiver->SetPaused(bNewPaused);
+			}
+		}
 	}
 
 	const FString StatusText = bNewPaused ? TEXT("已暂停") : TEXT("已恢复");

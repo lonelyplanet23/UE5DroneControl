@@ -124,7 +124,7 @@ void UDroneSelectionComponent::ApplyVisualState()
 
 	for (UPrimitiveComponent* Primitive : PrimitiveComponents)
 	{
-		if (!Primitive || Primitive->IsVisualizationComponent())
+		if (!Primitive)
 		{
 			continue;
 		}
@@ -184,7 +184,7 @@ void UDroneSelectionComponent::EnsureSelectionLabel()
 	Owner->GetComponents(PrimitiveComponents);
 	for (UPrimitiveComponent* Primitive : PrimitiveComponents)
 	{
-		if (Primitive && !Primitive->IsVisualizationComponent())
+		if (Primitive)
 		{
 			AnchorComponent = Primitive;
 			break;

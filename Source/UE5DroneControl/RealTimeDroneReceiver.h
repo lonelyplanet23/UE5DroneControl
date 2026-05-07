@@ -144,11 +144,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RealTime Config")
 	bool bUseWebSocket = true;
 
+	// Freeze local movement (set by P-key pause; does not affect incoming telemetry parsing)
+	UFUNCTION(BlueprintCallable, Category = "RealTime Config")
+	void SetPaused(bool bPause);
+
+	UFUNCTION(BlueprintPure, Category = "RealTime Config")
+	bool IsPaused() const { return bIsPaused; }
+
+	// Override to block SetClickTargetLocation while paused
+	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
+
 private:
+	bool bIsPaused = false;
 	FSocket* ListenSocket;
 
 	UFUNCTION()
 	void OnWebSocketTelemetry(int32 InDroneId, const FDroneTelemetrySnapshot& Snapshot);
+
+	// Called when a power_on or reconnect event arrives from the backend
+	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
 
 	FVector InitialLocation = FVector::ZeroVector;
 	FVector TargetLocation;
@@ -156,6 +170,10 @@ private:
 	FRotator LastRotation;
 	FVector ReferencePosition = FVector::ZeroVector;
 	bool bHasReceivedFirstData = false;
+
+	// GPS anchor (UE5 world coords, cm) set on power_on / reconnect
+	FVector AnchorWorldLocation = FVector::ZeroVector;
+	bool bHasGpsAnchor = false;
 
 	int32 CurrentDetectedPort = -1;
 	float AutoDetectStartTime = 0.0f;
