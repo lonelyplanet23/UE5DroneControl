@@ -33,7 +33,7 @@ struct HeartbeatStats {
 
 class HeartbeatManager {
 public:
-    explicit HeartbeatManager(UdpSender& sender);
+    explicit HeartbeatManager(UdpSender& sender, int heartbeat_hz = 2);
     ~HeartbeatManager();
 
     void Start(int drone_id, const std::string& jetson_ip, int send_port,
@@ -49,6 +49,7 @@ private:
     void HeartbeatLoop(int drone_id);
 
     UdpSender& sender_;
+    int heartbeat_interval_ms_ = 500;
     std::unordered_map<int, std::shared_ptr<HeartbeatState>> states_;
     std::unordered_map<int, std::unique_ptr<std::thread>> threads_;
     mutable std::mutex mutex_;

@@ -113,8 +113,8 @@ void AssemblyController::UpdateDronePosition(int drone_id, double ned_x, double 
     }
 
     if (progress.ready_count >= progress.total_count) {
-        state_ = AssemblyState::Ready;
-        spdlog::info("[Assembly] All drones ready");
+        state_ = AssemblyState::Executing;
+        spdlog::info("[Assembly] All drones ready, entering executing state");
     }
 }
 

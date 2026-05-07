@@ -35,7 +35,7 @@ mock_ue/
 ## 安装
 
 ```bash
-cd BackEnd/mock_ue
+cd tools/mock_ue
 pip install -r requirements.txt
 ```
 

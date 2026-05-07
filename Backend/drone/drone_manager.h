@@ -13,7 +13,7 @@
 
 class DroneManager {
 public:
-    explicit DroneManager(HeartbeatManager& hb_manager);
+    explicit DroneManager(HeartbeatManager& hb_manager, int low_battery_threshold = 20);
     ~DroneManager();
 
     void SetTelemetryCallback(TelemetryCallback cb);
@@ -59,6 +59,7 @@ private:
     void HandleTelemetry(DroneContext& ctx, const TelemetryData& data);
 
     HeartbeatManager& hb_manager_;
+    int low_battery_threshold_ = 20;
     std::unordered_map<int, std::unique_ptr<DroneContext>> drones_;
     GpsAnchorManager anchor_manager_;
 

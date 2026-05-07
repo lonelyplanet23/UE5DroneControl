@@ -28,8 +28,9 @@ DroneControlPacket make_packet(double ned_n, double ned_e, double ned_d, uint32_
 
 } // namespace
 
-DroneManager::DroneManager(HeartbeatManager& hb_manager)
+DroneManager::DroneManager(HeartbeatManager& hb_manager, int low_battery_threshold)
     : hb_manager_(hb_manager)
+    , low_battery_threshold_(low_battery_threshold)
 {
     spdlog::info("DroneManager created");
 }
@@ -346,10 +347,10 @@ void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
     hb_manager_.UpdateLastPosition(
         drone_id, data.position_ned[0], data.position_ned[1], data.position_ned[2]);
 
-    if (data.battery >= 0 && data.battery > 20) {
+    if (data.battery >= 0 && data.battery > low_battery_threshold_) {
         ctx.low_battery_alert_active = false;
     }
-    if (data.battery >= 0 && data.battery <= 20 &&
+    if (data.battery >= 0 && data.battery <= low_battery_threshold_ &&
         !ctx.low_battery_alert_active && alert_cb_) {
         ctx.low_battery_alert_active = true;
         alert_cb_(drone_id, "low_battery", data.battery);

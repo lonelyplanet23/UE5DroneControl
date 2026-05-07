@@ -319,20 +319,31 @@ async def run_checks() -> None:
         )
         request("POST", "/api/arrays/a-week3/stop")
 
-        batch = request(
+        timeout_array = request(
             "POST",
-            "/api/debug/cmd/batch/array",
-            [{"drone_id": "1", "mode": "recon", "waypoints": [{"x": 9999, "y": 0, "z": 0}]}],
+            "/api/arrays",
+            {
+                "array_id": "a-timeout-week3",
+                "mode": "recon",
+                "paths": [
+                    {
+                        "pathId": 1,
+                        "drone_id": "1",
+                        "bClosedLoop": False,
+                        "waypoints": [{"location": {"x": 9999, "y": 0, "z": 0}}],
+                    }
+                ],
+            },
         )
-        assert batch["status"] == "assembling"
-        await expect_ws(ws, lambda m: m.get("type") == "assembling", "batch assembling")
+        assert timeout_array["status"] == "assembling"
+        await expect_ws(ws, lambda m: m.get("type") == "assembling", "timeout assembling")
         await expect_ws(
             ws,
-            lambda m: m.get("type") == "assembly_timeout" and m.get("array_id") == "debug_batch",
+            lambda m: m.get("type") == "assembly_timeout" and m.get("array_id") == "a-timeout-week3",
             "assembly timeout",
             timeout=5.0,
         )
-        request("POST", "/api/arrays/debug_batch/stop")
+        request("POST", "/api/arrays/a-timeout-week3/stop")
 
         delete_result = request("DELETE", "/api/drones/1")
         assert delete_result["deleted"] is True
@@ -341,7 +352,7 @@ async def run_checks() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Week 1-3 backend integration test")
-    parser.add_argument("--exe", default=str(ROOT / "build" / "Release" / "DroneBackend.exe"))
+    parser.add_argument("--exe", default=str(ROOT / "BackEnd" / "build" / "Release" / "DroneBackend.exe"))
     parser.add_argument("--keep-backend", action="store_true")
     args = parser.parse_args()
 

@@ -5,6 +5,8 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -56,6 +58,11 @@ std::string get_string(const boost::json::object& obj, const char* key,
     if (!obj.contains(key)) return fallback;
     auto value = value_to_string(obj.at(key));
     return value.empty() ? fallback : value;
+}
+
+bool is_valid_array_mode(const std::string& mode)
+{
+    return mode == "recon" || mode == "patrol" || mode == "attack";
 }
 
 } // namespace
@@ -467,6 +474,9 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
     AssemblyConfig cfg;
     cfg.array_id = body.contains("array_id") ? std::string(body.at("array_id").as_string()) : "a1";
     cfg.mode     = body.contains("mode")     ? std::string(body.at("mode").as_string())     : "recon";
+    if (!is_valid_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid array mode: " + cfg.mode);
+    }
 
     if (body.contains("paths") && body.at("paths").is_array()) {
         for (const auto& p : body.at("paths").as_array()) {
@@ -504,6 +514,22 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
                 }
             }
             cfg.paths.push_back(path);
+        }
+    }
+
+    if (cfg.paths.empty()) {
+        throw ApiError(400, "paths required");
+    }
+    for (const auto& path : cfg.paths) {
+        if (path.drone_id.empty()) {
+            throw ApiError(400, "path.drone_id required");
+        }
+        const int drone_id = drone_id_from_string(path.drone_id);
+        if (!drone_mgr_.HasDrone(drone_id)) {
+            throw ApiError(404, "drone not found: " + path.drone_id);
+        }
+        if (path.waypoints.empty()) {
+            throw ApiError(400, "path.waypoints required for " + path.drone_id);
         }
     }
 
@@ -657,9 +683,17 @@ boost::json::value HttpServer::DebugPause(const std::string& id, bool pause) {
 
 boost::json::value HttpServer::DebugSingleArray(const std::string& id, const boost::json::object& body) {
     // 单机调试：直接启动执行引擎（跳过集结流程）
+    int numeric_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(numeric_id)) {
+        throw ApiError(404, "drone not found: " + id);
+    }
+
     AssemblyConfig cfg;
     cfg.array_id = "debug_" + id;
     cfg.mode = get_string(body, "mode", "recon");
+    if (!is_valid_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid array mode: " + cfg.mode);
+    }
 
     AssemblyConfig::Path path;
     path.drone_id = id;
@@ -696,6 +730,9 @@ boost::json::value HttpServer::DebugSingleArray(const std::string& id, const boo
 
 boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::json::object& body) {
     int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) {
+        throw ApiError(404, "drone not found: " + id);
+    }
     double x = get_number(body, "x", 0.0);
     double y = get_number(body, "y", 0.0);
     double z = get_number(body, "z", 0.0);
@@ -722,6 +759,9 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
                            get_bool(obj, "closed_loop", false);
         if (obj.contains("mode")) {
             cfg.mode = get_string(obj, "mode", cfg.mode);
+            if (!is_valid_array_mode(cfg.mode)) {
+                throw ApiError(400, "invalid array mode: " + cfg.mode);
+            }
         }
 
         if (obj.contains("waypoints") && obj.at("waypoints").is_array()) {
@@ -748,6 +788,10 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
         }
 
         if (!path.drone_id.empty() && !path.waypoints.empty()) {
+            const int drone_id = drone_id_from_string(path.drone_id);
+            if (!drone_mgr_.HasDrone(drone_id)) {
+                throw ApiError(404, "drone not found: " + path.drone_id);
+            }
             cfg.paths.push_back(path);
         }
     }
@@ -978,11 +1022,24 @@ void HttpServer::RunHttpServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.http_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[HTTP] Listening on 0.0.0.0:{}", config_.http_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec) {
+            if (ec == net::error::would_block || ec == net::error::try_again) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            if (running_) {
+                spdlog::warn("[HTTP] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            continue;
+        }
         std::thread(HandleHttpConnection, std::move(socket), this).detach();
     }
 }
@@ -992,11 +1049,24 @@ void HttpServer::RunWsServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.ws_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[WS] Listening on 0.0.0.0:{}", config_.ws_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec) {
+            if (ec == net::error::would_block || ec == net::error::try_again) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            if (running_) {
+                spdlog::warn("[WS] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            continue;
+        }
         std::thread(HandleWsConnection, std::move(socket), this).detach();
     }
 }

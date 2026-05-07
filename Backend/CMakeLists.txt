@@ -108,3 +108,8 @@ target_link_libraries(${PROJECT_NAME}_tests PRIVATE
 # ============================================================
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.yaml
     ${CMAKE_CURRENT_BINARY_DIR}/config.yaml COPYONLY)
+
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/config.yaml
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>/config.yaml)
