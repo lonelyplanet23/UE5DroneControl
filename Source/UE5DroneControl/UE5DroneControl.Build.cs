@@ -22,7 +22,8 @@ public class UE5DroneControl : ModuleRules
 			"UMG",
 			"Sockets",
             "Networking",
-			"Slate"
+			"Slate",
+			"HTTP"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
