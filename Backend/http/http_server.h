@@ -6,6 +6,7 @@
 #include "core/types.h"
 #include "drone/drone_manager.h"
 #include "execution/assembly_controller.h"
+#include "execution/execution_engine.h"
 #include "communication/ws_manager.h"
 
 #include <boost/asio/ip/tcp.hpp>
@@ -68,6 +69,7 @@ public:
     HttpServer(const AppConfig& config,
                DroneManager& drone_mgr,
                AssemblyController& assembly_ctrl,
+               ExecutionEngine& exec_engine,
                WsManager& ws_manager);
 
     /// 启动 HTTP 和 WebSocket 监听线程（阻塞直到 stop() 被调用）
@@ -140,6 +142,7 @@ private:
     const AppConfig&      config_;
     DroneManager&         drone_mgr_;
     AssemblyController&   assembly_ctrl_;
+    ExecutionEngine&      exec_engine_;
     WsManager&            ws_manager_;
 
     std::atomic<bool>     running_{false};

@@ -5,6 +5,8 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -58,6 +60,11 @@ std::string get_string(const boost::json::object& obj, const char* key,
     return value.empty() ? fallback : value;
 }
 
+bool is_valid_array_mode(const std::string& mode)
+{
+    return mode == "recon" || mode == "patrol" || mode == "attack";
+}
+
 } // namespace
 
 // ============================================================
@@ -66,10 +73,12 @@ std::string get_string(const boost::json::object& obj, const char* key,
 HttpServer::HttpServer(const AppConfig& config,
                        DroneManager& drone_mgr,
                        AssemblyController& assembly_ctrl,
+                       ExecutionEngine& exec_engine,
                        WsManager& ws_manager)
     : config_(config)
     , drone_mgr_(drone_mgr)
     , assembly_ctrl_(assembly_ctrl)
+    , exec_engine_(exec_engine)
     , ws_manager_(ws_manager)
 {
     // 注册 DroneManager 回调 → WS 推送
@@ -155,6 +164,9 @@ HttpServer::HttpServer(const AppConfig& config,
                 {"array_id", progress.array_id},
             };
             ws_manager_.broadcast(json_stringify(done_msg));
+
+            // 集结完成 → 启动执行引擎
+            exec_engine_.StartTasks(assembly_ctrl_.GetConfig());
         }
     });
 
@@ -253,6 +265,8 @@ http::response<http::string_body> HttpServer::HandleHttp(
         std::string path   = std::string(req.target());
         auto qpos = path.find('?');
         if (qpos != std::string::npos) path = path.substr(0, qpos);
+
+        spdlog::info("[HTTP] {} {}", method, path);
 
         if (method == "OPTIONS") return MakeResponse(req, 204, "");
 
@@ -460,6 +474,9 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
     AssemblyConfig cfg;
     cfg.array_id = body.contains("array_id") ? std::string(body.at("array_id").as_string()) : "a1";
     cfg.mode     = body.contains("mode")     ? std::string(body.at("mode").as_string())     : "recon";
+    if (!is_valid_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid array mode: " + cfg.mode);
+    }
 
     if (body.contains("paths") && body.at("paths").is_array()) {
         for (const auto& p : body.at("paths").as_array()) {
@@ -500,6 +517,22 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
         }
     }
 
+    if (cfg.paths.empty()) {
+        throw ApiError(400, "paths required");
+    }
+    for (const auto& path : cfg.paths) {
+        if (path.drone_id.empty()) {
+            throw ApiError(400, "path.drone_id required");
+        }
+        const int drone_id = drone_id_from_string(path.drone_id);
+        if (!drone_mgr_.HasDrone(drone_id)) {
+            throw ApiError(404, "drone not found: " + path.drone_id);
+        }
+        if (path.waypoints.empty()) {
+            throw ApiError(400, "path.waypoints required for " + path.drone_id);
+        }
+    }
+
     if (!assembly_ctrl_.Start(cfg))
         throw ApiError(409, "assembly already in progress");
 
@@ -508,6 +541,7 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
 
 boost::json::value HttpServer::ApiStopArray(const std::string& id) {
     assembly_ctrl_.Stop();
+    exec_engine_.StopAll();
     return boost::json::object{{"array_id", id}, {"status", "stopped"}};
 }
 
@@ -623,6 +657,9 @@ boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const
             tel.position_ned[1],
             tel.position_ned[2]);
     }
+    if (exec_engine_.IsRunning()) {
+        exec_engine_.OnTelemetry(drone_id, tel);
+    }
     return boost::json::object{{"injected", id}};
 }
 
@@ -645,11 +682,63 @@ boost::json::value HttpServer::DebugPause(const std::string& id, bool pause) {
 }
 
 boost::json::value HttpServer::DebugSingleArray(const std::string& id, const boost::json::object& body) {
-    return ApiCreateArray(body);
+    // 单机调试：直接启动执行引擎（跳过集结流程）
+    int numeric_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(numeric_id)) {
+        throw ApiError(404, "drone not found: " + id);
+    }
+
+    AssemblyConfig cfg;
+    cfg.array_id = "debug_" + id;
+    cfg.mode = get_string(body, "mode", "recon");
+    if (!is_valid_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid array mode: " + cfg.mode);
+    }
+
+    AssemblyConfig::Path path;
+    path.drone_id = id;
+    path.closed_loop = get_bool(body, "loop", false);
+
+    if (body.contains("waypoints") && body.at("waypoints").is_array()) {
+        for (const auto& w : body.at("waypoints").as_array()) {
+            if (!w.is_object()) continue;
+            const auto& wo = w.as_object();
+            AssemblyConfig::Path::Waypoint wp;
+            wp.x = get_number(wo, "x", 0.0);
+            wp.y = get_number(wo, "y", 0.0);
+            wp.z = get_number(wo, "z", 0.0);
+            wp.segment_speed = static_cast<float>(get_number(wo, "segment_speed", 0.0));
+            wp.wait_time = static_cast<float>(get_number(wo, "wait_time", 0.0));
+            path.waypoints.push_back(wp);
+        }
+    }
+
+    if (path.waypoints.empty())
+        throw ApiError(400, "waypoints required");
+
+    cfg.paths.push_back(path);
+    exec_engine_.StartTasks(cfg);
+
+    return boost::json::object{
+        {"array_id", cfg.array_id},
+        {"drone_id", id},
+        {"mode", cfg.mode},
+        {"waypoint_count", static_cast<int64_t>(path.waypoints.size())},
+        {"status", "executing"},
+    };
 }
 
 boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::json::object& body) {
-    return DebugMove(id, body);
+    int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) {
+        throw ApiError(404, "drone not found: " + id);
+    }
+    double x = get_number(body, "x", 0.0);
+    double y = get_number(body, "y", 0.0);
+    double z = get_number(body, "z", 0.0);
+    exec_engine_.InjectTarget(drone_id, x, y, z);
+    return boost::json::object{{"drone_id", id}, {"target_injected", true},
+                               {"x", x}, {"y", y}, {"z", z}};
 }
 
 boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
@@ -670,6 +759,9 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
                            get_bool(obj, "closed_loop", false);
         if (obj.contains("mode")) {
             cfg.mode = get_string(obj, "mode", cfg.mode);
+            if (!is_valid_array_mode(cfg.mode)) {
+                throw ApiError(400, "invalid array mode: " + cfg.mode);
+            }
         }
 
         if (obj.contains("waypoints") && obj.at("waypoints").is_array()) {
@@ -696,6 +788,10 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
         }
 
         if (!path.drone_id.empty() && !path.waypoints.empty()) {
+            const int drone_id = drone_id_from_string(path.drone_id);
+            if (!drone_mgr_.HasDrone(drone_id)) {
+                throw ApiError(404, "drone not found: " + path.drone_id);
+            }
             cfg.paths.push_back(path);
         }
     }
@@ -717,10 +813,11 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
 boost::json::value HttpServer::DebugArrayState(const std::string& id) {
     auto progress = assembly_ctrl_.GetProgress();
     return boost::json::object{
-        {"array_id",    progress.array_id},
-        {"ready_count", progress.ready_count},
-        {"total_count", progress.total_count},
-        {"state",       static_cast<int>(assembly_ctrl_.GetState())},
+        {"array_id",       progress.array_id},
+        {"ready_count",    progress.ready_count},
+        {"total_count",    progress.total_count},
+        {"assembly_state", static_cast<int>(assembly_ctrl_.GetState())},
+        {"exec_running",   exec_engine_.IsRunning()},
     };
 }
 
@@ -744,6 +841,7 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
         double y = get_number(msg, "y", 0.0);
         double z = get_number(msg, "z", 0.0);
         int drone_id = drone_id_from_string(drone_id_str);
+        spdlog::info("[WS] MOVE  drone_id={}  x={:.1f}  y={:.1f}  z={:.1f}", drone_id, x, y, z);
         if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z)) {
             ws_manager_.send(session, json_stringify(boost::json::object{
                 {"type", "error"}, {"code", 404}, {"message", "drone not found"}}));
@@ -762,12 +860,19 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     if (type == "pause") {
         bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            std::string ids_str;
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                if (!ids_str.empty()) ids_str += ",";
+                ids_str += value_to_string(id_value);
+            }
+            spdlog::info("[WS] PAUSE  drone_ids=[{}]", ids_str);
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
                 any_ok = drone_mgr_.ProcessPauseCommand(
                     drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            spdlog::info("[WS] PAUSE  drone_id={}", drone_id_str);
             any_ok = drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
         }
         if (!any_ok) {
@@ -786,12 +891,19 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     if (type == "resume") {
         bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            std::string ids_str;
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                if (!ids_str.empty()) ids_str += ",";
+                ids_str += value_to_string(id_value);
+            }
+            spdlog::info("[WS] RESUME  drone_ids=[{}]", ids_str);
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
                 any_ok = drone_mgr_.ProcessResumeCommand(
                     drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            spdlog::info("[WS] RESUME  drone_id={}", drone_id_str);
             any_ok = drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
         }
         if (!any_ok) {
@@ -830,6 +942,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
     }
 
     auto session = ws_manager_.add(&ws);
+    spdlog::info("[WS] Client connected. Active sessions: {}", ws_manager_.count());
     beast::flat_buffer buf;
 
     while (true) {
@@ -867,6 +980,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
 
     session->alive = false;
     ws_manager_.remove(&ws);
+    spdlog::info("[WS] Client disconnected. Active sessions: {}", ws_manager_.count());
 }
 
 // ============================================================
@@ -908,11 +1022,24 @@ void HttpServer::RunHttpServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.http_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[HTTP] Listening on 0.0.0.0:{}", config_.http_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec) {
+            if (ec == net::error::would_block || ec == net::error::try_again) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            if (running_) {
+                spdlog::warn("[HTTP] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            continue;
+        }
         std::thread(HandleHttpConnection, std::move(socket), this).detach();
     }
 }
@@ -922,11 +1049,24 @@ void HttpServer::RunWsServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.ws_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[WS] Listening on 0.0.0.0:{}", config_.ws_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec) {
+            if (ec == net::error::would_block || ec == net::error::try_again) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            if (running_) {
+                spdlog::warn("[WS] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            continue;
+        }
         std::thread(HandleWsConnection, std::move(socket), this).detach();
     }
 }

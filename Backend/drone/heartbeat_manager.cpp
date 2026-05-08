@@ -2,9 +2,11 @@
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 
-HeartbeatManager::HeartbeatManager(UdpSender& sender)
+HeartbeatManager::HeartbeatManager(UdpSender& sender, int heartbeat_hz)
     : sender_(sender)
+    , heartbeat_interval_ms_(std::max(1, 1000 / std::max(heartbeat_hz, 1)))
 {
 }
 
@@ -186,7 +188,6 @@ void HeartbeatManager::HeartbeatLoop(int drone_id)
         state->last_sent_time.store(ts);
         state->sent_count.fetch_add(1);
 
-        // 2Hz 心跳
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(heartbeat_interval_ms_));
     }
 }

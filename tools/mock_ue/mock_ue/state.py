@@ -27,8 +27,14 @@ class MockUEState:
         with self._lock:
             return list(self.selected_ids)
 
-    def sync_drones(self, payload: dict[str, Any]) -> Optional[str]:
-        drones = payload.get("drones", [])
+    def sync_drones(self, payload: Any) -> Optional[str]:
+        # payload 可能是 list（直接来自 GET /api/drones）或 dict（含 "drones" 键）
+        if isinstance(payload, list):
+            drones = payload
+        elif isinstance(payload, dict):
+            drones = payload.get("drones", [])
+        else:
+            return None
         if not isinstance(drones, list):
             return None
 

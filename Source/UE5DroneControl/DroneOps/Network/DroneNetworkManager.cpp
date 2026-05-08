@@ -19,9 +19,7 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 	HttpClient->BaseUrl = BackendBaseUrl;
 
 	WsClient = NewObject<UDroneWebSocketClient>(this);
-	// Force correct port — property may carry a stale serialized value from the editor
-	WsClient->ServerUrl = TEXT("ws://127.0.0.1:8081/ws");
-	WebSocketUrl = WsClient->ServerUrl;
+	WsClient->ServerUrl = WebSocketUrl;
 	WsClient->OnMessage.AddDynamic(this, &UDroneNetworkManager::OnWsMessage);
 
 	StartPolling();
