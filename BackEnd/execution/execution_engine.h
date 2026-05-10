@@ -4,6 +4,7 @@
 #include "execution/assembly_controller.h"
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -23,6 +24,51 @@ struct DroneTask {
     AssemblyConfig::Path::Waypoint override_target;
 };
 
+struct AvoidanceEvent {
+    int drone_id = 0;
+    int other_drone_id = 0;
+    double current_distance_m = 0.0;
+    double predicted_distance_m = 0.0;
+    double threshold_m = 0.0;
+    double base_ned_n = 0.0;
+    double base_ned_e = 0.0;
+    double base_ned_d = 0.0;
+    double applied_ned_n = 0.0;
+    double applied_ned_e = 0.0;
+    double applied_ned_d = 0.0;
+    double offset_n = 0.0;
+    double offset_e = 0.0;
+    double offset_d = 0.0;
+    bool activated = false;
+    bool restored = false;
+    bool valid = false;
+};
+
+struct AvoidanceStats {
+    uint64_t events_total = 0;
+    uint64_t activations_total = 0;
+    uint64_t restorations_total = 0;
+    int active_count = 0;
+    bool has_last_event = false;
+    AvoidanceEvent last_event;
+};
+
+struct ExecutionTaskSnapshot {
+    int drone_id = 0;
+    std::string mode;
+    bool closed_loop = false;
+    int current_wp = 0;
+    int waypoint_count = 0;
+    bool target_override = false;
+    bool avoidance_active = false;
+    double base_ned_n = 0.0;
+    double base_ned_e = 0.0;
+    double base_ned_d = 0.0;
+    double target_ned_n = 0.0;
+    double target_ned_e = 0.0;
+    double target_ned_d = 0.0;
+};
+
 /// 执行引擎
 ///
 /// 职责：
@@ -36,6 +82,7 @@ public:
     using MoveCallback = std::function<void(int drone_id, double ned_n, double ned_e, double ned_d)>;
     using TelemetryGetter = std::function<TelemetryData(int drone_id)>;
     using StateGetter = std::function<DroneConnectionState(int drone_id)>;
+    using AvoidanceCallback = std::function<void(const AvoidanceEvent&)>;
 
     ExecutionEngine(double arrival_threshold_m,
                     double avoidance_radius_m,
@@ -45,6 +92,7 @@ public:
     void SetMoveCallback(MoveCallback cb);
     void SetTelemetryGetter(TelemetryGetter cb);
     void SetStateGetter(StateGetter cb);
+    void SetAvoidanceCallback(AvoidanceCallback cb);
 
     /// 启动所有任务（集结完成后调用）
     void StartTasks(const AssemblyConfig& config);
@@ -59,11 +107,15 @@ public:
     void InjectTarget(int drone_id, double ue_x, double ue_y, double ue_z);
 
     bool IsRunning() const { return running_; }
+    std::vector<ExecutionTaskSnapshot> GetTaskSnapshots() const;
+    AvoidanceStats GetAvoidanceStats() const;
 
 private:
     void RunDroneTask(int drone_id);
     bool WaitForArrival(int drone_id, double ned_n, double ned_e, double ned_d);
     void CheckAvoidance();
+    void CheckAvoidanceLoop();
+    void RestoreExpiredAvoidanceTargets(const std::chrono::steady_clock::time_point& now);
 
     double arrival_threshold_m_;
     double avoidance_radius_m_;
@@ -72,6 +124,7 @@ private:
     MoveCallback move_cb_;
     TelemetryGetter telemetry_getter_;
     StateGetter state_getter_;
+    AvoidanceCallback avoidance_cb_;
 
     std::atomic<bool> running_{false};
 
@@ -81,11 +134,17 @@ private:
 
     // 避障：每机当前实际目标（NED）
     struct DroneTarget {
+        double base_ned_n = 0, base_ned_e = 0, base_ned_d = 0;
         double ned_n = 0, ned_e = 0, ned_d = 0;
         bool avoidance_active = false;
+        std::chrono::steady_clock::time_point avoidance_restore_at{};
+        std::chrono::steady_clock::time_point avoidance_cooldown_until{};
     };
     mutable std::mutex targets_mutex_;
     std::unordered_map<int, DroneTarget> targets_;
+
+    mutable std::mutex avoidance_stats_mutex_;
+    AvoidanceStats avoidance_stats_;
 
     std::thread avoidance_thread_;
 };

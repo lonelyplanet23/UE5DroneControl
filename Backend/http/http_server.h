@@ -104,6 +104,7 @@ private:
     boost::json::value ApiDeleteDrone(const std::string& id);
     boost::json::value ApiGetAnchor(const std::string& id);
     boost::json::value ApiCreateArray(const boost::json::object& body);
+    boost::json::value ApiPreviewArray(const boost::json::object& body);
     boost::json::value ApiStopArray(const std::string& id);
 
     // ---- Debug 路由 ----
@@ -117,6 +118,8 @@ private:
     boost::json::value DebugTarget(const std::string& id, const boost::json::object& body);
     boost::json::value DebugBatchArray(const boost::json::array& body);
     boost::json::value DebugArrayState(const std::string& id);
+    boost::json::value DebugMetrics();
+    boost::json::value DebugAvoidanceState();
 
     // ---- WS 命令处理 ----
     void HandleWsCommand(const boost::json::object& msg,

@@ -1,8 +1,8 @@
 # UE5DroneControl 后端测试指南
 
-> 版本：Week 3 & 4 功能测试  
-> 适用人群：非技术人员也可按步骤操作  
-> 日期：2026-05-08
+> 版本：Week 1-5 后端验收 + Week 5 收尾检查
+> 适用人群：非技术人员也可按步骤操作
+> 日期：2026-05-10
 
 ---
 
@@ -24,95 +24,131 @@
 
 ---
 
+## cmd 与 PowerShell 命令格式说明
+
+本指南中每条命令均提供两种格式：
+
+| 环境 | 打开方式 | curl 用法 | 换行续行符 | JSON 引号 |
+|------|---------|-----------|-----------|-----------|
+| **cmd**（命令提示符） | Win+R → 输入 `cmd` → 回车 | 直接用 `curl` | `^` | `\"` 转义 |
+| **PowerShell** | Win+R → 输入 `powershell` → 回车 | 必须用 `curl.exe` | `` ` `` | 单引号 `'...'` 包裹 |
+
+> PowerShell 中 `curl` 是 `Invoke-WebRequest` 的别名，行为不同，**必须写 `curl.exe`**。
+
+---
+
 ## 1. 环境准备
 
 > 在开始任何测试之前，请先完成本节所有步骤。
 
 ### 1.1 启动后端服务器
 
-1. 打开文件资源管理器，进入项目目录：
-   ```
-   f:\UE5DroneControl\BackEnd
-   ```
-2. 双击运行 `build.bat`，等待编译完成（终端显示 `Build succeeded` 或类似字样）。
-3. 编译完成后，在同一目录下找到 `DroneBackend.exe`，双击运行，或在终端中执行：
-   ```bash
-   cd /f/UE5DroneControl/BackEnd
-   ./DroneBackend.exe
-   ```
-4. 看到如下输出说明服务器已就绪：
-   ```
-   [INFO] HTTP server listening on port 8080
-   [INFO] WebSocket server listening on port 9090
-   ```
-   > 如果端口被占用，请关闭其他占用 8080/9090 端口的程序后重试。
+**第一步：编译**
+
+```cmd
+:: cmd
+cd /d f:\UE5DroneControl\BackEnd
+build.bat
+```
+
+```powershell
+# PowerShell
+cd f:\UE5DroneControl\BackEnd
+.\build.bat
+```
+
+等待终端显示 `Build succeeded` 或 `DroneBackend.exe` 出现在 `build\Release\` 目录中。
+
+**第二步：启动服务**
+
+```cmd
+:: cmd（从项目根目录）
+f:\UE5DroneControl\BackEnd\build\Release\DroneBackend.exe f:\UE5DroneControl\BackEnd\config.yaml
+```
+
+```powershell
+# PowerShell（从项目根目录）
+.\BackEnd\build\Release\DroneBackend.exe .\BackEnd\config.yaml
+```
+
+正常启动输出：
+
+```
+[info] ============================================
+[info]   Drone Backend v1.0.0
+[info]   HTTP :8080  WS :8081
+[info] ============================================
+[info] [HTTP] Listening on 0.0.0.0:8080
+[info] [WS]  Listening on 0.0.0.0:8081
+[info] Backend started. Press Ctrl+C to stop.
+```
+
+> 如果端口被占用，请关闭其他占用 8080/8081 端口的程序后重试（排查方法见附录 Q1）。
 
 ### 1.2 安装并打开 WebSocket 客户端
 
 **方法 A：使用 wscat（推荐，需要 Node.js）**
 
-1. 打开命令提示符（Win+R，输入 `cmd`，回车）。
-2. 安装 wscat：
-   ```bash
-   npm install -g wscat
-   ```
-3. 连接到后端 WebSocket：
-   ```bash
-   wscat -c ws://localhost:9090
-   ```
-4. 连接成功后终端会显示 `Connected (press CTRL+C to quit)`。
+```cmd
+:: cmd 或 PowerShell 均可
+npm install -g wscat
+wscat -c ws://127.0.0.1:8081/ws
+```
+
+连接成功后终端显示 `Connected (press CTRL+C to quit)`。
 
 **方法 B：使用浏览器在线工具（无需安装）**
 
 1. 打开浏览器，访问：https://www.piesocket.com/websocket-tester
-2. 在 "WebSocket URL" 输入框中填入：`ws://localhost:9090`
+2. 在 "WebSocket URL" 输入框中填入：`ws://127.0.0.1:8081/ws`
 3. 点击 "Connect" 按钮。
 
-### 1.3 在 Windows 上使用 curl 命令
+### 1.3 验证 curl 可用
 
-Windows 10/11 已内置 curl，无需额外安装。
+```cmd
+:: cmd
+curl --version
+```
 
-1. 打开命令提示符（Win+R → 输入 `cmd` → 回车）。
-2. 验证 curl 可用：
-   ```bash
-   curl --version
-   ```
-   看到版本号即表示可用。
-3. 本指南中所有 curl 命令均可直接复制粘贴到命令提示符中运行。
+```powershell
+# PowerShell
+curl.exe --version
+```
 
-> **提示**：如果使用 PowerShell，`curl` 是 `Invoke-WebRequest` 的别名，行为不同。建议使用"命令提示符（cmd）"而非 PowerShell 运行本指南中的 curl 命令。
+看到版本号即表示可用（Windows 10/11 已内置 curl）。
 
 ### 1.4 运行 Python 脚本
 
-1. 确认已安装 Python 3（访问 https://www.python.org/downloads/ 下载安装）。
-2. 验证安装：
-   ```bash
-   python --version
-   ```
-3. 安装所需依赖（仅需执行一次）：
-   ```bash
-   cd /f/UE5DroneControl/BackEnd
-   pip install requests websocket-client
-   ```
-4. 运行脚本示例：
-   ```bash
-   python simulate_telemetry.py
-   ```
+**安装依赖（仅需执行一次）：**
+
+```cmd
+:: cmd 或 PowerShell 均可
+pip install requests websocket-client
+```
+
+**从项目根目录运行脚本（推荐）：**
+
+```cmd
+:: cmd
+cd /d f:\UE5DroneControl
+python tools\simulate_telemetry.py --register --drones 1 --hz 10
+```
+
+```powershell
+# PowerShell
+cd f:\UE5DroneControl
+python tools\simulate_telemetry.py --register --drones 1 --hz 10
+```
 
 ### 1.5 录屏工具推荐
 
 **方法 A：Windows 内置 Xbox Game Bar（最简单）**
 
-1. 按下 `Win + G` 打开 Xbox Game Bar。
-2. 点击"捕获"面板中的红色圆形录制按钮开始录屏。
-3. 再次点击停止，视频保存在 `C:\Users\你的用户名\Videos\Captures\`。
+按下 `Win + G` 打开 Xbox Game Bar，点击"捕获"面板中的红色圆形录制按钮开始录屏。视频保存在 `C:\Users\你的用户名\Videos\Captures\`。
 
-**方法 B：OBS Studio（功能更强大，推荐用于完整演示视频）**
+**方法 B：OBS Studio（功能更强大）**
 
-1. 下载安装：https://obsproject.com/
-2. 打开 OBS，在"来源"面板点击 `+` → 选择"显示器采集"。
-3. 点击"开始录制"按钮。
-4. 录制完成后点击"停止录制"，视频默认保存在桌面。
+下载安装：https://obsproject.com/，在"来源"面板点击 `+` → 选择"显示器采集"，点击"开始录制"。
 
 ---
 
@@ -124,33 +160,30 @@ Windows 10/11 已内置 curl，无需额外安装。
 
 ### 操作步骤
 
-1. 确保后端已编译（已执行过 `build.bat`）。
-2. 打开命令提示符，进入后端目录：
-   ```bash
-   cd /f/UE5DroneControl/BackEnd
-   ```
-3. 运行单元测试程序：
-   ```bash
-   ./DroneBackend_tests.exe
-   ```
-4. 等待测试运行完毕（通常几秒内完成）。
+```cmd
+:: cmd（从项目根目录）
+f:\UE5DroneControl\BackEnd\build\Release\DroneBackend_tests.exe
+```
+
+```powershell
+# PowerShell（从项目根目录）
+.\BackEnd\build\Release\DroneBackend_tests.exe
+```
 
 ### 预期结果
 
-终端输出类似以下内容：
 ```
 [==========] Running 28 tests from X test suites.
-[----------] Global test environment set-up.
 ...
 [  PASSED  ] 28 tests.
 [  FAILED  ] 0 tests.
 ```
+
 所有 28 个测试显示 `PASSED`，`FAILED` 数量为 0。
 
 ### 录屏要点
 
-- 录制整个终端窗口，确保最终的 `PASSED 28 / FAILED 0` 行清晰可见。
-- 可以在测试运行前先展示一下目录结构，说明测试文件位置。
+录制整个终端窗口，确保最终的 `PASSED 28 / FAILED 0` 行清晰可见。
 
 ---
 
@@ -160,914 +193,625 @@ Windows 10/11 已内置 curl，无需额外安装。
 
 **测试目的**：验证可以通过 HTTP POST 请求注册新无人机，系统返回唯一 ID。
 
-**操作步骤**：
+**前提条件**：后端服务器正在运行。
 
-1. 确保后端服务器正在运行（参见 1.1 节）。
-2. 打开命令提示符，执行以下命令：
-   ```bash
-   curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"Drone_Alpha\",\"slot\":1}"
-   ```
-3. 观察终端输出。
-
-**预期结果**：
-
-HTTP 状态码为 `201 Created`，响应体类似：
-```json
-{
-  "id": 1,
-  "id_str": "1",
-  "slot": 1,
-  "name": "Drone_Alpha"
-}
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV1\",\"slot\":1}"
 ```
-关键字段：`id`（数字 ID）、`id_str`（字符串 ID）、`slot`（槽位号）均存在。
+
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/drones `
+  -H "Content-Type: application/json" `
+  -d '{"name":"UAV1","slot":1}'
+```
+
+**预期结果**：HTTP 状态码 `201 Created`，响应体：
+
+```json
+{"id": 1, "id_str": "d1", "slot": 1, "name": "UAV1"}
+```
 
 ### 测试 3.2：防止重复注册
 
 **测试目的**：验证系统拒绝重复的无人机名称或槽位，返回 409 错误。
 
-**操作步骤**：
-
-1. 先完成测试 3.1（已注册 Drone_Alpha，slot=1）。
-2. 尝试注册相同名称：
-   ```bash
-   curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"Drone_Alpha\",\"slot\":2}"
-   ```
-3. 再尝试注册相同槽位：
-   ```bash
-   curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"Drone_Beta\",\"slot\":1}"
-   ```
-
-**预期结果**：
-
-两次请求均返回 HTTP `409 Conflict`，响应体包含错误信息，例如：
-```json
-{"error": "name already exists"}
+```cmd
+:: cmd — 重复名称
+curl -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV1\",\"slot\":2}"
+:: cmd — 重复槽位
+curl -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV2\",\"slot\":1}"
 ```
+
+```powershell
+# PowerShell — 重复名称
+curl.exe -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d '{"name":"UAV1","slot":2}'
+# PowerShell — 重复槽位
+curl.exe -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d '{"name":"UAV2","slot":1}'
+```
+
+**预期结果**：两次请求均返回 HTTP `409 Conflict`。
 
 ### 测试 3.3：查询无人机列表
 
-**测试目的**：验证可以获取所有已注册无人机的列表。
-
-**操作步骤**：
-
-1. 确保已注册至少一架无人机（参见测试 3.1）。
-2. 执行查询命令：
-   ```bash
-   curl http://localhost:8080/api/drones
-   ```
-
-**预期结果**：
-
-返回 HTTP `200 OK`，响应体为 JSON 数组，包含所有已注册无人机：
-```json
-[
-  {"id": 1, "id_str": "1", "slot": 1, "name": "Drone_Alpha"}
-]
+```cmd
+:: cmd
+curl http://127.0.0.1:8080/api/drones
 ```
+
+```powershell
+# PowerShell
+curl.exe http://127.0.0.1:8080/api/drones
+```
+
+**预期结果**：返回 `200 OK`，JSON 数组包含所有已注册无人机。
 
 ### 测试 3.4：更新无人机信息
 
-**测试目的**：验证可以修改已注册无人机的名称。
+```cmd
+:: cmd
+curl -X PUT http://127.0.0.1:8080/api/drones/1 -H "Content-Type: application/json" -d "{\"name\":\"UAV1-A\"}"
+curl http://127.0.0.1:8080/api/drones
+```
 
-**操作步骤**：
+```powershell
+# PowerShell
+curl.exe -X PUT http://127.0.0.1:8080/api/drones/1 -H "Content-Type: application/json" -d '{"name":"UAV1-A"}'
+curl.exe http://127.0.0.1:8080/api/drones
+```
 
-1. 确保 ID 为 1 的无人机已注册。
-2. 执行更新命令（将名称改为 Drone_Alpha_V2）：
-   ```bash
-   curl -X PUT http://localhost:8080/api/drones/1 -H "Content-Type: application/json" -d "{\"name\":\"Drone_Alpha_V2\"}"
-   ```
-3. 再次查询列表确认更改：
-   ```bash
-   curl http://localhost:8080/api/drones
-   ```
-
-**预期结果**：
-
-PUT 请求返回 `200 OK`，随后的 GET 请求显示该无人机名称已更新为 `Drone_Alpha_V2`。
+**预期结果**：PUT 返回 `200 OK`，随后 GET 显示名称已更新。
 
 ### 测试 3.5：删除无人机
 
-**测试目的**：验证可以删除已注册的无人机，且删除后无法再查询到该无人机。
+```cmd
+:: cmd
+curl -X DELETE http://127.0.0.1:8080/api/drones/1
+curl http://127.0.0.1:8080/api/drones
+```
 
-**操作步骤**：
+```powershell
+# PowerShell
+curl.exe -X DELETE http://127.0.0.1:8080/api/drones/1
+curl.exe http://127.0.0.1:8080/api/drones
+```
 
-1. 执行删除命令：
-   ```bash
-   curl -X DELETE http://localhost:8080/api/drones/1
-   ```
-2. 查询列表确认已删除：
-   ```bash
-   curl http://localhost:8080/api/drones
-   ```
-
-**预期结果**：
-
-DELETE 请求返回 `200 OK` 或 `204 No Content`，随后的 GET 请求返回的列表中不再包含 ID 为 1 的无人机。
+**预期结果**：DELETE 返回 `200 OK` 或 `204 No Content`，随后列表中不再包含该无人机。
 
 ### 测试 3.6：数据持久化
 
-**测试目的**：验证注册的无人机数据在后端重启后仍然保留。
+1. 注册一架无人机（参见测试 3.1）。
+2. 按 `Ctrl+C` 关闭后端服务器。
+3. 重新启动后端（参见 1.1 节）。
+4. 查询列表，确认数据仍存在：
 
-**操作步骤**：
+```cmd
+:: cmd
+curl http://127.0.0.1:8080/api/drones
+```
 
-1. 注册一架新无人机：
-   ```bash
-   curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"Persist_Test\",\"slot\":5}"
-   ```
-2. 记录返回的 `id` 值。
-3. 关闭后端服务器（在运行服务器的终端按 `Ctrl+C`）。
-4. 重新启动后端服务器：
-   ```bash
-   ./DroneBackend.exe
-   ```
-5. 查询无人机列表：
-   ```bash
-   curl http://localhost:8080/api/drones
-   ```
+```powershell
+# PowerShell
+curl.exe http://127.0.0.1:8080/api/drones
+```
 
-**预期结果**：
-
-重启后查询列表，`Persist_Test` 无人机仍然存在，数据未丢失。
+**预期结果**：重启后注册数据仍然存在，未丢失。
 
 ### 录屏要点（测试 3.1-3.6）
 
-- 将命令提示符窗口最大化，确保 JSON 响应完整可见。
-- 每次执行命令前，可以先用鼠标指向命令，停顿 1-2 秒，再按回车。
-- 持久化测试时，录制关闭服务器、重启服务器、再次查询的完整过程。
+将命令提示符窗口最大化，确保 JSON 响应完整可见。持久化测试时录制关闭、重启、再次查询的完整过程。
 
 ---
 
 ## 4. 遥测数据注入与推送
 
+> **前提条件**：已注册 ID 为 1 的无人机（参见测试 3.1）。
+
 ### 测试 4.1：HTTP 遥测注入
 
-**测试目的**：验证可以通过 HTTP 接口向指定无人机注入遥测数据（位置、姿态、速度、电量、GPS）。
+**测试目的**：验证可以通过 HTTP 接口向指定无人机注入遥测数据。
 
-**前提条件**：已注册 ID 为 1 的无人机（参见测试 3.1）。
-
-**操作步骤**：
-
-1. 执行遥测注入命令：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[1.0,2.0,-3.0],\"quaternion\":[0.965,0.0,0.0,0.258],\"velocity\":[3.0,4.0,0.0],\"battery\":85,\"gps\":{\"lat\":39.9042,\"lon\":116.4074,\"alt\":50.0}}"
-   ```
-2. 观察返回结果。
-
-**预期结果**：
-
-返回 HTTP `200 OK`，响应体包含注入成功的确认信息。
-
-### 测试 4.2：WebSocket 遥测推送（10Hz）
-
-**测试目的**：验证后端以 10Hz（每秒 10 次）频率通过 WebSocket 向客户端推送遥测数据。
-
-**操作步骤**：
-
-1. 打开一个新的命令提示符窗口，连接 WebSocket：
-   ```bash
-   wscat -c ws://localhost:9090
-   ```
-2. 在另一个命令提示符窗口，执行遥测注入（参见测试 4.1）。
-3. 观察 wscat 窗口中的消息流。
-
-**预期结果**：
-
-wscat 窗口中每秒收到约 10 条 JSON 消息，格式类似：
-```json
-{
-  "type": "telemetry",
-  "drone_id": 1,
-  "position": {"x": 100, "y": 200, "z": 300},
-  "yaw": -30.0,
-  "speed": 5.0,
-  "battery": 85
-}
+```cmd
+:: cmd（单行）
+curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[1.0,2.0,-3.0],\"q\":[0.965925826,0,0,0.258819045],\"velocity\":[3.0,4.0,0.0],\"battery\":85,\"gps_lat\":39.9042,\"gps_lon\":116.4074,\"gps_alt\":50.0}"
 ```
-消息以稳定频率持续推送。
 
-### 测试 4.3：首次注入触发 power_on 事件
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject `
+  -H "Content-Type: application/json" `
+  -d '{"position":[1.0,2.0,-3.0],"q":[0.965925826,0,0,0.258819045],"velocity":[3.0,4.0,0.0],"battery":85,"gps_lat":39.9042,"gps_lon":116.4074,"gps_alt":50.0}'
+```
 
-**测试目的**：验证无人机首次收到遥测数据时，WebSocket 会推送 `power_on` 事件，并包含 GPS 坐标。
+**预期结果**：返回 HTTP `200 OK`。
 
-**操作步骤**：
+### 测试 4.2：WebSocket 遥测推送
 
-1. 重新注册一架全新的无人机（确保之前没有注入过遥测）：
-   ```bash
-   curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"NewDrone\",\"slot\":2}"
-   ```
-   记录返回的 `id`（假设为 2）。
-2. 连接 WebSocket 客户端（wscat 或浏览器工具）。
-3. 向新无人机注入第一次遥测：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,0],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":100,\"gps\":{\"lat\":39.9042,\"lon\":116.4074,\"alt\":50.0}}"
-   ```
-4. 观察 WebSocket 客户端收到的消息。
+**测试目的**：确认注入遥测后，WebSocket 客户端可以收到 `power_on` 事件和持续 `telemetry` 消息。
 
-**预期结果**：
+**终端 A：连接 WebSocket**
 
-WebSocket 收到一条 `power_on` 事件消息，包含 GPS 信息：
+```cmd
+:: cmd 或 PowerShell 均可
+wscat -c ws://127.0.0.1:8081/ws
+```
+
+**终端 B：再次注入遥测**
+
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[1.0,2.0,-3.0],\"q\":[0.965925826,0,0,0.258819045],\"velocity\":[3.0,4.0,0.0],\"battery\":85,\"gps_lat\":39.9042,\"gps_lon\":116.4074,\"gps_alt\":50.0}"
+```
+
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject `
+  -H "Content-Type: application/json" `
+  -d '{"position":[1.0,2.0,-3.0],"q":[0.965925826,0,0,0.258819045],"velocity":[3.0,4.0,0.0],"battery":85,"gps_lat":39.9042,"gps_lon":116.4074,"gps_alt":50.0}'
+```
+
+**预期结果**：WebSocket 窗口出现类似消息：
+
 ```json
-{
-  "type": "event",
-  "event": "power_on",
-  "drone_id": 2,
-  "gps": {"lat": 39.9042, "lon": 116.4074, "alt": 50.0}
-}
+{"type":"event","event":"power_on","drone_id":1}
+{"type":"telemetry","drone_id":1,"x":100,"y":200,"z":300,"yaw":-30,"speed":5,"battery":85}
 ```
 
 ---
 
 ## 5. 坐标与姿态转换
 
-### 测试 5.1：NED 坐标转换为 UE 坐标（厘米）
+### 测试 5.1：查询转换后的状态
 
-**测试目的**：验证后端将 NED（北东地）坐标系的位置数据正确转换为 UE5 引擎使用的坐标系（单位：厘米）。
+**测试目的**：验证 NED 米制位置、四元数和速度被转换为 UE 厘米位置、左手系 yaw 和合速度。
 
-**转换规则**：NED [x, y, z] → UE [x*100, y*100, -z*100]
-
-**操作步骤**：
-
-1. 注入位置 [1, 2, -3]（NED 坐标，单位：米）：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[1.0,2.0,-3.0],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":80,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":50}}"
-   ```
-2. 观察 WebSocket 推送的遥测消息中的 `position` 字段。
-
-**预期结果**：
-
-WebSocket 消息中 `position` 字段应为：
-```json
-"position": {"x": 100, "y": 200, "z": 300}
-```
-即 x=1×100=100，y=2×100=200，z=(-(-3))×100=300。
-
-### 测试 5.2：四元数转偏航角（Yaw）
-
-**测试目的**：验证后端将四元数姿态数据正确转换为偏航角（Yaw，单位：度）。
-
-**操作步骤**：
-
-1. 注入四元数 [0.965, 0, 0, 0.258]（对应偏航约 -30°）：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,0],\"quaternion\":[0.965,0.0,0.0,0.258],\"velocity\":[0,0,0],\"battery\":80,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":50}}"
-   ```
-2. 观察 WebSocket 推送消息中的 `yaw` 字段。
-
-**预期结果**：
-
-WebSocket 消息中 `yaw` 字段约为 `-30.0`（允许 ±1° 误差）。
-
-### 测试 5.3：速度计算
-
-**测试目的**：验证后端根据三轴速度向量正确计算合速度（标量速度）。
-
-**计算公式**：speed = √(vx² + vy² + vz²)
-
-**操作步骤**：
-
-1. 注入速度 [3, 4, 0]：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,0],\"quaternion\":[1,0,0,0],\"velocity\":[3.0,4.0,0.0],\"battery\":80,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":50}}"
-   ```
-2. 观察 WebSocket 推送消息中的 `speed` 字段。
-
-**预期结果**：
-
-`speed` 字段值为 `5.0`（即 √(9+16+0) = 5）。
-
-### 测试 5.4：查询 GPS 锚点
-
-**测试目的**：验证首次注入遥测后，系统记录了 GPS 锚点（用于后续坐标转换的参考原点）。
-
-**操作步骤**：
-
-1. 确保已向 ID 为 1 的无人机注入过至少一次遥测（含 GPS 数据）。
-2. 查询 GPS 锚点：
-   ```bash
-   curl http://localhost:8080/api/drones/1/anchor
-   ```
-
-**预期结果**：
-
-返回 `200 OK`，响应体包含首次注入时的 GPS 坐标：
-```json
-{
-  "lat": 39.9042,
-  "lon": 116.4074,
-  "alt": 50.0
-}
+```cmd
+:: cmd
+curl http://127.0.0.1:8080/api/debug/drone/1/state
+curl http://127.0.0.1:8080/api/drones/1/anchor
 ```
 
-### 录屏要点（测试 4-5）
+```powershell
+# PowerShell
+curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
+curl.exe http://127.0.0.1:8080/api/drones/1/anchor
+```
 
-- 建议将终端（curl 命令）和 WebSocket 客户端窗口并排显示。
-- 注入命令执行后，立即切换到 WebSocket 窗口，展示收到的消息。
-- 对于坐标转换测试，可以在屏幕上用便签或注释标注输入值和预期输出值，方便观看者理解。
+**预期结果**：
+
+- `position=[1,2,-3]` 转换为 UE `x=100,y=200,z=300`（单位厘米）。
+- `velocity=[3,4,0]` 的 `speed` 为 `5`。
+- 示例四元数对应 NED yaw 约 `30°`，UE 推送 yaw 约 `-30°`。
+- `/anchor` 返回 `valid=true`，并包含首次遥测的 GPS 坐标。
 
 ---
 
 ## 6. 心跳与指令队列
 
-### 测试 6.1：心跳检测
+### 测试 6.1：发送移动指令并查询队列
 
-**测试目的**：验证后端持续向无人机发送心跳包，且发送计数随时间增加。
-
-**操作步骤**：
-
-1. 确保 ID 为 1 的无人机已注册并已注入遥测。
-2. 第一次查询心跳状态：
-   ```bash
-   curl http://localhost:8080/api/debug/heartbeat/1
-   ```
-   记录 `sent_count` 值。
-3. 等待 5 秒后再次查询：
-   ```bash
-   curl http://localhost:8080/api/debug/heartbeat/1
-   ```
-
-**预期结果**：
-
-第二次查询的 `sent_count` 值大于第一次，说明心跳包在持续发送：
-```json
-{"drone_id": 1, "sent_count": 15, "last_sent": "..."}
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d "{\"x\":1000,\"y\":2000,\"z\":-500}"
+curl http://127.0.0.1:8080/api/debug/drone/1/queue
 ```
 
-### 测试 6.2：发送移动指令
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/move `
+  -H "Content-Type: application/json" `
+  -d '{"x":1000,"y":2000,"z":-500}'
+curl.exe http://127.0.0.1:8080/api/debug/drone/1/queue
+```
 
-**测试目的**：验证可以向无人机发送移动指令，指令进入队列并设置模式为 1（移动模式）。
+**预期结果**：队列中出现 `mode=1` 的移动指令，目标点从 UE `(1000,2000,-500)` cm 转换为 NED `(10,20,5)` m。
 
-**操作步骤**：
+### 测试 6.2：暂停和恢复
 
-1. 发送移动指令：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d "{\"target\":[10.0,20.0,-5.0],\"speed\":5.0}"
-   ```
-2. 查询指令队列状态（如有相关接口）：
-   ```bash
-   curl http://localhost:8080/api/debug/cmd/1/queue
-   ```
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/pause
+curl http://127.0.0.1:8080/api/debug/drone/1/state
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/resume
+curl http://127.0.0.1:8080/api/debug/drone/1/state
+```
 
-**预期结果**：
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/pause
+curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/resume
+curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
+```
 
-指令队列中包含该移动指令，`mode` 字段值为 `1`。
+**预期结果**：暂停后 `queue_paused=true`，恢复后 `queue_paused=false`。
 
-### 测试 6.3：暂停与恢复指令队列
+### 测试 6.3：查看心跳
 
-**测试目的**：验证可以暂停和恢复无人机的指令队列执行。
+```cmd
+:: cmd
+curl http://127.0.0.1:8080/api/debug/heartbeat/1
+```
 
-**操作步骤**：
+```powershell
+# PowerShell
+curl.exe http://127.0.0.1:8080/api/debug/heartbeat/1
+```
 
-1. 暂停指令队列：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/pause
-   ```
-2. 查询队列状态，确认 `queue_paused` 为 `true`：
-   ```bash
-   curl http://localhost:8080/api/debug/cmd/1/queue
-   ```
-3. 恢复指令队列：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/resume
-   ```
-4. 再次查询队列状态，确认 `queue_paused` 为 `false`。
-
-**预期结果**：
-
-- 暂停后：`queue_paused: true`
-- 恢复后：`queue_paused: false`
-
-### 录屏要点（测试 6）
-
-- 心跳测试时，录制两次查询之间的等待过程，展示计数增长。
-- 暂停/恢复测试时，每次操作后立即查询状态，展示字段变化。
+**预期结果**：`running=true`，`sent_count` 随时间增长。真实 Jetson 联调时，可用 Wireshark 抓 slot 1 默认控制端口 `8889`，确认 24 字节控制包。
 
 ---
 
 ## 7. 连接状态与告警
 
-### 测试 7.1：连接丢失检测
+### 测试 7.1：低电量告警
 
-**测试目的**：验证当无人机停止发送遥测超过 10 秒后，系统将其状态标记为 `lost`，并通过 WebSocket 推送 `lost_connection` 事件。
-
-**操作步骤**：
-
-1. 确保 WebSocket 客户端已连接。
-2. 向 ID 为 1 的无人机注入一次遥测数据（参见测试 4.1）。
-3. 停止注入（不再执行任何注入命令）。
-4. 等待约 10-15 秒。
-5. 观察 WebSocket 客户端收到的消息。
-
-**预期结果**：
-
-约 10 秒后，WebSocket 收到 `lost_connection` 事件：
-```json
-{
-  "type": "event",
-  "event": "lost_connection",
-  "drone_id": 1
-}
-```
-同时，查询无人机状态时 `status` 字段变为 `lost`。
-
-### 测试 7.2：重新连接检测
-
-**测试目的**：验证连接丢失后重新注入遥测，系统推送 `reconnect` 事件。
-
-**操作步骤**：
-
-1. 完成测试 7.1（无人机处于 `lost` 状态）。
-2. 重新注入遥测数据：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,0],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":80,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":50}}"
-   ```
-3. 观察 WebSocket 客户端收到的消息。
-
-**预期结果**：
-
-WebSocket 收到 `reconnect` 事件：
-```json
-{
-  "type": "event",
-  "event": "reconnect",
-  "drone_id": 1
-}
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-10],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":15}"
 ```
 
-### 测试 7.3：低电量告警
-
-**测试目的**：验证当电量低于阈值（15%）时，WebSocket 推送低电量告警。
-
-**操作步骤**：
-
-1. 确保 WebSocket 客户端已连接。
-2. 注入电量为 15% 的遥测数据：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,0],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":15,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":50}}"
-   ```
-3. 观察 WebSocket 客户端收到的消息。
-
-**预期结果**：
-
-WebSocket 收到低电量告警消息，`alert` 字段值为 `low_battery`：
-```json
-{
-  "type": "alert",
-  "alert": "low_battery",
-  "drone_id": 1,
-  "battery": 15
-}
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject `
+  -H "Content-Type: application/json" `
+  -d '{"position":[0,0,-10],"q":[1,0,0,0],"velocity":[0,0,0],"battery":15}'
 ```
 
-### 录屏要点（测试 7）
+**预期结果**：WebSocket 收到 `{"type":"alert","alert":"low_battery","value":15}`。
 
-- 连接丢失测试时，录制等待的过程（可以加速播放），展示 10 秒后事件触发。
-- 建议在屏幕上显示计时器（可用手机计时），方便观看者了解等待时长。
+### 测试 7.2：失联与重连
+
+1. 停止所有遥测注入，等待 `BackEnd/config.yaml` 中 `drone.lost_timeout_sec` 指定的秒数（默认 10 秒）。
+2. 查询状态。
+
+```cmd
+:: cmd
+curl http://127.0.0.1:8080/api/debug/drone/1/state
+```
+
+```powershell
+# PowerShell
+curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
+```
+
+3. 再次注入正常电量遥测。
+
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-10],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85,\"gps_lat\":39.91,\"gps_lon\":116.41,\"gps_alt\":50}"
+```
+
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject `
+  -H "Content-Type: application/json" `
+  -d '{"position":[0,0,-10],"q":[1,0,0,0],"velocity":[0,0,0],"battery":85,"gps_lat":39.91,"gps_lon":116.41,"gps_alt":50}'
+```
+
+**预期结果**：超时后状态为 `lost`，WebSocket 收到 `lost_connection`；重新注入后收到 `reconnect`。
 
 ---
 
 ## 8. UDP 遥测通道
 
-### 测试 8.1：UDP 遥测模拟
+### 测试 8.1：使用模拟脚本走 UDP 路径
 
-**测试目的**：验证后端可以通过 UDP 协议接收遥测数据（UdpReceiver 路径）。
+```cmd
+:: cmd
+cd /d f:\UE5DroneControl
+python tools\simulate_telemetry.py --register --transport udp --drones 1 2 --hz 10
+```
 
-**操作步骤**：
+```powershell
+# PowerShell
+cd f:\UE5DroneControl
+python tools\simulate_telemetry.py --register --transport udp --drones 1 2 --hz 10
+```
 
-1. 确保后端服务器正在运行。
-2. 确保 WebSocket 客户端已连接。
-3. 进入后端目录，运行 UDP 遥测模拟脚本：
-   ```bash
-   cd /f/UE5DroneControl/BackEnd
-   python simulate_telemetry.py --transport udp
-   ```
-4. 观察 WebSocket 客户端收到的消息。
-
-**预期结果**：
-
-- 脚本运行后，终端显示 UDP 数据发送日志。
-- WebSocket 客户端收到遥测推送消息，与 HTTP 注入方式的消息格式相同。
-- 后端日志中可以看到 `UdpReceiver` 相关的接收记录。
-
-### 录屏要点（测试 8）
-
-- 同时录制脚本运行终端和 WebSocket 客户端窗口。
-- 展示 UDP 路径与 HTTP 路径产生相同格式的 WebSocket 推送消息。
+**预期结果**：后端通过 `UdpReceiver` 收到 YAML 遥测，WebSocket 继续推送 `telemetry`，`GET /api/drones` 中无人机状态为 `online`。
 
 ---
 
 ## 9. 编队集结流程
 
-### 测试 9.1：双机编队集结（正常完成）
+> 前提：ID 为 1 的无人机已注册并在线。若测试 3.5 删除过 ID 1，请重新注册并注入遥测。
 
-**测试目的**：验证两架无人机可以完成完整的编队集结流程，从 `assembling` 状态到 `assembly_complete`。
+### 测试 9.1：双机集结并完成
 
-**操作步骤**：
-
-1. 注册两架无人机（如果尚未注册）：
-   ```bash
-   curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"Drone_1\",\"slot\":1}"
-   curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"Drone_2\",\"slot\":2}"
-   ```
-2. 向两架无人机注入初始遥测数据：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,0],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":90,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":50}}"
-   curl -X POST http://localhost:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[10,0,0],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":90,\"gps\":{\"lat\":39.901,\"lon\":116.4,\"alt\":50}}"
-   ```
-3. 发起编队集结请求：
-   ```bash
-   curl -X POST http://localhost:8080/api/arrays -H "Content-Type: application/json" -d "{\"drone_ids\":[1,2],\"formation\":\"line\"}"
-   ```
-4. 观察 WebSocket 推送的状态变化（应出现 `assembling` 状态）。
-5. 注入两架无人机的到达位置（模拟它们飞到集结点）：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[5,0,-10],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":88,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":60}}"
-   curl -X POST http://localhost:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[5,2,-10],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":88,\"gps\":{\"lat\":39.9,\"lon\":116.401,\"alt\":60}}"
-   ```
-6. 观察 WebSocket 消息，等待 `assembly_complete` 事件。
-
-**预期结果**：
-
-- 步骤 3 后，WebSocket 收到状态变为 `assembling` 的消息。
-- 步骤 5 后，WebSocket 收到 `assembly_complete` 事件：
-  ```json
-  {"type": "event", "event": "assembly_complete", "array_id": 1}
-  ```
-
-### 测试 9.2：编队集结超时
-
-**测试目的**：验证当无人机未能在规定时间内到达集结点时，系统触发 `assembly_timeout` 事件。
-
-**操作步骤**：
-
-1. 发起编队集结请求（参见测试 9.1 步骤 1-3）。
-2. 不注入到达位置（不执行步骤 5）。
-3. 等待约 60 秒。
-4. 观察 WebSocket 消息。
-
-**预期结果**：
-
-约 60 秒后，WebSocket 收到超时事件：
-```json
-{"type": "event", "event": "assembly_timeout", "array_id": 1}
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV2\",\"slot\":2}"
+curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85,\"gps_lat\":39.9,\"gps_lon\":116.3,\"gps_alt\":50}"
+curl -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[5,0,-5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":90,\"gps_lat\":39.9,\"gps_lon\":116.31,\"gps_alt\":50}"
+curl -X POST http://127.0.0.1:8080/api/arrays -H "Content-Type: application/json" -d "{\"array_id\":\"a1\",\"mode\":\"recon\",\"paths\":[{\"pathId\":1,\"drone_id\":\"d1\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":2000,\"y\":1000,\"z\":-500}}]},{\"pathId\":2,\"drone_id\":\"d2\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":-1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":-2000,\"y\":1000,\"z\":-500}}]}]}"
 ```
 
-### 录屏要点（测试 9）
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d '{"name":"UAV2","slot":2}'
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d '{"position":[0,0,-5],"q":[1,0,0,0],"velocity":[0,0,0],"battery":85,"gps_lat":39.9,"gps_lon":116.3,"gps_alt":50}'
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d '{"position":[5,0,-5],"q":[1,0,0,0],"velocity":[0,0,0],"battery":90,"gps_lat":39.9,"gps_lon":116.31,"gps_alt":50}'
+curl.exe -X POST http://127.0.0.1:8080/api/arrays `
+  -H "Content-Type: application/json" `
+  -d '{"array_id":"a1","mode":"recon","paths":[{"pathId":1,"drone_id":"d1","bClosedLoop":false,"waypoints":[{"location":{"x":1000,"y":0,"z":-500}},{"location":{"x":2000,"y":1000,"z":-500}}]},{"pathId":2,"drone_id":"d2","bClosedLoop":false,"waypoints":[{"location":{"x":-1000,"y":0,"z":-500}},{"location":{"x":-2000,"y":1000,"z":-500}}]}]}'
+```
 
-- 集结流程测试时，建议将 WebSocket 客户端窗口放大，清晰展示状态变化消息。
-- 超时测试时，可以在屏幕上显示计时器，展示 60 秒等待过程（可加速播放）。
+**模拟到达首航点并查询集结状态**
+
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[10,0,5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85}"
+curl -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[-10,0,5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":90}"
+curl http://127.0.0.1:8080/api/debug/arrays/a1/state
+```
+
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d '{"position":[10,0,5],"q":[1,0,0,0],"velocity":[0,0,0],"battery":85}'
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d '{"position":[-10,0,5],"q":[1,0,0,0],"velocity":[0,0,0],"battery":90}'
+curl.exe http://127.0.0.1:8080/api/debug/arrays/a1/state
+```
+
+**预期结果**：WebSocket 依次收到 `assembling`、`assembly_complete`，状态查询中 `exec_running=true`。
+
+### 测试 9.2：停止阵列任务
+
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/arrays/a1/stop
+```
+
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/arrays/a1/stop
+```
+
+**预期结果**：返回 `{"array_id":"a1","status":"stopped"}`。
 
 ---
 
 ## 10. 侦察/巡逻/攻击模式
 
-### 测试 10.1：侦察模式（非循环）
+### 测试 10.1：侦察模式
 
-**测试目的**：验证侦察模式下，无人机按顺序执行航点，到达最后一个航点后停止。
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"recon\",\"loop\":true,\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":1000,\"z\":-500}]}"
+```
 
-**操作步骤**：
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
+  -H "Content-Type: application/json" `
+  -d '{"mode":"recon","loop":true,"waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}'
+```
 
-1. 确保 ID 为 1 的无人机已注册并已注入遥测。
-2. 发送侦察模式指令（非循环，loop=false）：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"recon\",\"loop\":false,\"waypoints\":[[0,0,-10],[10,0,-10],[10,10,-10]]}"
-   ```
-3. 观察 WebSocket 推送的指令执行状态。
-4. 模拟无人机依次到达各航点（注入对应位置的遥测数据）：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-10],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":80,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":60}}"
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[10,0,-10],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":79,\"gps\":{\"lat\":39.9,\"lon\":116.401,\"alt\":60}}"
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[10,10,-10],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":78,\"gps\":{\"lat\":39.901,\"lon\":116.401,\"alt\":60}}"
-   ```
+**预期结果**：非循环侦察到末航点后悬停；`loop=true` 时到末航点后回到第一个航点。
 
-**预期结果**：
+### 测试 10.2：巡逻模式与目标注入
 
-无人机执行完最后一个航点后，指令队列停止，不再循环回第一个航点。WebSocket 消息显示任务完成状态。
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"patrol\",\"loop\":false,\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":0,\"z\":-500}]}"
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/target -H "Content-Type: application/json" -d "{\"x\":3000,\"y\":3000,\"z\":-500}"
+```
 
-### 测试 10.2：侦察模式（循环）
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
+  -H "Content-Type: application/json" `
+  -d '{"mode":"patrol","loop":false,"waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":0,"z":-500}]}'
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/target `
+  -H "Content-Type: application/json" `
+  -d '{"x":3000,"y":3000,"z":-500}'
+```
 
-**测试目的**：验证循环侦察模式下，无人机到达最后一个航点后自动返回第一个航点继续执行。
+**预期结果**：目标注入后，中断当前巡逻航点，飞向目标点。
 
-**操作步骤**：
+### 测试 10.3：攻击模式
 
-1. 发送循环侦察模式指令（loop=true）：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"recon\",\"loop\":true,\"waypoints\":[[0,0,-10],[10,0,-10],[10,10,-10]]}"
-   ```
-2. 模拟无人机到达所有航点后，观察是否自动回到第一个航点继续执行。
-3. 注入第三个航点位置后，继续注入第一个航点位置，观察循环行为。
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"attack\",\"loop\":false,\"waypoints\":[{\"x\":500,\"y\":0,\"z\":-500},{\"x\":1000,\"y\":500,\"z\":-500},{\"x\":1500,\"y\":1000,\"z\":-500}]}"
+```
 
-**预期结果**：
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
+  -H "Content-Type: application/json" `
+  -d '{"mode":"attack","loop":false,"waypoints":[{"x":500,"y":0,"z":-500},{"x":1000,"y":500,"z":-500},{"x":1500,"y":1000,"z":-500}]}'
+```
 
-无人机完成最后一个航点后，指令队列自动重置，从第一个航点重新开始执行，形成循环。
-
-### 测试 10.3：巡逻模式 + 目标注入
-
-**测试目的**：验证巡逻模式下，当注入新目标时，无人机中断当前巡逻并飞向新目标。
-
-**操作步骤**：
-
-1. 启动巡逻模式：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"patrol\",\"loop\":true,\"waypoints\":[[0,0,-10],[20,0,-10],[20,20,-10],[0,20,-10]]}"
-   ```
-2. 等待 2-3 秒后，注入新目标：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/target -H "Content-Type: application/json" -d "{\"target\":[50,50,-15],\"priority\":\"high\"}"
-   ```
-3. 观察 WebSocket 消息，查看无人机是否中断巡逻并飞向新目标。
-
-**预期结果**：
-
-注入目标后，WebSocket 消息显示无人机中断当前巡逻任务，转向新目标位置飞行。
-
-### 测试 10.4：攻击模式
-
-**测试目的**：验证攻击模式下，无人机飞到最后一个航点后停止（不循环）。
-
-**操作步骤**：
-
-1. 发送攻击模式指令：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"attack\",\"loop\":false,\"waypoints\":[[0,0,-10],[30,0,-10],[30,30,-20]]}"
-   ```
-2. 模拟无人机依次到达各航点：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[30,30,-20],\"quaternion\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":75,\"gps\":{\"lat\":39.902,\"lon\":116.402,\"alt\":70}}"
-   ```
-3. 观察无人机是否在最后一个航点停止。
-
-**预期结果**：
-
-无人机到达最后一个航点（攻击目标）后停止，不返回也不循环。
-
-### 测试 10.5：多机并发指令
-
-**测试目的**：验证可以同时向多架无人机发送指令，各无人机独立执行自己的指令队列。
-
-**操作步骤**：
-
-1. 确保 ID 为 1 和 2 的无人机均已注册并注入遥测。
-2. 批量发送指令：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/cmd/batch/array -H "Content-Type: application/json" -d "{\"commands\":[{\"drone_id\":1,\"mode\":\"recon\",\"loop\":false,\"waypoints\":[[0,0,-10],[10,0,-10]]},{\"drone_id\":2,\"mode\":\"patrol\",\"loop\":true,\"waypoints\":[[5,5,-10],[15,5,-10]]}]}"
-   ```
-3. 分别查询两架无人机的指令队列状态：
-   ```bash
-   curl http://localhost:8080/api/debug/cmd/1/queue
-   curl http://localhost:8080/api/debug/cmd/2/queue
-   ```
-
-**预期结果**：
-
-- 无人机 1 执行侦察模式（非循环）。
-- 无人机 2 执行巡逻模式（循环）。
-- 两架无人机的指令队列相互独立，互不干扰。
-
-### 录屏要点（测试 10）
-
-- 建议将 WebSocket 客户端窗口和 curl 命令窗口并排显示。
-- 循环模式测试时，展示至少两个完整循环周期。
-- 目标注入测试时，录制注入前后的状态变化，清晰展示中断效果。
+**预期结果**：依次经过中间航点，到最后攻击目标点后悬停，不循环。
 
 ---
 
 ## 11. 多机并发与避障
 
-### 测试 11.1：基础避障
+### 测试 11.1：批量阵列任务
 
-**测试目的**：验证当两架无人机飞行路径接近时，低优先级无人机会自动获得临时偏移目标以避免碰撞。
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/batch/array -H "Content-Type: application/json" -d "[{\"drone_id\":\"d1\",\"mode\":\"recon\",\"waypoints\":[{\"x\":100,\"y\":0,\"z\":-300}]},{\"drone_id\":\"d2\",\"mode\":\"recon\",\"waypoints\":[{\"x\":-100,\"y\":0,\"z\":-300}]}]"
+```
 
-**操作步骤**：
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/batch/array `
+  -H "Content-Type: application/json" `
+  -d '[{"drone_id":"d1","mode":"recon","waypoints":[{"x":100,"y":0,"z":-300}]},{"drone_id":"d2","mode":"recon","waypoints":[{"x":-100,"y":0,"z":-300}]}]'
+```
 
-1. 确保 ID 为 1 和 2 的无人机均已注册并处于执行状态。
-2. 向两架无人机注入接近的位置和速度（模拟即将碰撞的场景）：
-   ```bash
-   curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-10],\"quaternion\":[1,0,0,0],\"velocity\":[1,0,0],\"battery\":80,\"gps\":{\"lat\":39.9,\"lon\":116.4,\"alt\":60}}"
-   curl -X POST http://localhost:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[3,0,-10],\"quaternion\":[1,0,0,0],\"velocity\":[-1,0,0],\"battery\":80,\"gps\":{\"lat\":39.9,\"lon\":116.401,\"alt\":60}}"
-   ```
-   （两架无人机位置相距 3 米，速度方向相对，即将碰撞）
-3. 观察 WebSocket 推送的消息，查看是否有避障相关事件或目标偏移。
+**预期结果**：两架无人机进入同一集结任务；集结完成后，执行引擎为每架机启动独立线程。
 
-**预期结果**：
+### 测试 11.2：基础避障观察
 
-- 系统检测到两架无人机即将碰撞。
-- 低优先级无人机（ID 较大的，即 ID=2）收到临时偏移目标指令。
-- WebSocket 消息中可以看到避障相关的状态变化或事件通知。
+避障需要两机都处于执行阶段，并持续注入相互接近的位置与速度。低优先级机（ID 较大的无人机）会收到临时偏移目标，约 3 秒后恢复原目标。建议用 Wireshark 抓控制端口 `8889/8891`，或查询两机队列：
 
-### 录屏要点（测试 11）
+```cmd
+:: cmd
+curl http://127.0.0.1:8080/api/debug/drone/1/queue
+curl http://127.0.0.1:8080/api/debug/drone/2/queue
+```
 
-- 同时展示两架无人机的遥测数据和 WebSocket 消息。
-- 清晰展示注入接近位置前后的系统响应变化。
+```powershell
+# PowerShell
+curl.exe http://127.0.0.1:8080/api/debug/drone/1/queue
+curl.exe http://127.0.0.1:8080/api/debug/drone/2/queue
+```
+
+### 测试 11.3：阵列预演与碰撞风险
+
+**测试目的**：在正式下发前先检查路径结构、无人机注册情况和碰撞风险。
+
+```cmd
+:: cmd
+curl -X POST http://127.0.0.1:8080/api/arrays/preview -H "Content-Type: application/json" -d "{\"array_id\":\"preview1\",\"mode\":\"recon\",\"paths\":[{\"pathId\":1,\"drone_id\":\"d1\",\"waypoints\":[{\"location\":{\"x\":100,\"y\":0,\"z\":-300}},{\"location\":{\"x\":300,\"y\":0,\"z\":-300}}]},{\"pathId\":2,\"drone_id\":\"d2\",\"waypoints\":[{\"location\":{\"x\":120,\"y\":0,\"z\":-300}},{\"location\":{\"x\":320,\"y\":0,\"z\":-300}}]}]}"
+```
+
+```powershell
+# PowerShell
+curl.exe -X POST http://127.0.0.1:8080/api/arrays/preview `
+  -H "Content-Type: application/json" `
+  -d '{"array_id":"preview1","mode":"recon","paths":[{"pathId":1,"drone_id":"d1","waypoints":[{"location":{"x":100,"y":0,"z":-300}},{"location":{"x":300,"y":0,"z":-300}}]},{"pathId":2,"drone_id":"d2","waypoints":[{"location":{"x":120,"y":0,"z":-300}},{"location":{"x":320,"y":0,"z":-300}}]}]}'
+```
+
+**预期结果**：返回 JSON 中 `valid=false`，`collision_risks` 非空，`threshold_m` 对应 `config.yaml` 中的避障半径。
+
+### 测试 11.4：调试指标与避障状态
+
+```cmd
+:: cmd
+curl http://127.0.0.1:8080/api/debug/metrics
+curl http://127.0.0.1:8080/api/debug/avoidance
+```
+
+```powershell
+# PowerShell
+curl.exe http://127.0.0.1:8080/api/debug/metrics
+curl.exe http://127.0.0.1:8080/api/debug/avoidance
+```
+
+**预期结果**：`/api/debug/metrics` 显示注册数、在线数、集结状态和避障统计；`/api/debug/avoidance` 显示最近一次碰撞风险或恢复事件。
 
 ---
 
 ## 12. 集成测试
 
-### 测试 12.1：Week 3 集成测试
+> 集成脚本会自己启动和关闭后端。运行前请先关闭手动启动的 `DroneBackend.exe`，避免占用 8080/8081。
 
-**测试目的**：运行 Week 3 的完整集成测试脚本，验证所有 Week 3 功能正常工作。
+### 测试 12.1：Week 1-3 后端集成测试
 
-**操作步骤**：
-
-1. 确保后端服务器正在运行。
-2. 打开命令提示符，进入后端目录：
-   ```bash
-   cd /f/UE5DroneControl/BackEnd
-   ```
-3. 运行 Week 3 集成测试脚本：
-   ```bash
-   python integration_week3.py
-   ```
-4. 等待测试完成（可能需要 1-2 分钟）。
-
-**预期结果**：
-
-所有测试项目显示 `PASS`，终端输出类似：
+```cmd
+:: cmd
+cd /d f:\UE5DroneControl
+python tools\integration_week3.py
 ```
-[PASS] Drone registration
-[PASS] Duplicate prevention
-[PASS] Telemetry injection
-[PASS] WebSocket push
-[PASS] Coordinate conversion
-...
-All tests passed!
+
+```powershell
+# PowerShell
+cd f:\UE5DroneControl
+python tools\integration_week3.py
 ```
-没有任何 `FAIL` 或 `ERROR` 项目。
 
-### 测试 12.2：Week 4 集成测试
+**预期结果**：终端输出 `week1-3 backend integration: PASS`。
 
-**测试目的**：运行 Week 4 的完整集成测试脚本，验证所有 Week 4 功能正常工作。
+### 测试 12.2：Week 4 后端集成测试
 
-**操作步骤**：
-
-1. 确保后端服务器正在运行。
-2. 运行 Week 4 集成测试脚本：
-   ```bash
-   python integration_week4.py
-   ```
-3. 等待测试完成（可能需要 2-3 分钟，因为包含超时测试）。
-
-**预期结果**：
-
-所有测试项目显示 `PASS`，终端输出类似：
+```cmd
+:: cmd
+cd /d f:\UE5DroneControl
+python tools\integration_week4.py
 ```
-[PASS] Assembly flow
-[PASS] Assembly timeout
-[PASS] Recon mode (non-loop)
-[PASS] Recon mode (loop)
-[PASS] Patrol + target injection
-[PASS] Attack mode
-[PASS] Multi-drone concurrent
-[PASS] Basic avoidance
-...
-All tests passed!
+
+```powershell
+# PowerShell
+cd f:\UE5DroneControl
+python tools\integration_week4.py
 ```
-没有任何 `FAIL` 或 `ERROR` 项目。
 
-### 录屏要点（测试 12）
+**预期结果**：终端输出 `week4 backend integration: ALL PASS`。
 
-- 录制完整的测试运行过程，包括开始和结束。
-- 确保最终的 `All tests passed!` 或类似成功消息清晰可见。
-- 如果测试失败，不要剪辑掉失败信息，应先修复问题再重新录制。
+### 测试 12.3：Week 5 后端收尾测试
+
+```cmd
+:: cmd
+cd /d f:\UE5DroneControl
+python tools\integration_week5.py
+```
+
+```powershell
+# PowerShell
+cd f:\UE5DroneControl
+python tools\integration_week5.py
+```
+
+**预期结果**：终端输出 `ALL PASS`。
+
+**覆盖内容**：注册、`/api/arrays/preview` 预演、正式集结、`/api/debug/metrics`、`/api/debug/avoidance`、停机收尾。
+
+> 注意：Week 3/4/5 集成脚本都会启动同一套默认端口的后端实例，**请顺序执行，不要并行运行**，否则会互相抢占 8080/8081 和临时文件。
 
 ---
 
 ## 13. 录屏建议
 
-### 13.1 推荐屏幕布局
+推荐录制三个窗口：后端日志窗口、curl 命令窗口、WebSocket 客户端窗口。集成测试可以单独录制一个窗口，重点展示脚本开始命令和最终 `PASS / ALL PASS` 行。
 
-为了让演示视频清晰易懂，建议采用以下屏幕布局：
+录制前检查：
 
-```
-+---------------------------+---------------------------+
-|                           |                           |
-|   终端窗口（curl 命令）    |   WebSocket 客户端窗口    |
-|                           |                           |
-|   用于执行 HTTP 请求      |   用于观察实时推送消息    |
-|                           |                           |
-+---------------------------+---------------------------+
-|                                                       |
-|   后端服务器日志窗口（可选，展示服务器端处理过程）     |
-|                                                       |
-+-------------------------------------------------------+
-```
-
-**具体操作**：
-1. 打开三个命令提示符窗口。
-2. 将屏幕分成左右两半（Windows 快捷键：`Win + 左箭头` / `Win + 右箭头`）。
-3. 左侧放 curl 命令窗口，右侧放 WebSocket 客户端窗口。
-4. 如果需要，可以在底部再开一个窗口显示后端日志。
-
-### 13.2 各测试录屏要点汇总
-
-| 测试类别 | 录屏重点 | 建议时长 |
-|---------|---------|---------|
-| 单元测试 | 完整测试输出，PASSED 28 行 | 30 秒 |
-| 无人机注册 | 命令 + JSON 响应 | 2 分钟 |
-| 遥测注入 | curl 命令 + WS 消息流 | 2 分钟 |
-| 坐标转换 | 注入值 + WS 中的转换结果 | 1 分钟 |
-| 连接状态 | 等待 10 秒 + 事件触发 | 2 分钟 |
-| 编队集结 | 完整流程 + 状态变化 | 3 分钟 |
-| 侦察/巡逻 | 航点执行 + 循环/停止 | 3 分钟 |
-| 集成测试 | 完整脚本运行 + ALL PASS | 3 分钟 |
-
-### 13.3 建议视频结构
-
-**方案 A：按功能分组录制多个短视频**
-
-1. `01_unit_tests.mp4` — 单元测试（约 1 分钟）
-2. `02_drone_management.mp4` — 无人机注册与管理（约 3 分钟）
-3. `03_telemetry_websocket.mp4` — 遥测与 WebSocket（约 4 分钟）
-4. `04_commands_status.mp4` — 指令与状态（约 4 分钟）
-5. `05_assembly_modes.mp4` — 编队与飞行模式（约 5 分钟）
-6. `06_integration_tests.mp4` — 集成测试（约 5 分钟）
-
-**方案 B：录制一个完整演示视频**
-
-按照本指南的章节顺序，录制一个 15-20 分钟的完整演示视频，涵盖所有 30 个测试用例。
-
-### 13.4 如何标注关键时刻
-
-**使用 OBS 的文字叠加功能**：
-1. 在 OBS 的"来源"面板点击 `+` → 选择"文字（GDI+）"。
-2. 输入当前测试的名称，例如"测试 3.1：注册无人机"。
-3. 每切换测试时更新文字内容。
-
-**使用视频编辑软件后期添加字幕**：
-- Windows 内置的"照片"应用支持基本视频编辑和字幕添加。
-- 也可以使用免费软件 DaVinci Resolve 进行专业字幕制作。
-
-**录制前的准备**：
-1. 关闭不必要的程序和通知，避免干扰画面。
-2. 将字体大小调大（命令提示符右键 → 属性 → 字体，设置为 16-18pt）。
-3. 使用深色主题的终端，提高可读性。
-4. 录制前先演练一遍，确保命令都能正常执行。
-
-### 13.5 录制前检查清单
-
-在开始录制之前，请确认以下事项：
-
-- [ ] 后端服务器已启动并正常运行
-- [ ] WebSocket 客户端已连接
-- [ ] 所有 curl 命令已在文本编辑器中准备好，可以快速复制粘贴
-- [ ] 屏幕分辨率设置为 1920×1080 或更高
-- [ ] 录屏软件已开启并测试正常
-- [ ] 关闭了所有不必要的通知（微信、QQ 等）
-- [ ] 数据库/存储文件已清空（如需从头演示注册流程）
+- 后端已启动，或集成脚本运行前已关闭手动后端。
+- WebSocket 客户端已连接到 `ws://127.0.0.1:8081/ws`。
+- 终端字体调大到 16pt 以上。
+- 如果演示注册流程，先确认没有残留同名/同槽位无人机。
 
 ---
 
 ## 附录：常见问题排查
 
-### Q1：后端服务器无法启动
+### Q1：端口 8080/8081 被占用
 
-**可能原因**：
-- 端口 8080 或 9090 已被其他程序占用。
-
-**解决方法**：
-```bash
-# 查找占用端口的程序
+```cmd
+:: cmd
 netstat -ano | findstr :8080
-# 根据 PID 结束进程
+netstat -ano | findstr :8081
 taskkill /PID <PID号> /F
 ```
 
-### Q2：curl 命令返回"连接被拒绝"
-
-**可能原因**：
-- 后端服务器未启动，或启动失败。
-
-**解决方法**：
-1. 检查后端服务器终端是否有错误信息。
-2. 重新运行 `./DroneBackend.exe`。
-
-### Q3：WebSocket 无法连接
-
-**可能原因**：
-- WebSocket 端口（9090）未开放，或防火墙阻止了连接。
-
-**解决方法**：
-1. 确认后端服务器日志中显示 `WebSocket server listening on port 9090`。
-2. 临时关闭 Windows 防火墙进行测试。
-
-### Q4：Python 脚本报错"ModuleNotFoundError"
-
-**解决方法**：
-```bash
-pip install requests websocket-client
+```powershell
+# PowerShell
+Get-NetTCPConnection -LocalPort 8080,8081 | Select-Object LocalPort,OwningProcess
+Stop-Process -Id <PID号> -Force
 ```
 
-### Q5：集成测试脚本报错
+### Q2：PowerShell 中 curl 行为异常
 
-**解决方法**：
-1. 确保后端服务器正在运行。
-2. 确保数据库中没有残留的测试数据（重启后端服务器可清空内存数据）。
-3. 检查 Python 版本是否为 3.7 或更高：`python --version`。
+请使用 `curl.exe`，不要只写 `curl`。PowerShell 中 `curl` 是 `Invoke-WebRequest` 的别名。
 
----
+### Q3：Python 脚本缺少依赖
 
-*本测试指南涵盖 UE5DroneControl 后端 Week 3 和 Week 4 的全部 30 个测试用例。如有疑问，请联系开发团队。*
+```cmd
+:: cmd
+pip install websockets requests websocket-client
+```
 
+```powershell
+# PowerShell
+pip install websockets requests websocket-client
+```
 
----
+### Q4：注册接口返回 409
+
+说明名称或 slot 已存在。换一个 `name/slot`，或先删除已有无人机：
+
+```cmd
+:: cmd
+curl -X DELETE http://127.0.0.1:8080/api/drones/1
+```
+
+```powershell
+# PowerShell
+curl.exe -X DELETE http://127.0.0.1:8080/api/drones/1
+```
