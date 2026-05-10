@@ -6,6 +6,8 @@
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "DroneOps/Network/DroneNetworkManager.h"
+#include "DroneOps/Network/DroneHttpClient.h"
+#include "PathEditor/DronePathActor.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "Components/WidgetComponent.h"
@@ -128,6 +130,12 @@ void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMultiDroneCharacter::Tick(float DeltaTime)
 {
+	// Block parent movement and UDP when paused
+	if (bIsPaused)
+	{
+		bSendClickTarget = false;
+	}
+
 	Super::Tick(DeltaTime);
 
 	if (!Registry)
@@ -141,7 +149,7 @@ void AMultiDroneCharacter::Tick(float DeltaTime)
 		MirrorDelayDistance = FVector::Dist(GetActorLocation(), MirrorSnap.WorldLocation);
 	}
 
-	if (bInAssemblyMode && MirrorSnap.Availability == EDroneAvailability::Online)
+	if (bInAssemblyMode && !bIsPaused && MirrorSnap.Availability == EDroneAvailability::Online)
 	{
 		const FVector TargetPos = MirrorSnap.WorldLocation;
 		const FVector NewPos = FMath::VInterpTo(GetActorLocation(), TargetPos, DeltaTime, AssemblyFollowInterpSpeed);
@@ -218,6 +226,21 @@ void AMultiDroneCharacter::OnAssemblyTimeout(const FString& ArrayId, int32 Ready
 	ExitAssemblyMode();
 }
 
+void AMultiDroneCharacter::SetPaused(bool bPause)
+{
+	bIsPaused = bPause;
+	if (bPause)
+	{
+		bWasMovingBeforePause = bSendClickTarget;
+		bSendClickTarget = false;
+	}
+	else
+	{
+		bSendClickTarget = bWasMovingBeforePause;
+	}
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: %s"), *DroneName, bPause ? TEXT("Paused") : TEXT("Resumed"));
+}
+
 void AMultiDroneCharacter::OnPrimarySelected_Implementation()
 {
 	if (SelectionComponent)
@@ -262,8 +285,7 @@ void AMultiDroneCharacter::OnDeselected_Implementation()
 
 void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 Mode)
 {
-	// remote: assembly 模式下屏蔽移动指令
-	if (bInAssemblyMode)
+	if (bInAssemblyMode || bIsPaused)
 	{
 		return;
 	}

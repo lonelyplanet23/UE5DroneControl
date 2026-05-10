@@ -10,6 +10,7 @@
 #include "DroneOpsPlayerController.generated.h"
 
 class UDroneRegistrySubsystem;
+class ADronePathActor;
 
 /**
  * Delegate for when drone info panel is requested by middle click.
@@ -143,4 +144,10 @@ private:
 
 	/** Open drone info panel for given DroneId (C++ implementation) */
 	void OpenDroneInfoPanel(int32 DroneId);
+
+	UFUNCTION(Exec)
+	void TestSendArrayTask();
+
+	UFUNCTION()
+	void OnTestArrayTaskComplete(bool bSuccess, const FString& ResponseBody);
 };

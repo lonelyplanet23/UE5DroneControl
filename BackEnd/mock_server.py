@@ -148,11 +148,14 @@ ws_clients = set()
 _ws_loop: asyncio.AbstractEventLoop | None = None
 
 async def _broadcast(msg: str):
+    if '"type": "telemetry"' not in msg:
+        print(f"[WS] Broadcast to {len(ws_clients)} client(s): {msg[:120]}")
     dead = set()
     for ws in ws_clients:
         try:
             await ws.send(msg)
-        except Exception:
+        except Exception as e:
+            print(f"[WS] Send failed: {e}")
             dead.add(ws)
     ws_clients.difference_update(dead)
 

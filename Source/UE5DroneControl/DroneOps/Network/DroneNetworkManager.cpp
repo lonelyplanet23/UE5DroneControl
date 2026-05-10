@@ -205,6 +205,11 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		return;
 	}
 
+	if (MsgType != TEXT("telemetry"))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] WS non-telemetry: type=%s"), *MsgType);
+	}
+
 	// Telemetry push (flat): { "type": "telemetry", "drone_id": N, "x":..., "y":..., "z":...,
 	//                          "yaw":..., "pitch":..., "roll":..., "speed":..., "battery":... }
 	if (MsgType == TEXT("telemetry"))
