@@ -9,6 +9,7 @@ UE5DroneControl 项目的 C++ 后端服务。提供 HTTP REST 接口与 WebSocke
 - [功能概述](#功能概述)
 - [目录结构](#目录结构)
 - [依赖](#依赖)
+- [命令格式速查](#命令格式速查)
 - [编译](#编译)
 - [运行](#运行)
 - [配置](#配置)
@@ -16,6 +17,7 @@ UE5DroneControl 项目的 C++ 后端服务。提供 HTTP REST 接口与 WebSocke
 - [WebSocket 协议](#websocket-协议)
 - [维护](#维护)
 - [数据流](#数据流)
+- [当前进度与第五周完成情况](#当前进度与第五周完成情况)
 
 ---
 
@@ -110,6 +112,19 @@ BackEnd/
 
 ---
 
+## 命令格式速查
+
+本文档中 Windows 操作尽量同时给出 cmd 和 PowerShell 两种格式：
+
+| 环境 | 进入目录 | curl | 多行续行 | JSON 参数 |
+|------|----------|------|----------|-----------|
+| cmd | `cd /d f:\UE5DroneControl` | `curl` | `^` | `\"` 转义 |
+| PowerShell | `cd f:\UE5DroneControl` | `curl.exe` | `` ` `` | 单引号包裹 JSON |
+
+PowerShell 里 `curl` 是 `Invoke-WebRequest` 的别名，测试接口时建议始终写 `curl.exe`。
+
+---
+
 ## 编译
 
 ### 前提条件
@@ -119,8 +134,17 @@ BackEnd/
 
 ### 一键编译
 
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl\BackEnd
+build.bat
+```
+
+PowerShell：
+
 ```powershell
-cd BackEnd
+cd f:\UE5DroneControl\BackEnd
 .\build.bat
 ```
 
@@ -128,9 +152,21 @@ cd BackEnd
 
 ### 手动编译
 
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl\BackEnd
+if not exist build mkdir build
+cd build
+cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake --build . --config Release --target DroneBackend
+```
+
+PowerShell：
+
 ```powershell
-cd BackEnd
-mkdir build
+cd f:\UE5DroneControl\BackEnd
+New-Item -ItemType Directory -Force build | Out-Null
 cd build
 cmake .. -G "Visual Studio 17 2022" -A x64 `
     -DCMAKE_TOOLCHAIN_FILE="C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
@@ -141,7 +177,18 @@ cmake --build . --config Release --target DroneBackend
 
 ### 编译并运行单元测试
 
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl\BackEnd
+cmake --build build --config Release --target DroneBackend_tests
+build\Release\DroneBackend_tests.exe
+```
+
+PowerShell：
+
 ```powershell
+cd f:\UE5DroneControl\BackEnd
 cmake --build build --config Release --target DroneBackend_tests
 .\build\Release\DroneBackend_tests.exe
 ```
@@ -150,15 +197,34 @@ cmake --build build --config Release --target DroneBackend_tests
 
 ## 运行
 
-```powershell
-cd BackEnd\build\Release
-.\DroneBackend.exe
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl
+BackEnd\build\Release\DroneBackend.exe BackEnd\config.yaml
 ```
 
-或从项目根目录指定配置文件路径：
+PowerShell：
 
 ```powershell
+cd f:\UE5DroneControl
 .\BackEnd\build\Release\DroneBackend.exe .\BackEnd\config.yaml
+```
+
+也可以进入 Release 目录后直接启动：
+
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl\BackEnd\build\Release
+DroneBackend.exe ..\..\config.yaml
+```
+
+PowerShell：
+
+```powershell
+cd f:\UE5DroneControl\BackEnd\build\Release
+.\DroneBackend.exe ..\..\config.yaml
 ```
 
 正常启动输出：
@@ -180,6 +246,14 @@ cd BackEnd\build\Release
 ## 配置
 
 编辑 `config.yaml`（编译时自动复制到 `build\` 目录）。若只修改配置而不重新编译，直接覆盖 `build\config.yaml`，或运行：
+
+cmd：
+
+```cmd
+copy /Y BackEnd\config.yaml BackEnd\build\config.yaml
+```
+
+PowerShell：
 
 ```powershell
 Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
@@ -274,6 +348,35 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 
 ### 集结任务
 
+#### `POST /api/arrays/preview`
+
+预演阵列任务，不启动真实集结。后端会校验 `mode`、`paths`、`drone_id`、航点结构，并按当前 `avoidance_radius_m` 做路径间最小距离检查。UE5 可在提交正式任务前调用该接口，用 `valid/warnings/collision_risks` 给用户显示预演和碰撞风险。
+
+**请求体：** 与 `POST /api/arrays` 相同。
+
+**响应示例：**
+```json
+{
+  "array_id": "a1",
+  "mode": "recon",
+  "valid": false,
+  "warnings": [],
+  "collision_risks": [
+    {
+      "drone_id": "d1",
+      "other_drone_id": "d2",
+      "segment_index": 0,
+      "other_segment_index": 0,
+      "min_distance_m": 0.2,
+      "threshold_m": 3.0
+    }
+  ],
+  "paths": [],
+  "arrival_threshold_m": 0.5,
+  "avoidance_radius_m": 3.0
+}
+```
+
 #### `POST /api/arrays`
 
 下发集结任务，后端开始监控各机到达初始航点。
@@ -296,6 +399,8 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 
 停止集结任务。
 
+> `POST /api/arrays` 会做正式结构校验并启动任务；如需在 UE5 中阻止有碰撞风险的路径，应先调用 `/api/arrays/preview`，由前端根据 `valid=false` 或 `collision_risks` 拦截提交。
+
 ### 调试接口（需 `server.debug: true`）
 
 | 方法 | 路径 | 说明 |
@@ -311,6 +416,8 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 | POST | `/api/debug/cmd/{id}/target` | 注入目标识别事件（巡逻模式专用） |
 | POST | `/api/debug/cmd/batch/array` | 多机并发阵列任务下发（含集结流程） |
 | GET | `/api/debug/arrays/{id}/state` | 集结与执行状态快照 |
+| GET | `/api/debug/metrics` | 后端收口指标：注册数、在线数、集结状态、执行状态、避障统计 |
+| GET | `/api/debug/avoidance` | 实时避障状态与最近一次避障/恢复事件 |
 
 **`/api/debug/cmd/{id}/array` 请求体示例：**
 ```json
@@ -383,17 +490,41 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 
 ### 清理日志文件
 
+cmd：
+
+```cmd
+del BackEnd\logs\backend.log
+```
+
+PowerShell：
+
 ```powershell
 Remove-Item BackEnd\logs\backend.log
 ```
 
 或删除整个 logs 目录（运行时自动重建）：
 
+cmd：
+
+```cmd
+rmdir /S /Q BackEnd\logs
+```
+
+PowerShell：
+
 ```powershell
 Remove-Item -Recurse -Force BackEnd\logs
 ```
 
 ### 清理编译产物
+
+cmd：
+
+```cmd
+rmdir /S /Q BackEnd\build
+```
+
+PowerShell：
 
 ```powershell
 Remove-Item -Recurse -Force BackEnd\build
@@ -405,11 +536,29 @@ Remove-Item -Recurse -Force BackEnd\build
 
 无人机注册信息持久化在 `BackEnd\data\drones.json`，删除后重启将清空注册表：
 
+cmd：
+
+```cmd
+del BackEnd\data\drones.json
+```
+
+PowerShell：
+
 ```powershell
 Remove-Item BackEnd\data\drones.json
 ```
 
 ### 完整清理（恢复到源码状态）
+
+cmd：
+
+```cmd
+rmdir /S /Q BackEnd\build
+rmdir /S /Q BackEnd\logs
+rmdir /S /Q BackEnd\data
+```
+
+PowerShell：
 
 ```powershell
 Remove-Item -Recurse -Force BackEnd\build
@@ -460,9 +609,11 @@ POST /api/arrays
 
 ---
 
-## 第四周验收状态
+## 当前进度与第五周完成情况
 
 本节按项目架构文档与后端开发文档检查 `BackEnd/`，不包含旧目录 `BackEnd(before)/`。
+
+此前项目处于第四周完成期；本次已补齐后端第五周收尾内容。后端第一至第五周目标现在均具备可运行实现和自动化验收入口，后续项目收口应以 Week 5 集成测试、UE5 演示联调和真实 Jetson/PX4 回归结果作为最终材料。
 
 | 周次 | 后端范围 | 当前状态 | 验证入口 |
 |------|----------|----------|----------|
@@ -470,13 +621,30 @@ POST /api/arrays
 | 第二周 | UDP 收发、坐标转换、GPS 锚点、心跳维持 | 已实现 | `DroneBackend_tests.exe`、HTTP/UDP 遥测注入 |
 | 第三周 | 连接状态机、WebSocket 推送、move/pause/resume、遥测/事件/告警、调试接口 | 已实现 | `integration_week3.py` |
 | 第四周 | 集结流程、三种执行模式、多机并发调度、基础实时避障 | 已实现 | `integration_week4.py`、UDP 抓包/队列状态 |
+| 第五周 | 阵列预演校验、碰撞风险提示、避障状态告警、调试指标、全流程后端集成测试 | 后端已实现 | `integration_week5.py`、`/api/arrays/preview`、`/api/debug/metrics` |
+
+第五周后端完成情况：
+
+| 任务 | 当前判断 | 验收入口 |
+|------|----------|------------|
+| 后端告警推送（低电量/断联） | 已实现，纳入 Week 3/4 测试 | 运行 `integration_week3.py`，并用 `TEST_GUIDE.md` 第 7 节手工验证 |
+| `/api/arrays/{id}/stop` | 已实现，Week 4 脚本覆盖 | 下发阵列后调用 stop，确认返回 `status=stopped` |
+| 到达阈值可配置 | 已实现，读取 `drone.arrival_threshold_m` | 使用不同阈值配置跑集结完成/超时测试 |
+| 阵列预演与碰撞提示 | 已实现 `/api/arrays/preview`，返回 `warnings/collision_risks` | 运行 `integration_week5.py`，或手工提交交叉/近距离路径 |
+| 实时避障优化 | 已实现避障轮询、偏移目标、恢复目标、WS `collision_risk/avoidance_restore` 告警和调试状态 | 查询 `/api/debug/avoidance`，双机接近场景抓 UDP |
+| 调试指标与测试闭环 | 已实现 `/api/debug/metrics` 与 Week 5 集成脚本 | 顺序运行单元测试、Week 3/4/5 集成脚本 |
+| 坐标转换精度优化 | 基础 NED↔UE 与四元数转换已由单元测试覆盖 | 使用真实 GPS/Cesium 场景做误差记录 |
+| 性能优化（心跳、遥测推送） | 基础频率可配置，后端可用 `/api/debug/metrics` 观察运行状态 | 多机 10Hz 遥测下观察 CPU、日志和 WS 延迟 |
+| UE5 阵列预演动画/物理碰撞/UI | 不属于 `BackEnd/`；后端已提供预演、告警和状态数据 | UE5 接入 `/api/arrays/preview`、WS 事件与 `/api/debug/*` |
+| 完整测试用例文档和测试报告 | 后端测试指南已覆盖 Week 5；项目级报告需汇总 UE5/Jetson 结果 | 按 `TEST_GUIDE.md` 第 12 节和真实联调结果填写报告 |
 
 重要说明：
 
 - `heartbeat_hz`、`lost_timeout_sec`、`arrival_threshold_m`、`assembly_timeout_sec`、`avoidance_radius_m`、`avoidance_lookahead_sec`、`low_battery_threshold` 均从 `config.yaml` 读取。
 - `POST /api/arrays` 会校验 `mode`、`paths`、`drone_id` 与航点，不再静默接受空路径或未注册无人机。
+- `POST /api/arrays/preview` 用于正式下发前的后端预演检查，返回路径归一化结果、结构告警和碰撞风险，不会启动集结或写入任务状态。
 - `DebugBatchArray` 当前按一个 `AssemblyConfig.mode` 执行整批任务；如果请求中每条 path 都带 `mode`，最终会统一使用最后解析到的模式。正式多模式混合任务建议拆成多个任务，或后续将模式移动到 path 级别。
-- 基础避障通过执行引擎线程检测在线无人机预测距离，并对 ID 较大的低优先级机临时发送偏移目标，3 秒后恢复原目标；该实现是第四周基础版，不等同于完整路径规划。
+- 避障通过执行引擎线程检测在线无人机预测距离，并对 ID 较大的低优先级机临时发送偏移目标，3 秒后恢复原目标；这是实时避障保护层，不等同于完整路径规划器。
 
 ---
 
@@ -484,7 +652,19 @@ POST /api/arrays
 
 从项目根目录运行：
 
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl
+BackEnd\build\Release\DroneBackend_tests.exe
+python tools\integration_week3.py
+python tools\integration_week4.py
+```
+
+PowerShell：
+
 ```powershell
+cd f:\UE5DroneControl
 .\BackEnd\build\Release\DroneBackend_tests.exe
 python tools\integration_week3.py
 python tools\integration_week4.py
@@ -521,7 +701,25 @@ week4 backend integration: ALL PASS
 
 常用命令：
 
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl
+python tools\simulate_telemetry.py --register --drones 1 --hz 10
+python tools\simulate_telemetry.py --register --drones 1 2 --hz 10
+python tools\simulate_telemetry.py --drones 1 --move-circle
+python tools\simulate_telemetry.py --drones 1 --battery 15
+python tools\simulate_telemetry.py --drones 1 --position 10 0 5
+python tools\simulate_telemetry.py --drones 1 --ue-target 1000 0 -500
+python tools\simulate_telemetry.py --register --transport udp --drones 1 2 --hz 10
+python tools\simulate_telemetry.py --transport udp --udp-base-port 18888 --drones 1
+python tools\simulate_telemetry.py --base http://<后端IP>:8080 --udp-host <后端IP> --transport udp --drones 1
+```
+
+PowerShell：
+
 ```powershell
+cd f:\UE5DroneControl
 # 自动注册 d1，然后以 10Hz 通过 HTTP 调试接口注入悬停遥测
 python tools\simulate_telemetry.py --register --drones 1 --hz 10
 
@@ -552,6 +750,15 @@ python tools\simulate_telemetry.py --base http://<后端IP>:8080 --udp-host <后
 
 验收方法：
 
+cmd：
+
+```cmd
+curl http://127.0.0.1:8080/api/debug/drone/1/state
+curl http://127.0.0.1:8080/api/drones/1/anchor
+```
+
+PowerShell：
+
 ```powershell
 curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
 curl.exe http://127.0.0.1:8080/api/drones/1/anchor
@@ -568,200 +775,45 @@ curl.exe http://127.0.0.1:8080/api/drones/1/anchor
 
 ## 手工测试指南（无 UE5 / 无 Jetson）
 
-前提：
+本节保留一组快速烟测命令；完整逐项测试、录屏步骤、异常排查和 cmd/PowerShell 双格式示例见 [TEST_GUIDE.md](TEST_GUIDE.md)。
 
-1. `BackEnd/config.yaml` 中 `server.debug: true`
-2. 启动后端：
+前提：`BackEnd/config.yaml` 中 `server.debug: true`，后端已启动，WebSocket 客户端连接到 `ws://127.0.0.1:8081/ws`。
+
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl
+BackEnd\build\Release\DroneBackend.exe BackEnd\config.yaml
+
+curl -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV1\",\"slot\":1}"
+curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[1,2,-3],\"q\":[0.965925826,0,0,0.258819045],\"velocity\":[3,4,0],\"battery\":85,\"gps_lat\":39.9042,\"gps_lon\":116.4074,\"gps_alt\":45}"
+curl http://127.0.0.1:8080/api/debug/drone/1/state
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d "{\"x\":1000,\"y\":2000,\"z\":-500}"
+curl http://127.0.0.1:8080/api/debug/drone/1/queue
+```
+
+PowerShell：
 
 ```powershell
+cd f:\UE5DroneControl
 .\BackEnd\build\Release\DroneBackend.exe .\BackEnd\config.yaml
-```
 
-3. WebSocket 客户端连接：`ws://127.0.0.1:8081/ws`
-
-### 1. 注册、查询、更新、删除
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8080/api/drones `
-  -H "Content-Type: application/json" `
-  -d "{\"name\":\"UAV1\",\"model\":\"PX4\",\"slot\":1,\"ip\":\"127.0.0.1\"}"
-
-curl.exe http://127.0.0.1:8080/api/drones
-
-curl.exe -X PUT http://127.0.0.1:8080/api/drones/1 `
-  -H "Content-Type: application/json" `
-  -d "{\"name\":\"UAV1-A\"}"
-
-curl.exe -X DELETE http://127.0.0.1:8080/api/drones/1
-```
-
-验收点：
-
-- 首次注册返回 `id=1`、`id_str=d1`
-- 重复 `name` 或重复 `slot` 返回 `409`
-- 删除后 `GET /api/drones` 中不再出现该无人机
-- 重启后端后，未删除的无人机会从 `storage.path` 恢复
-
-### 2. 遥测、锚点、坐标和姿态
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8080/api/drones `
-  -H "Content-Type: application/json" `
-  -d "{\"name\":\"UAV1\",\"slot\":1}"
-
-curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject `
-  -H "Content-Type: application/json" `
-  -d "{\"position\":[1,2,-3],\"q\":[0.965925826,0,0,0.258819045],\"velocity\":[3,4,0],\"battery\":85,\"gps_lat\":39.9042,\"gps_lon\":116.4074,\"gps_alt\":45}"
-
-curl.exe http://127.0.0.1:8080/api/drones/1/anchor
+curl.exe -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d '{"name":"UAV1","slot":1}'
+curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d '{"position":[1,2,-3],"q":[0.965925826,0,0,0.258819045],"velocity":[3,4,0],"battery":85,"gps_lat":39.9042,"gps_lon":116.4074,"gps_alt":45}'
 curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
-```
-
-验收点：
-
-- WebSocket 收到 `event=power_on`，携带 `gps_lat/gps_lon/gps_alt`
-- WebSocket 收到 `telemetry`
-- `position=[1,2,-3]` 转换为 UE 偏移 `x=100,y=200,z=300`
-- `velocity=[3,4,0]` 推送 `speed=5`
-- 示例四元数对应 NED yaw 约 `30°`，UE 推送 yaw 约 `-30°`
-
-### 3. move/pause/resume 与队列
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/move `
-  -H "Content-Type: application/json" `
-  -d "{\"x\":1000,\"y\":2000,\"z\":-500}"
-
+curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d '{"x":1000,"y":2000,"z":-500}'
 curl.exe http://127.0.0.1:8080/api/debug/drone/1/queue
-
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/pause
-curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
-
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/resume
 ```
 
-验收点：
+快速验收点：
 
-- 队列中出现 `mode=1`
-- UE 偏移 `(1000,2000,-500)` 转换为 NED `(10,20,5)`
-- pause 后 `queue_paused=true`
-- resume 后 `queue_paused=false`
-- WebSocket 发送 `{ "type":"move", "request_id":"m1", ... }` 时会收到 `command_ack`
-
-### 4. 心跳和 UDP 控制包
-
-上线后查看心跳：
-
-```powershell
-curl.exe http://127.0.0.1:8080/api/debug/heartbeat/1
-```
-
-验收点：
-
-- `running=true`
-- `sent_count` 持续增加
-- 频率由 `config.yaml` 的 `drone.heartbeat_hz` 控制，且配置校验要求 `>=2`
-- Wireshark 抓目标端口（slot 1 默认 `8889`）可看到 24 字节小端包，格式 `<dfffI>`
-- 没有队列指令时 `Mode=0`，发送 move 后会出现 `Mode=1`
-
-### 5. 失联、重连、告警
-
-```powershell
-# 低电量
-curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject `
-  -H "Content-Type: application/json" `
-  -d "{\"position\":[0,0,-10],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":15}"
-
-# 停止注入遥测，等待 lost_timeout_sec 后查询
-curl.exe http://127.0.0.1:8080/api/debug/drone/1/state
-
-# 重新注入，触发 reconnect
-curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject `
-  -H "Content-Type: application/json" `
-  -d "{\"position\":[0,0,-10],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85,\"gps_lat\":39.91,\"gps_lon\":116.41,\"gps_alt\":50}"
-```
-
-验收点：
-
-- 电量 `<= drone.low_battery_threshold` 推送 `alert=low_battery`
-- 停止遥测超过 `lost_timeout_sec` 后状态为 `lost`，推送 `event=lost_connection` 与 `alert=lost_connection`
-- 重连首包推送 `event=reconnect`，并携带新 GPS 锚点
-
-### 6. 集结流程
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV2\",\"slot\":2}"
-
-curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85,\"gps_lat\":39.9,\"gps_lon\":116.3,\"gps_alt\":50}"
-curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[5,0,-5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":90,\"gps_lat\":39.9,\"gps_lon\":116.31,\"gps_alt\":50}"
-
-curl.exe -X POST http://127.0.0.1:8080/api/arrays `
-  -H "Content-Type: application/json" `
-  -d "{\"array_id\":\"a1\",\"mode\":\"recon\",\"paths\":[{\"pathId\":1,\"drone_id\":\"d1\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":2000,\"y\":1000,\"z\":-500}}]},{\"pathId\":2,\"drone_id\":\"d2\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":-1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":-2000,\"y\":1000,\"z\":-500}}]}]}"
-
-# 到达首航点。UE(1000,0,-500) -> NED(10,0,5)
-curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[10,0,5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85}"
-curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[-10,0,5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":90}"
-
-curl.exe http://127.0.0.1:8080/api/debug/arrays/a1/state
-```
-
-验收点：
-
-- 下发任务后 WebSocket 收到 `assembling`
-- 每架机到达首航点后 `ready_count` 增加
-- 全部到达后收到 `assembly_complete`
-- `/api/debug/arrays/a1/state` 中 `exec_running=true`
-
-### 7. 执行模式
-
-单机调试接口会跳过集结，直接启动执行引擎。
-
-```powershell
-# 侦察模式，循环
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
-  -H "Content-Type: application/json" `
-  -d "{\"mode\":\"recon\",\"loop\":true,\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":1000,\"z\":-500}]}"
-
-# 巡逻模式
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
-  -H "Content-Type: application/json" `
-  -d "{\"mode\":\"patrol\",\"loop\":false,\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":0,\"z\":-500}]}"
-
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/target `
-  -H "Content-Type: application/json" `
-  -d "{\"x\":3000,\"y\":3000,\"z\":-500}"
-
-# 攻击模式
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
-  -H "Content-Type: application/json" `
-  -d "{\"mode\":\"attack\",\"loop\":false,\"waypoints\":[{\"x\":500,\"y\":0,\"z\":-500},{\"x\":1000,\"y\":500,\"z\":-500},{\"x\":1500,\"y\":1000,\"z\":-500}]}"
-```
-
-验收点：
-
-- 侦察非循环：按航点顺序发送，末航点后悬停
-- 侦察循环：到末航点后回到第一个航点
-- 巡逻：`target` 注入后中断当前航点序列，飞向目标，到达后停止
-- 攻击：依次经过中间航点，到最后攻击目标点后悬停，不循环
-
-### 8. 多机并发和基础避障
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/batch/array `
-  -H "Content-Type: application/json" `
-  -d "[{\"drone_id\":\"d1\",\"mode\":\"recon\",\"waypoints\":[{\"x\":100,\"y\":0,\"z\":-300}]},{\"drone_id\":\"d2\",\"mode\":\"recon\",\"waypoints\":[{\"x\":-100,\"y\":0,\"z\":-300}]}]"
-```
-
-验收点：
-
-- 两架无人机进入同一集结任务
-- 集结完成后执行引擎为每架机启动独立线程
-- `/api/debug/drone/1/queue` 与 `/api/debug/drone/2/queue` 互不影响
-- 避障验证需要两机都处在执行阶段，持续注入相互靠近的位置与速度；使用 Wireshark 抓控制端口，确认低优先级机收到临时偏移目标，约 3 秒后恢复原目标
+- 注册返回 `id=1`、`id_str=d1`。
+- WebSocket 收到 `power_on` 和持续 `telemetry`。
+- 状态中 UE 坐标约为 `x=100,y=200,z=300`，速度为 `5`。
+- move 后队列出现 `mode=1`，目标点转换为 NED 米制坐标。
+- 集结、三种执行模式、多机并发、基础避障、低电量/失联告警请按 [TEST_GUIDE.md](TEST_GUIDE.md) 第 7-12 节执行。
 
 ---
-
 ## 真实 UE5 联调
 
 ### 后端准备

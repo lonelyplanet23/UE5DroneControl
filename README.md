@@ -1329,21 +1329,40 @@ python ue_to_px4_bridge.py --drone-id 3 --topic-prefix /px4_3 --udp-port 8893
 
 从第三周起，项目引入 C++ 后端服务（`BackEnd/`），替代原有 Python 桥接脚本，提供统一的 HTTP REST + WebSocket 接口供 UE5 调用，并通过 UDP 与 Jetson 伴飞计算机通信。
 
-### 12.1 当前后端完成状态
+### 12.1 当前后端完成状态与下一步
 
-| 周次 | 模块 | 状态 |
-|------|------|------|
-| 第一周 | 项目骨架、配置加载、注册管理 | ✅ 完成 |
-| 第二周 | UDP 收发、坐标转换、GPS 锚点、心跳维持 | ✅ 完成 |
-| 第三周 | 连接状态机、WebSocket 服务器、move/pause/resume、遥测推送、调试接口 | ✅ 完成 |
-| 第四周 | 集结流程（含集结指令发送）、执行引擎（侦察/巡逻/攻击）、多机并发调度、实时避障（基础版） | ✅ 完成 |
+此前项目应处于第四周完成期；本次已补齐后端第五周内容。第一至第五周后端目标现在都有可运行实现和自动化验收入口，后续项目收口以 Week 5 集成测试、UE5 演示联调和真实 Jetson/PX4 回归结果为准。
+
+| 周次 | 模块 | 状态 | 验证入口 |
+|------|------|------|----------|
+| 第一周 | 项目骨架、配置加载、注册管理 | ✅ 完成 | `BackEnd\build\Release\DroneBackend_tests.exe` |
+| 第二周 | UDP 收发、坐标转换、GPS 锚点、心跳维持 | ✅ 完成 | HTTP/UDP 遥测注入、心跳查询 |
+| 第三周 | 连接状态机、WebSocket 服务器、move/pause/resume、遥测推送、调试接口 | ✅ 完成 | `python tools\integration_week3.py` |
+| 第四周 | 集结流程（含集结指令发送）、执行引擎（侦察/巡逻/攻击）、多机并发调度、实时避障（基础版） | ✅ 完成 | `python tools\integration_week4.py` |
+| 第五周 | 后端阵列预演、碰撞风险提示、避障调试指标、全流程集成测试；UE5 阵列预演/UI/碰撞提示属于前端联调 | 后端已完成，UE5 侧待接入 | 见 `BackEnd\TEST_GUIDE.md` 与 `BackEnd\README.md` |
+
+第五周剩余项按责任面划分：
+
+- 后端侧：单元测试、Week 3/4/5 集成测试、`/api/arrays/preview`、`/api/debug/metrics`、`/api/debug/avoidance`、真实 Jetson UDP 链路都已具备验收入口。
+- UE5 侧：接入阵列预演结果、碰撞提示和 WS 告警展示，完成状态 UI 闭环。
+- 项目收尾：整理完整测试用例、端到端测试报告、Bug 列表和演示材料。后端部分已可进入结束/答辩准备状态。
 
 ### 12.2 快速启动后端
 
+cmd：
+
+```cmd
+cd /d f:\UE5DroneControl\BackEnd
+build.bat
+build\Release\DroneBackend.exe config.yaml
+```
+
+PowerShell：
+
 ```powershell
-cd BackEnd
+cd f:\UE5DroneControl\BackEnd
 .\build.bat                          # 编译（首次约 5 分钟）
-.\build\Release\DroneBackend.exe     # 启动
+.\build\Release\DroneBackend.exe .\config.yaml
 ```
 
 正常输出：
@@ -1368,23 +1387,25 @@ cd BackEnd
 
 使用 `/api/debug/drone/{id}/inject` 接口注入模拟遥测，完整替代真实无人机：
 
-```bash
-# 1. 注册无人机
-curl -X POST http://localhost:8080/api/drones -d '{"name":"UAV1","slot":1}'
+cmd：
 
-# 2. 注入遥测（触发 power_on 事件）
-curl -X POST http://localhost:8080/api/debug/drone/1/inject \
-  -d '{"position":[0,0,-10],"q":[1,0,0,0],"velocity":[0,0,0],"battery":85,"gps_lat":39.9,"gps_lon":116.3,"gps_alt":50}'
-
-# 3. 发送移动指令
-curl -X POST http://localhost:8080/api/debug/cmd/1/move -d '{"x":1000,"y":0,"z":-500}'
-
-# 4. 下发阵列任务（集结 + 执行）
-curl -X POST http://localhost:8080/api/arrays \
-  -d '{"array_id":"a1","mode":"recon","paths":[{"drone_id":"d1","waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}]}'
+```cmd
+curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV1\",\"slot\":1}"
+curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-10],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85,\"gps_lat\":39.9,\"gps_lon\":116.3,\"gps_alt\":50}"
+curl -X POST http://localhost:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d "{\"x\":1000,\"y\":0,\"z\":-500}"
+curl -X POST http://localhost:8080/api/arrays -H "Content-Type: application/json" -d "{\"array_id\":\"a1\",\"mode\":\"recon\",\"paths\":[{\"drone_id\":\"d1\",\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":1000,\"z\":-500}]}]}"
 ```
 
-详细测试步骤见 [BackEnd/README.md](BackEnd/README.md#测试指南无-ue5--无-jetson)。
+PowerShell：
+
+```powershell
+curl.exe -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d '{"name":"UAV1","slot":1}'
+curl.exe -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d '{"position":[0,0,-10],"q":[1,0,0,0],"velocity":[0,0,0],"battery":85,"gps_lat":39.9,"gps_lon":116.3,"gps_alt":50}'
+curl.exe -X POST http://localhost:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d '{"x":1000,"y":0,"z":-500}'
+curl.exe -X POST http://localhost:8080/api/arrays -H "Content-Type: application/json" -d '{"array_id":"a1","mode":"recon","paths":[{"drone_id":"d1","waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}]}'
+```
+
+详细测试步骤见 [BackEnd/TEST_GUIDE.md](BackEnd/TEST_GUIDE.md) 和 [BackEnd/README.md](BackEnd/README.md#手工测试指南无-ue5--无-jetson)。
 
 ### 12.5 与真实 Jetson 联调
 
