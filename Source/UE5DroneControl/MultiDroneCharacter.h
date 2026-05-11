@@ -101,6 +101,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Assembly")
 	bool IsInAssemblyMode() const { return bInAssemblyMode; }
 
+	/** Pause or resume all local movement (click-target and assembly following). */
+	UFUNCTION(BlueprintCallable, Category = "Assembly")
+	void SetPaused(bool bPause);
+
 	// ---- Delay metric ----
 
 	/**
@@ -108,7 +112,7 @@ public:
 	 * Updated every Tick when a mirror drone is registered.
 	 * Exposed to Blueprint for UI display.
 	 */
-	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Telemetry")
 	float MirrorDelayDistance = 0.0f;
 
 	// ---- IDroneSelectableInterface ----
@@ -125,6 +129,8 @@ private:
 	// Called on power_on / reconnect to sync shadow drone position to mirror drone
 	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
 	bool bInAssemblyMode = false;
+	bool bIsPaused = false;
+	bool bWasMovingBeforePause = false;
 
 	// Smooth speed for following mirror drone position (cm/s interp speed)
 	UPROPERTY(EditAnywhere, Category = "Assembly", meta = (ClampMin = "1.0"))

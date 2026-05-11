@@ -859,13 +859,31 @@ void ADroneOpsPlayerController::OnPauseToggle()
 		if (bNewPaused) PausedDroneIds.Add(Id);
 		else            PausedDroneIds.Remove(Id);
 
-		// Freeze / unfreeze the local drone actor so it stops interpolating
+		// Freeze / unfreeze the mirror drone (RealTimeDroneReceiver)
 		if (AActor* ReceiverActor = DroneRegistry ? DroneRegistry->GetReceiverActor(Id) : nullptr)
 		{
 			if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(ReceiverActor))
 			{
 				Receiver->SetPaused(bNewPaused);
 			}
+		}
+
+		// Freeze / unfreeze the shadow drone (MultiDroneCharacter)
+		if (APawn* SenderPawn = DroneRegistry ? DroneRegistry->GetSenderPawn(Id) : nullptr)
+		{
+			if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(SenderPawn))
+			{
+				Shadow->SetPaused(bNewPaused);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("OnPauseToggle: SenderPawn for drone %d is not AMultiDroneCharacter (class=%s)"),
+					Id, *SenderPawn->GetClass()->GetName());
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("OnPauseToggle: no SenderPawn registered for drone %d"), Id);
 		}
 	}
 
@@ -929,3 +947,23 @@ void ADroneOpsPlayerController::OnSwitchToRealTimeDrone()
 	UE_LOG(LogTemp, Log, TEXT("Camera switched to RealTimeDroneReceiver[%d]: %s (key 1)"),
 		RealTimeDroneIndex - 1, *Target->GetName());
 }
+
+void ADroneOpsPlayerController::TestSendArrayTask()
+{
+	UGameInstance* GI = GetGameInstance();
+	if (!GI) return;
+
+	UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>();
+	if (!NetMgr) return;
+
+	FOnHttpResponse Cb;
+	Cb.BindDynamic(this, &ADroneOpsPlayerController::OnTestArrayTaskComplete);
+	NetMgr->SendArrayTask(TMap<int32, ADronePathActor*>(), Cb);
+	UE_LOG(LogTemp, Log, TEXT("[TestSendArrayTask] Called SendArrayTask"));
+}
+
+void ADroneOpsPlayerController::OnTestArrayTaskComplete(bool bSuccess, const FString& ResponseBody)
+{
+	UE_LOG(LogTemp, Log, TEXT("[TestSendArrayTask] bSuccess=%d Body=%s"), bSuccess, *ResponseBody);
+}
+
