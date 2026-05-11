@@ -36,6 +36,7 @@ protected:
 	void OnPrimaryClick();
 	void OnShowInfo();
 	void OnFreeCamToggle();
+	void OnTestToast();
 
 	// Click handling
 	void HandleMapClick(const FVector& WorldLocation);

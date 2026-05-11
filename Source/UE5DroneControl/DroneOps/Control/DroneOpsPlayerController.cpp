@@ -5,6 +5,7 @@
 #include "DroneOps/Core/ICoordinateService.h"
 #include "DroneOps/Interfaces/DroneSelectableInterface.h"
 #include "DroneOps/Interfaces/DroneInfoProviderInterface.h"
+#include "UI/UIManagerBlueprintLibrary.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Blueprint/UserWidget.h"
@@ -78,6 +79,7 @@ void ADroneOpsPlayerController::SetupInputComponent()
 		InputComponent->BindAction("PrimaryClick", IE_Pressed, this, &ADroneOpsPlayerController::OnPrimaryClick);
 		InputComponent->BindAction("ShowInfo", IE_Pressed, this, &ADroneOpsPlayerController::OnShowInfo);
 		InputComponent->BindAction("FreeCamToggle", IE_Pressed, this, &ADroneOpsPlayerController::OnFreeCamToggle);
+		InputComponent->BindKey(EKeys::T, IE_Pressed, this, &ADroneOpsPlayerController::OnTestToast);
 	}
 }
 
@@ -349,4 +351,9 @@ bool ADroneOpsPlayerController::GetWorldLocationUnderCursor(FVector& OutLocation
 		return true;
 	}
 	return false;
+}
+
+void ADroneOpsPlayerController::OnTestToast()
+{
+	UUIManagerBlueprintLibrary::ShowToast(this, TEXT("测试：无人机注册成功"), 2.0f);
 }

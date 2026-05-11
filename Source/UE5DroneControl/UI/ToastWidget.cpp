@@ -13,11 +13,13 @@ void UToastWidget::SetMessage(const FString& Message)
 
 void UToastWidget::ShowAndAutoClose()
 {
-    if (AutoCloseDuration > 0)
+    if (AutoCloseDuration > 0 && GetWorld())
     {
-        GetWorld()->GetTimerManager().SetTimer(AutoCloseTimerHandle, this, &UToastWidget::OnAutoCloseTimer, AutoCloseDuration, false);
+        GetWorld()->GetTimerManager().SetTimer(
+            AutoCloseTimerHandle, this, &UToastWidget::OnAutoCloseTimer, AutoCloseDuration, false);
     }
 }
+
 
 void UToastWidget::NativeConstruct()
 {

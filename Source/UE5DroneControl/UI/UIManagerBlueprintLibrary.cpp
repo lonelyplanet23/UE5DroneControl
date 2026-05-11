@@ -14,39 +14,32 @@ TWeakObjectPtr<UAssemblyPopupWidget> UUIManagerBlueprintLibrary::CurrentAssembly
 
 TSubclassOf<UDroneListWidget> UUIManagerBlueprintLibrary::GetDroneListClass()
 {
-    // 自动加载蓝图类（如果存在的话）
-    static ConstructorHelpers::FClassFinder<UDroneListWidget> Finder(TEXT("/Game/DroneOps/UI/WBP_DroneList.WBP_DroneList_C"));
-    if (Finder.Succeeded())
-    {
-        return TSubclassOf<UDroneListWidget>(Finder.Class);
-    }
-    return UDroneListWidget::StaticClass();
+    UClass* Class = LoadClass<UDroneListWidget>(nullptr, TEXT("/Game/DroneOps/UI/WBP_DroneList.WBP_DroneList_C"));
+    return Class ? Class : UDroneListWidget::StaticClass();
 }
 
 TSubclassOf<UToastWidget> UUIManagerBlueprintLibrary::GetToastClass()
 {
-    static ConstructorHelpers::FClassFinder<UToastWidget> Finder(TEXT("/Game/DroneOps/UI/WBP_Toast.WBP_Toast_C"));
-    if (Finder.Succeeded())
-    {
-        return TSubclassOf<UToastWidget>(Finder.Class);
-    }
-    return UToastWidget::StaticClass();
+    UClass* Class = LoadClass<UToastWidget>(nullptr, TEXT("/Game/DroneOps/UI/WBP_Toast.WBP_Toast_C"));
+    return Class ? Class : UToastWidget::StaticClass();
 }
 
 TSubclassOf<UAssemblyPopupWidget> UUIManagerBlueprintLibrary::GetAssemblyPopupClass()
 {
-    static ConstructorHelpers::FClassFinder<UAssemblyPopupWidget> Finder(TEXT("/Game/DroneOps/UI/WBP_AssemblyPopup.WBP_AssemblyPopup_C"));
-    if (Finder.Succeeded())
-    {
-        return TSubclassOf<UAssemblyPopupWidget>(Finder.Class);
-    }
-    return UAssemblyPopupWidget::StaticClass();
+    UClass* Class = LoadClass<UAssemblyPopupWidget>(nullptr, TEXT("/Game/DroneOps/UI/WBP_AssemblyPopup.WBP_AssemblyPopup_C"));
+    return Class ? Class : UAssemblyPopupWidget::StaticClass();
 }
 
 void UUIManagerBlueprintLibrary::ShowToast(UObject* WorldContextObject, const FString& Message, float Duration)
 {
     UWorld* World = WorldContextObject->GetWorld();
     if (!World) return;
+
+    // 关闭上一条还在显示的 Toast，避免叠加
+    if (CurrentToast.IsValid())
+    {
+        CurrentToast->RemoveFromParent();
+    }
 
     UToastWidget* Toast = CreateWidget<UToastWidget>(World, GetToastClass());
     if (Toast)
@@ -75,13 +68,12 @@ void UUIManagerBlueprintLibrary::ShowDroneList(UObject* WorldContextObject)
     UDroneListWidget* DroneList = CreateWidget<UDroneListWidget>(World, GetDroneListClass());
     if (DroneList)
     {
-        // 如果蓝图类没设置ListItemClass，就设默认值
         if (!DroneList->ListItemClass)
         {
-            static ConstructorHelpers::FClassFinder<UDroneListItemWidget> ItemFinder(TEXT("/Game/DroneOps/UI/WBP_DroneListItem.WBP_DroneListItem_C"));
-            if (ItemFinder.Succeeded())
+            UClass* ItemClass = LoadClass<UDroneListItemWidget>(nullptr, TEXT("/Game/DroneOps/UI/WBP_DroneListItem.WBP_DroneListItem_C"));
+            if (ItemClass)
             {
-                DroneList->ListItemClass = ItemFinder.Class;
+                DroneList->ListItemClass = ItemClass;
                 UE_LOG(LogTemp, Log, TEXT("UIManager: Auto-set ListItemClass"));
             }
         }
