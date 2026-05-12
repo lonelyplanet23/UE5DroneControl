@@ -16,6 +16,7 @@
 #include "Engine/EngineTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/OverlapResult.h"
+#include "UI/UIManagerBlueprintLibrary.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Blueprint/UserWidget.h"
@@ -202,6 +203,7 @@ void ADroneOpsPlayerController::SetupInputComponent()
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("DroneOpsPlayerController: InputComponent is null"));
+		InputComponent->BindKey(EKeys::T, IE_Pressed, this, &ADroneOpsPlayerController::OnTestToast);
 	}
 }
 
@@ -967,3 +969,8 @@ void ADroneOpsPlayerController::OnTestArrayTaskComplete(bool bSuccess, const FSt
 	UE_LOG(LogTemp, Log, TEXT("[TestSendArrayTask] bSuccess=%d Body=%s"), bSuccess, *ResponseBody);
 }
 
+
+void ADroneOpsPlayerController::OnTestToast()
+{
+	UUIManagerBlueprintLibrary::ShowToast(this, TEXT("测试：无人机注册成功"), 2.0f);
+}
