@@ -12,7 +12,8 @@ UENUM(BlueprintType)
 enum class EDroneCameraMode : uint8
 {
 	Follow UMETA(DisplayName = "Follow Drone"),
-	Free UMETA(DisplayName = "Free Camera")
+	Free UMETA(DisplayName = "Free Camera"),
+	TopDown UMETA(DisplayName = "Top Down")
 };
 
 /**

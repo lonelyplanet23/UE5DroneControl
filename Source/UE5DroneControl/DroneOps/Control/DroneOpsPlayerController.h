@@ -39,6 +39,7 @@ protected:
 	void OnShowInfo();
 	void OnFreeCamToggle();
 	void OnPauseToggle();
+	void OnTopDownToggle();
 	void OnSwitchToTopDown();
 	void OnSwitchToRealTimeDrone();
 	void OnShiftPressed()  { bShiftHeld = true; }
@@ -107,6 +108,21 @@ private:
 	// FR-04: Free camera actor (spawned at runtime)
 	UPROPERTY()
 	TObjectPtr<ACameraActor> FreeCamActor;
+
+	// Top-down camera actor (spawned at runtime, toggled by Space)
+	UPROPERTY()
+	TObjectPtr<ACameraActor> TopDownCamActor;
+
+	// Previous camera mode before entering TopDown, so Space can toggle back
+	EDroneCameraMode PreTopDownMode = EDroneCameraMode::Follow;
+
+	// ViewTarget active right before entering TopDown — restored verbatim on exit
+	UPROPERTY()
+	TObjectPtr<AActor> PreTopDownViewTarget = nullptr;
+
+	// Height (cm) of the top-down camera above the focused drone
+	UPROPERTY(EditAnywhere, Category = "TopDownCam")
+	float TopDownHeightCm = 5000.0f;
 
 	// FR-04: Cached free camera rotation for smooth control
 	FRotator FreeCamRotation = FRotator::ZeroRotator;

@@ -111,6 +111,40 @@ namespace
 			}
 		}
 	}
+
+	// 多机派发时为每架无人机计算一个不重叠的偏移点（方形螺旋，中心为 index 0）。
+	FVector ComputeMultiDispatchOffset(int32 Index, float SpacingCm)
+	{
+		if (Index <= 0)
+		{
+			return FVector::ZeroVector;
+		}
+
+		int32 Ring = 1;
+		while (((2 * Ring + 1) * (2 * Ring + 1)) <= Index)
+		{
+			++Ring;
+		}
+
+		const int32 RingStart = (2 * Ring - 1) * (2 * Ring - 1);
+		const int32 RingOffset = Index - RingStart;
+		const int32 SideLen = 2 * Ring;
+		const int32 Side = RingOffset / SideLen;
+		const int32 PosOnSide = RingOffset % SideLen;
+
+		int32 GX = 0;
+		int32 GY = 0;
+		switch (Side)
+		{
+			case 0: GX =  Ring;             GY = -Ring + PosOnSide; break;
+			case 1: GX =  Ring - PosOnSide; GY =  Ring;             break;
+			case 2: GX = -Ring;             GY =  Ring - PosOnSide; break;
+			case 3: GX = -Ring + PosOnSide; GY = -Ring;             break;
+			default: break;
+		}
+
+		return FVector(static_cast<float>(GX) * SpacingCm, static_cast<float>(GY) * SpacingCm, 0.0f);
+	}
 }
 
 ADroneOpsPlayerController::ADroneOpsPlayerController()
@@ -211,6 +245,17 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// SpaceBar: Follow <-> TopDown only. Free mode is intentionally ignored.
+	// Polled here (not BindKey) because BindKey misses some edges depending on InputMode.
+	if (WasInputKeyJustPressed(EKeys::SpaceBar))
+	{
+		if (CameraModeState.CameraMode == EDroneCameraMode::Follow ||
+			CameraModeState.CameraMode == EDroneCameraMode::TopDown)
+		{
+			OnTopDownToggle();
+		}
+	}
+
 	// FR-04: Free camera control
 	if (CameraModeState.CameraMode == EDroneCameraMode::Free && FreeCamActor && IsValid(FreeCamActor))
 	{
@@ -238,6 +283,21 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 		{
 			MoveDir.Normalize();
 			FreeCamActor->AddActorWorldOffset(MoveDir * FreeCamMoveSpeed * DeltaTime);
+		}
+	}
+
+	// Top-down camera: lock XY to the drone we entered TopDown on, fixed height, looking straight down
+	if (CameraModeState.CameraMode == EDroneCameraMode::TopDown && TopDownCamActor && IsValid(TopDownCamActor))
+	{
+		AActor* Focus = IsValid(PreTopDownViewTarget) ? PreTopDownViewTarget.Get() : nullptr;
+		if (!Focus)
+		{
+			Focus = ResolveFollowViewTargetByDroneId(CameraModeState.FollowDroneId);
+		}
+		if (IsValid(Focus))
+		{
+			const FVector FocusLoc = Focus->GetActorLocation();
+			TopDownCamActor->SetActorLocation(FVector(FocusLoc.X, FocusLoc.Y, FocusLoc.Z + TopDownHeightCm));
 		}
 	}
 
@@ -520,17 +580,51 @@ void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
 		}
 	}
 
-	// 本地可视移动优先使用“当前实际选中的Actor”，避免Registry映射错位导致点A动B
+	// 本地可视移动优先使用”当前实际选中的Actor”，避免Registry映射错位导致点A动B
 	if (AUE5DroneControlCharacter* SelectedChar = Cast<AUE5DroneControlCharacter>(TargetActor))
 	{
 		SelectedChar->SetClickTargetLocation(WorldLocation, 1);
 	}
 
+	const FString ActorName = TargetActor ? TargetActor->GetName() : FString::Printf(TEXT("Drone-%d"), EffectiveDroneId);
 	UE_LOG(LogTemp, Log, TEXT("FR2 Dispatch: Actor=%s SelectedDroneId=%d EffectiveDroneId=%d"),
-		TargetActor ? *TargetActor->GetName() : TEXT("None"), SelectedDroneId, EffectiveDroneId);
+		*ActorName, SelectedDroneId, EffectiveDroneId);
 	SendTargetCommand(EffectiveDroneId, WorldLocation);
 
-	const FString TargetName = TargetActor ? TargetActor->GetName() : FString::Printf(TEXT("Drone-%d"), SelectedDroneId);
+	// Dispatch to all other multi-selected drones
+	if (DroneRegistry)
+	{
+		TArray<int32> MultiIds = DroneRegistry->GetMultiSelectedDrones();
+		constexpr float SpacingCm = 100.0f;  // 1 米 = 100 UE 单位
+		int32 NextIndex = 1;
+		for (int32 Id : MultiIds)
+		{
+			if (Id == EffectiveDroneId) continue;
+
+			EDroneControlLockReason LockReason = EDroneControlLockReason::None;
+			if (DroneRegistry->IsControlLocked(Id, LockReason)) continue;
+
+			const FVector SlotLocation = WorldLocation + ComputeMultiDispatchOffset(NextIndex, SpacingCm);
+			++NextIndex;
+
+			if (AActor* OtherActor = ResolveDroneActorById(Id))
+			{
+				if (AUE5DroneControlCharacter* OtherChar = Cast<AUE5DroneControlCharacter>(OtherActor))
+				{
+					OtherChar->SetClickTargetLocation(SlotLocation, 1);
+				}
+			}
+			SendTargetCommand(Id, SlotLocation);
+		}
+		if (MultiIds.Num() > 1)
+		{
+			const int32 Count = MultiIds.Num();
+			UE_LOG(LogTemp, Log, TEXT("Multi-dispatch to %d drones -> (%.0f, %.0f, %.0f)"),
+				Count, WorldLocation.X, WorldLocation.Y, WorldLocation.Z);
+		}
+	}
+
+	const FString TargetName = ActorName;
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
@@ -818,6 +912,72 @@ void ADroneOpsPlayerController::ApplyFollowViewTarget(int32 DroneId)
 	UE_LOG(LogTemp, Log, TEXT("Switched to Follow Camera (FollowDroneId=%d, Target=%s)"),
 		CameraModeState.FollowDroneId,
 		*FollowTarget->GetName());
+}
+
+void ADroneOpsPlayerController::OnTopDownToggle()
+{
+	// Toggle off: restore the exact ViewTarget that was active before Space was pressed
+	if (CameraModeState.CameraMode == EDroneCameraMode::TopDown)
+	{
+		AActor* RestoreTarget = IsValid(PreTopDownViewTarget) ? PreTopDownViewTarget.Get() : nullptr;
+		if (!RestoreTarget)
+		{
+			RestoreTarget = ResolveFollowViewTargetByDroneId(CameraModeState.FollowDroneId);
+		}
+
+		CameraModeState.CameraMode = PreTopDownMode;
+		if (IsValid(RestoreTarget))
+		{
+			SetViewTargetWithBlend(RestoreTarget, 0.25f);
+			LastFollowViewTarget = RestoreTarget;
+		}
+		bShowMouseCursor = true;
+		SetInputMode(FInputModeGameAndUI());
+
+		UE_LOG(LogTemp, Log, TEXT("TopDown: exit, restored target=%s"),
+			RestoreTarget ? *RestoreTarget->GetName() : TEXT("<none>"));
+		return;
+	}
+
+	// Toggle on — only reachable from Follow (Free is filtered out in Tick)
+	PreTopDownMode = CameraModeState.CameraMode;
+	PreTopDownViewTarget = GetViewTarget();
+
+	if (!TopDownCamActor || !IsValid(TopDownCamActor))
+	{
+		TopDownCamActor = GetWorld()->SpawnActor<ACameraActor>(
+			ACameraActor::StaticClass(), FVector::ZeroVector, FRotator(-90.0f, 0.0f, 0.0f));
+	}
+	if (!IsValid(TopDownCamActor))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("OnTopDownToggle: failed to spawn TopDownCamActor"));
+		return;
+	}
+
+	// Anchor on whatever we're currently looking at, fall back to selection / registry
+	AActor* FocusActor = IsValid(PreTopDownViewTarget) ? PreTopDownViewTarget.Get() : nullptr;
+	if (!FocusActor)
+	{
+		int32 FocusId = SelectedDroneId > 0 ? SelectedDroneId : CameraModeState.FollowDroneId;
+		if (FocusId <= 0 && DroneRegistry)
+		{
+			FocusId = DroneRegistry->GetPrimarySelectedDrone();
+		}
+		FocusActor = ResolveFollowViewTargetByDroneId(FocusId);
+	}
+
+	const FVector FocusLoc = IsValid(FocusActor) ? FocusActor->GetActorLocation() : FVector::ZeroVector;
+	TopDownCamActor->SetActorLocationAndRotation(
+		FVector(FocusLoc.X, FocusLoc.Y, FocusLoc.Z + TopDownHeightCm),
+		FRotator(-90.0f, 0.0f, 0.0f));
+
+	CameraModeState.CameraMode = EDroneCameraMode::TopDown;
+	SetViewTargetWithBlend(TopDownCamActor, 0.25f);
+	bShowMouseCursor = true;
+	SetInputMode(FInputModeGameAndUI());
+
+	UE_LOG(LogTemp, Log, TEXT("TopDown: enter, cached target=%s Height=%.0f"),
+		IsValid(PreTopDownViewTarget) ? *PreTopDownViewTarget->GetName() : TEXT("<none>"), TopDownHeightCm);
 }
 
 void ADroneOpsPlayerController::OnPauseToggle()
