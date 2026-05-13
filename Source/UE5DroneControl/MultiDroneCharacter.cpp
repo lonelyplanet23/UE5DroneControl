@@ -129,26 +129,6 @@ void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			NetMgr->OnDroneWsEvent.RemoveAll(this);
 		}
 	}
-
-	// local: 订阅 power_on/reconnect 事件，用于上电时位置对齐
-	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
-	{
-		NetMgr->OnDroneWsEvent.AddUObject(this, &AMultiDroneCharacter::OnDroneWsEvent);
-	}
-}
-
-void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-	Super::EndPlay(EndPlayReason);
-
-	if (UGameInstance* GI = GetGameInstance())
-	{
-		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
-		{
-			NetMgr->OnDroneWsEvent.RemoveAll(this);
-			// 如果 assembly 事件也需要手动解绑，在这里补充
-		}
-	}
 }
 
 void AMultiDroneCharacter::Tick(float DeltaTime)
