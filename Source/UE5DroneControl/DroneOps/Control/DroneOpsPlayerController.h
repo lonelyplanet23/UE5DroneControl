@@ -43,6 +43,7 @@ protected:
 	void OnSwitchToRealTimeDrone();
 	void OnShiftPressed()  { bShiftHeld = true; }
 	void OnShiftReleased() { bShiftHeld = false; }
+	void OnTestToast();
 
 	// Click handling
 	void HandleMapClick(const FVector& WorldLocation);

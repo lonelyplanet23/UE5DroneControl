@@ -3,10 +3,41 @@
 #include "conversion/quaternion_utils.h"
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cmath>
 #include <fstream>
+#include <limits>
 #include <sstream>
+#include <chrono>
+#include <thread>
 
 namespace {
+
+struct Vec3 {
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+};
+
+Vec3 operator+(const Vec3& a, const Vec3& b)
+{
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+Vec3 operator-(const Vec3& a, const Vec3& b)
+{
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+Vec3 operator*(const Vec3& v, double scale)
+{
+    return {v.x * scale, v.y * scale, v.z * scale};
+}
+
+double dot(const Vec3& a, const Vec3& b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
 
 boost::json::value get_number_or_string_id(int drone_id)
 {
@@ -58,6 +89,290 @@ std::string get_string(const boost::json::object& obj, const char* key,
     return value.empty() ? fallback : value;
 }
 
+bool is_valid_array_mode(const std::string& mode)
+{
+    return mode == "recon" || mode == "patrol" || mode == "attack";
+}
+
+std::string assembly_state_to_string(AssemblyState state)
+{
+    switch (state) {
+        case AssemblyState::Idle:       return "idle";
+        case AssemblyState::Assembling: return "assembling";
+        case AssemblyState::Ready:      return "ready";
+        case AssemblyState::Executing:  return "executing";
+        case AssemblyState::Timeout:    return "timeout";
+    }
+    return "unknown";
+}
+
+Vec3 ue_cm_to_m(const AssemblyConfig::Path::Waypoint& wp)
+{
+    return {wp.x / 100.0, wp.y / 100.0, wp.z / 100.0};
+}
+
+double point_segment_distance_sq(const Vec3& p, const Vec3& a, const Vec3& b)
+{
+    const Vec3 ab = b - a;
+    const double denom = dot(ab, ab);
+    if (denom < 1e-12) {
+        return dot(p - a, p - a);
+    }
+    const double t = std::clamp(dot(p - a, ab) / denom, 0.0, 1.0);
+    const Vec3 proj = a + ab * t;
+    return dot(p - proj, p - proj);
+}
+
+double segment_segment_distance_sq(const Vec3& p0, const Vec3& p1,
+                                   const Vec3& q0, const Vec3& q1)
+{
+    const Vec3 u = p1 - p0;
+    const Vec3 v = q1 - q0;
+    const Vec3 w = p0 - q0;
+    const double a = dot(u, u);
+    const double b = dot(u, v);
+    const double c = dot(v, v);
+    const double d = dot(u, w);
+    const double e = dot(v, w);
+    const double D = a * c - b * b;
+    const double EPS = 1e-12;
+
+    double sN = 0.0;
+    double sD = D;
+    double tN = 0.0;
+    double tD = D;
+
+    if (D < EPS) {
+        sN = 0.0;
+        sD = 1.0;
+        tN = e;
+        tD = c;
+    } else {
+        sN = b * e - c * d;
+        tN = a * e - b * d;
+
+        if (sN < 0.0) {
+            sN = 0.0;
+            tN = e;
+            tD = c;
+        } else if (sN > sD) {
+            sN = sD;
+            tN = e + b;
+            tD = c;
+        }
+    }
+
+    if (tN < 0.0) {
+        tN = 0.0;
+        if (-d < 0.0) {
+            sN = 0.0;
+        } else if (-d > a) {
+            sN = sD;
+        } else {
+            sN = -d;
+            sD = a;
+        }
+    } else if (tN > tD) {
+        tN = tD;
+        if ((-d + b) < 0.0) {
+            sN = 0.0;
+        } else if ((-d + b) > a) {
+            sN = sD;
+        } else {
+            sN = -d + b;
+            sD = a;
+        }
+    }
+
+    const double sc = (std::fabs(sN) < EPS ? 0.0 : sN / sD);
+    const double tc = (std::fabs(tN) < EPS ? 0.0 : tN / tD);
+    const Vec3 dp = w + (u * sc) - (v * tc);
+    return dot(dp, dp);
+}
+
+boost::json::object path_to_json(const AssemblyConfig::Path& path)
+{
+    boost::json::array waypoints;
+    for (const auto& wp : path.waypoints) {
+        waypoints.push_back(boost::json::object{
+            {"x", wp.x},
+            {"y", wp.y},
+            {"z", wp.z},
+            {"segment_speed", wp.segment_speed},
+            {"wait_time", wp.wait_time},
+        });
+    }
+    return boost::json::object{
+        {"path_id", path.path_id},
+        {"drone_id", path.drone_id},
+        {"closed_loop", path.closed_loop},
+        {"waypoints", waypoints},
+    };
+}
+
+struct PreviewResult {
+    bool valid = true;
+    boost::json::array warnings;
+    boost::json::array risks;
+    boost::json::array paths;
+    std::vector<std::pair<std::string, std::vector<Vec3>>> route_cache;
+};
+
+PreviewResult build_preview(const AppConfig& config,
+                            const DroneManager& drone_mgr,
+                            const boost::json::object& body)
+{
+    PreviewResult result;
+    AssemblyConfig cfg;
+    cfg.array_id = body.contains("array_id") ? get_string(body, "array_id", "a1") : "a1";
+    cfg.mode = body.contains("mode") ? get_string(body, "mode", "recon") : "recon";
+    if (!is_valid_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid array mode: " + cfg.mode);
+    }
+
+    if (!body.contains("paths") || !body.at("paths").is_array()) {
+        throw ApiError(400, "paths required");
+    }
+
+    auto parse_drone_id = [](const std::string& id) -> int {
+        if (!id.empty() && (id[0] == 'd' || id[0] == 'D')) {
+            try { return std::stoi(id.substr(1)); } catch (...) { return 0; }
+        }
+        try { return std::stoi(id); } catch (...) { return 0; }
+    };
+
+    const auto& raw_paths = body.at("paths").as_array();
+    for (const auto& p : raw_paths) {
+        if (!p.is_object()) continue;
+        const auto& po = p.as_object();
+
+        AssemblyConfig::Path path;
+        path.path_id = po.contains("pathId") ? get_int(po, "pathId")
+                                             : get_int(po, "path_id", 0);
+        path.drone_id = get_string(po, "drone_id", "");
+        if (path.drone_id.empty() && po.contains("droneId")) {
+            path.drone_id = get_string(po, "droneId", "");
+        }
+        path.closed_loop = get_bool(po, "bClosedLoop", false) ||
+                           get_bool(po, "closed_loop", false);
+
+        if (po.contains("waypoints") && po.at("waypoints").is_array()) {
+            for (const auto& w : po.at("waypoints").as_array()) {
+                if (!w.is_object()) continue;
+                const auto& wo = w.as_object();
+                const boost::json::object* loc = &wo;
+                if (wo.contains("location") && wo.at("location").is_object()) {
+                    loc = &wo.at("location").as_object();
+                }
+
+                AssemblyConfig::Path::Waypoint wp;
+                wp.x = get_number(*loc, "x", 0.0);
+                wp.y = get_number(*loc, "y", 0.0);
+                wp.z = get_number(*loc, "z", 0.0);
+                wp.segment_speed = static_cast<float>(
+                    wo.contains("segmentSpeed") ? get_number(wo, "segmentSpeed", 0.0)
+                                                 : get_number(wo, "segment_speed", 0.0));
+                wp.wait_time = static_cast<float>(
+                    wo.contains("waitTime") ? get_number(wo, "waitTime", 0.0)
+                                            : get_number(wo, "wait_time", 0.0));
+                path.waypoints.push_back(wp);
+            }
+        }
+
+        if (path.drone_id.empty()) {
+            result.valid = false;
+            result.warnings.push_back(boost::json::object{
+                {"type", "missing_drone_id"},
+                {"path_id", path.path_id},
+            });
+            continue;
+        }
+        const int drone_id = parse_drone_id(path.drone_id);
+        if (!drone_mgr.HasDrone(drone_id)) {
+            result.valid = false;
+            result.warnings.push_back(boost::json::object{
+                {"type", "unregistered_drone"},
+                {"drone_id", drone_id},
+                {"drone_id_str", path.drone_id},
+            });
+        }
+        if (path.waypoints.empty()) {
+            result.valid = false;
+            result.warnings.push_back(boost::json::object{
+                {"type", "missing_waypoints"},
+                {"drone_id", drone_id},
+            });
+            continue;
+        }
+
+        cfg.paths.push_back(path);
+        result.paths.push_back(path_to_json(path));
+
+        std::vector<Vec3> route_points;
+        route_points.reserve(path.waypoints.size());
+        for (const auto& wp : path.waypoints) {
+            route_points.push_back(ue_cm_to_m(wp));
+        }
+        result.route_cache.push_back({path.drone_id, std::move(route_points)});
+    }
+
+    if (cfg.paths.empty()) {
+        throw ApiError(400, "no valid paths");
+    }
+
+    const double avoidance_radius_m = config.avoidance_radius_m;
+
+    for (size_t i = 0; i < result.route_cache.size(); ++i) {
+        for (size_t j = i + 1; j < result.route_cache.size(); ++j) {
+            const auto& left = result.route_cache[i];
+            const auto& right = result.route_cache[j];
+            double min_dist_sq = std::numeric_limits<double>::infinity();
+            size_t left_idx = 0;
+            size_t right_idx = 0;
+
+            for (size_t a = 0; a < left.second.size(); ++a) {
+                const Vec3& p = left.second[a];
+                min_dist_sq = std::min(min_dist_sq, point_segment_distance_sq(p, right.second.front(), right.second.back()));
+                for (size_t b = 0; b < right.second.size(); ++b) {
+                    const double d = dot(left.second[a] - right.second[b], left.second[a] - right.second[b]);
+                    if (d < min_dist_sq) {
+                        min_dist_sq = d;
+                        left_idx = a;
+                        right_idx = b;
+                    }
+                }
+            }
+
+            for (size_t a = 0; a + 1 < left.second.size(); ++a) {
+                for (size_t b = 0; b + 1 < right.second.size(); ++b) {
+                    const double d = segment_segment_distance_sq(
+                        left.second[a], left.second[a + 1], right.second[b], right.second[b + 1]);
+                    if (d < min_dist_sq) {
+                        min_dist_sq = d;
+                        left_idx = a;
+                        right_idx = b;
+                    }
+                }
+            }
+
+            const double min_dist = std::sqrt(min_dist_sq);
+            if (min_dist < avoidance_radius_m) {
+                result.valid = false;
+                result.risks.push_back(boost::json::object{
+                    {"drone_id", left.first},
+                    {"other_drone_id", right.first},
+                    {"segment_index", static_cast<int64_t>(left_idx)},
+                    {"other_segment_index", static_cast<int64_t>(right_idx)},
+                    {"min_distance_m", min_dist},
+                    {"threshold_m", avoidance_radius_m},
+                });
+            }
+        }
+    }
+
+    return result;
+}
+
 } // namespace
 
 // ============================================================
@@ -66,10 +381,12 @@ std::string get_string(const boost::json::object& obj, const char* key,
 HttpServer::HttpServer(const AppConfig& config,
                        DroneManager& drone_mgr,
                        AssemblyController& assembly_ctrl,
+                       ExecutionEngine& exec_engine,
                        WsManager& ws_manager)
     : config_(config)
     , drone_mgr_(drone_mgr)
     , assembly_ctrl_(assembly_ctrl)
+    , exec_engine_(exec_engine)
     , ws_manager_(ws_manager)
 {
     // 注册 DroneManager 回调 → WS 推送
@@ -140,6 +457,29 @@ HttpServer::HttpServer(const AppConfig& config,
         ws_manager_.broadcast(json_stringify(msg));
     });
 
+    exec_engine_.SetAvoidanceCallback([this](const AvoidanceEvent& event) {
+        if (!event.valid) return;
+        auto payload = boost::json::object{
+            {"type", "alert"},
+            {"alert", event.activated ? "collision_risk" : "avoidance_restore"},
+            {"alert_type", event.activated ? "collision_risk" : "avoidance_restore"},
+            {"drone_id", event.drone_id},
+            {"drone_id_str", drone_id_string(event.drone_id)},
+            {"other_drone_id", event.other_drone_id},
+            {"current_distance_m", event.current_distance_m},
+            {"predicted_distance_m", event.predicted_distance_m},
+            {"threshold_m", event.threshold_m},
+            {"base_ned", boost::json::array{event.base_ned_n, event.base_ned_e, event.base_ned_d}},
+            {"applied_ned", boost::json::array{event.applied_ned_n, event.applied_ned_e, event.applied_ned_d}},
+            {"offset_n", event.offset_n},
+            {"offset_e", event.offset_e},
+            {"offset_d", event.offset_d},
+            {"activated", event.activated},
+            {"restored", event.restored},
+        };
+        ws_manager_.broadcast(json_stringify(payload));
+    });
+
     assembly_ctrl_.SetProgressCallback([this](const AssemblyProgress& progress) {
         auto msg = boost::json::object{
             {"type",        "assembling"},
@@ -155,6 +495,9 @@ HttpServer::HttpServer(const AppConfig& config,
                 {"array_id", progress.array_id},
             };
             ws_manager_.broadcast(json_stringify(done_msg));
+
+            // 集结完成 → 启动执行引擎
+            exec_engine_.StartTasks(assembly_ctrl_.GetConfig());
         }
     });
 
@@ -254,6 +597,8 @@ http::response<http::string_body> HttpServer::HandleHttp(
         auto qpos = path.find('?');
         if (qpos != std::string::npos) path = path.substr(0, qpos);
 
+        spdlog::info("[HTTP] {} {}", method, path);
+
         if (method == "OPTIONS") return MakeResponse(req, 204, "");
 
         const auto body = parse_body(req);
@@ -279,6 +624,8 @@ http::response<http::string_body> HttpServer::HandleHttp(
             return MakeResponse(req, 200, json_stringify(ApiGetAnchor(id)));
         if (method == "POST" && path == "/api/arrays")
             return MakeResponse(req, 201, json_stringify(ApiCreateArray(require_object(body, "body"))));
+        if (method == "POST" && path == "/api/arrays/preview")
+            return MakeResponse(req, 200, json_stringify(ApiPreviewArray(require_object(body, "body"))));
         if (method == "POST" && PathMatch(path, "/api/arrays/", "/stop", id))
             return MakeResponse(req, 200, json_stringify(ApiStopArray(id)));
 
@@ -306,6 +653,10 @@ http::response<http::string_body> HttpServer::HandleHttp(
             return MakeResponse(req, 200, json_stringify(DebugTarget(id, require_object(body, "body"))));
         if (method == "GET"  && PathMatch(path, "/api/debug/arrays/", "/state", id))
             return MakeResponse(req, 200, json_stringify(DebugArrayState(id)));
+        if (method == "GET"  && path == "/api/debug/metrics")
+            return MakeResponse(req, 200, json_stringify(DebugMetrics()));
+        if (method == "GET"  && path == "/api/debug/avoidance")
+            return MakeResponse(req, 200, json_stringify(DebugAvoidanceState()));
 
         throw ApiError(404, "not found");
     } catch (const ApiError& e) {
@@ -457,9 +808,17 @@ boost::json::value HttpServer::ApiGetAnchor(const std::string& id) {
 }
 
 boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
+    auto preview = ApiPreviewArray(body);
+    if (!preview.is_object()) {
+        throw ApiError(500, "preview failed");
+    }
+
     AssemblyConfig cfg;
-    cfg.array_id = body.contains("array_id") ? std::string(body.at("array_id").as_string()) : "a1";
-    cfg.mode     = body.contains("mode")     ? std::string(body.at("mode").as_string())     : "recon";
+    cfg.array_id = body.contains("array_id") ? get_string(body, "array_id", "a1") : "a1";
+    cfg.mode = body.contains("mode") ? get_string(body, "mode", "recon") : "recon";
+    if (!is_valid_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid array mode: " + cfg.mode);
+    }
 
     if (body.contains("paths") && body.at("paths").is_array()) {
         for (const auto& p : body.at("paths").as_array()) {
@@ -474,16 +833,15 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
             }
             path.closed_loop = get_bool(po, "bClosedLoop", false) ||
                                get_bool(po, "closed_loop", false);
-
             if (po.contains("waypoints") && po.at("waypoints").is_array()) {
                 for (const auto& w : po.at("waypoints").as_array()) {
                     if (!w.is_object()) continue;
                     const auto& wo = w.as_object();
-                    AssemblyConfig::Path::Waypoint wp;
                     const boost::json::object* loc = &wo;
                     if (wo.contains("location") && wo.at("location").is_object()) {
                         loc = &wo.at("location").as_object();
                     }
+                    AssemblyConfig::Path::Waypoint wp;
                     wp.x = get_number(*loc, "x", 0.0);
                     wp.y = get_number(*loc, "y", 0.0);
                     wp.z = get_number(*loc, "z", 0.0);
@@ -500,14 +858,46 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
         }
     }
 
+    if (cfg.paths.empty()) {
+        throw ApiError(400, "paths required");
+    }
+
+    for (const auto& path : cfg.paths) {
+        if (path.drone_id.empty()) {
+            throw ApiError(400, "path.drone_id required");
+        }
+        const int drone_id = drone_id_from_string(path.drone_id);
+        if (!drone_mgr_.HasDrone(drone_id)) {
+            throw ApiError(404, "drone not found: " + path.drone_id);
+        }
+        if (path.waypoints.empty()) {
+            throw ApiError(400, "path.waypoints required for " + path.drone_id);
+        }
+    }
+
     if (!assembly_ctrl_.Start(cfg))
         throw ApiError(409, "assembly already in progress");
 
     return boost::json::object{{"array_id", cfg.array_id}, {"status", "assembling"}};
 }
 
+boost::json::value HttpServer::ApiPreviewArray(const boost::json::object& body) {
+    auto preview = build_preview(config_, drone_mgr_, body);
+    return boost::json::object{
+        {"array_id", body.contains("array_id") ? get_string(body, "array_id", "a1") : "a1"},
+        {"mode", body.contains("mode") ? get_string(body, "mode", "recon") : "recon"},
+        {"valid", preview.valid},
+        {"warnings", preview.warnings},
+        {"collision_risks", preview.risks},
+        {"paths", preview.paths},
+        {"arrival_threshold_m", config_.arrival_threshold_m},
+        {"avoidance_radius_m", config_.avoidance_radius_m},
+    };
+}
+
 boost::json::value HttpServer::ApiStopArray(const std::string& id) {
     assembly_ctrl_.Stop();
+    exec_engine_.StopAll();
     return boost::json::object{{"array_id", id}, {"status", "stopped"}};
 }
 
@@ -623,6 +1013,9 @@ boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const
             tel.position_ned[1],
             tel.position_ned[2]);
     }
+    if (exec_engine_.IsRunning()) {
+        exec_engine_.OnTelemetry(drone_id, tel);
+    }
     return boost::json::object{{"injected", id}};
 }
 
@@ -645,11 +1038,63 @@ boost::json::value HttpServer::DebugPause(const std::string& id, bool pause) {
 }
 
 boost::json::value HttpServer::DebugSingleArray(const std::string& id, const boost::json::object& body) {
-    return ApiCreateArray(body);
+    // 单机调试：直接启动执行引擎（跳过集结流程）
+    int numeric_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(numeric_id)) {
+        throw ApiError(404, "drone not found: " + id);
+    }
+
+    AssemblyConfig cfg;
+    cfg.array_id = "debug_" + id;
+    cfg.mode = get_string(body, "mode", "recon");
+    if (!is_valid_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid array mode: " + cfg.mode);
+    }
+
+    AssemblyConfig::Path path;
+    path.drone_id = id;
+    path.closed_loop = get_bool(body, "loop", false);
+
+    if (body.contains("waypoints") && body.at("waypoints").is_array()) {
+        for (const auto& w : body.at("waypoints").as_array()) {
+            if (!w.is_object()) continue;
+            const auto& wo = w.as_object();
+            AssemblyConfig::Path::Waypoint wp;
+            wp.x = get_number(wo, "x", 0.0);
+            wp.y = get_number(wo, "y", 0.0);
+            wp.z = get_number(wo, "z", 0.0);
+            wp.segment_speed = static_cast<float>(get_number(wo, "segment_speed", 0.0));
+            wp.wait_time = static_cast<float>(get_number(wo, "wait_time", 0.0));
+            path.waypoints.push_back(wp);
+        }
+    }
+
+    if (path.waypoints.empty())
+        throw ApiError(400, "waypoints required");
+
+    cfg.paths.push_back(path);
+    exec_engine_.StartTasks(cfg);
+
+    return boost::json::object{
+        {"array_id", cfg.array_id},
+        {"drone_id", id},
+        {"mode", cfg.mode},
+        {"waypoint_count", static_cast<int64_t>(path.waypoints.size())},
+        {"status", "executing"},
+    };
 }
 
 boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::json::object& body) {
-    return DebugMove(id, body);
+    int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) {
+        throw ApiError(404, "drone not found: " + id);
+    }
+    double x = get_number(body, "x", 0.0);
+    double y = get_number(body, "y", 0.0);
+    double z = get_number(body, "z", 0.0);
+    exec_engine_.InjectTarget(drone_id, x, y, z);
+    return boost::json::object{{"drone_id", id}, {"target_injected", true},
+                               {"x", x}, {"y", y}, {"z", z}};
 }
 
 boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
@@ -670,6 +1115,9 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
                            get_bool(obj, "closed_loop", false);
         if (obj.contains("mode")) {
             cfg.mode = get_string(obj, "mode", cfg.mode);
+            if (!is_valid_array_mode(cfg.mode)) {
+                throw ApiError(400, "invalid array mode: " + cfg.mode);
+            }
         }
 
         if (obj.contains("waypoints") && obj.at("waypoints").is_array()) {
@@ -696,6 +1144,10 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
         }
 
         if (!path.drone_id.empty() && !path.waypoints.empty()) {
+            const int drone_id = drone_id_from_string(path.drone_id);
+            if (!drone_mgr_.HasDrone(drone_id)) {
+                throw ApiError(404, "drone not found: " + path.drone_id);
+            }
             cfg.paths.push_back(path);
         }
     }
@@ -716,11 +1168,90 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
 
 boost::json::value HttpServer::DebugArrayState(const std::string& id) {
     auto progress = assembly_ctrl_.GetProgress();
+    auto snapshots = exec_engine_.GetTaskSnapshots();
+    boost::json::array tasks;
+    for (const auto& snapshot : snapshots) {
+        tasks.push_back(boost::json::object{
+            {"drone_id", snapshot.drone_id},
+            {"drone_id_str", drone_id_string(snapshot.drone_id)},
+            {"mode", snapshot.mode},
+            {"closed_loop", snapshot.closed_loop},
+            {"current_wp", snapshot.current_wp},
+            {"waypoint_count", snapshot.waypoint_count},
+            {"target_override", snapshot.target_override},
+            {"avoidance_active", snapshot.avoidance_active},
+            {"base_ned", boost::json::array{snapshot.base_ned_n, snapshot.base_ned_e, snapshot.base_ned_d}},
+            {"target_ned", boost::json::array{snapshot.target_ned_n, snapshot.target_ned_e, snapshot.target_ned_d}},
+        });
+    }
     return boost::json::object{
-        {"array_id",    progress.array_id},
-        {"ready_count", progress.ready_count},
-        {"total_count", progress.total_count},
-        {"state",       static_cast<int>(assembly_ctrl_.GetState())},
+        {"array_id",       progress.array_id},
+        {"ready_count",    progress.ready_count},
+        {"total_count",    progress.total_count},
+        {"assembly_state", assembly_state_to_string(assembly_ctrl_.GetState())},
+        {"exec_running",   exec_engine_.IsRunning()},
+        {"tasks",          tasks},
+    };
+}
+
+boost::json::value HttpServer::DebugMetrics()
+{
+    auto drones = drone_mgr_.GetAllStatus();
+    int online_count = 0;
+    int lost_count = 0;
+    int offline_count = 0;
+    int connecting_count = 0;
+    for (const auto& d : drones) {
+        if (d.connection_state == "online") ++online_count;
+        else if (d.connection_state == "lost") ++lost_count;
+        else if (d.connection_state == "connecting") ++connecting_count;
+        else ++offline_count;
+    }
+
+    auto progress = assembly_ctrl_.GetProgress();
+    auto avoidance = exec_engine_.GetAvoidanceStats();
+    return boost::json::object{
+        {"registered_drones", static_cast<int64_t>(drones.size())},
+        {"online_drones", online_count},
+        {"connecting_drones", connecting_count},
+        {"lost_drones", lost_count},
+        {"offline_drones", offline_count},
+        {"assembly_state", assembly_state_to_string(assembly_ctrl_.GetState())},
+        {"assembly_ready", progress.ready_count},
+        {"assembly_total", progress.total_count},
+        {"exec_running", exec_engine_.IsRunning()},
+        {"avoidance_events_total", static_cast<int64_t>(avoidance.events_total)},
+        {"avoidance_activations_total", static_cast<int64_t>(avoidance.activations_total)},
+        {"avoidance_restorations_total", static_cast<int64_t>(avoidance.restorations_total)},
+        {"avoidance_active_count", avoidance.active_count},
+    };
+}
+
+boost::json::value HttpServer::DebugAvoidanceState()
+{
+    auto avoidance = exec_engine_.GetAvoidanceStats();
+    auto last = avoidance.last_event;
+    return boost::json::object{
+        {"events_total", static_cast<int64_t>(avoidance.events_total)},
+        {"activations_total", static_cast<int64_t>(avoidance.activations_total)},
+        {"restorations_total", static_cast<int64_t>(avoidance.restorations_total)},
+        {"active_count", avoidance.active_count},
+        {"has_last_event", avoidance.has_last_event},
+        {"last_event", boost::json::object{
+            {"drone_id", last.drone_id},
+            {"other_drone_id", last.other_drone_id},
+            {"current_distance_m", last.current_distance_m},
+            {"predicted_distance_m", last.predicted_distance_m},
+            {"threshold_m", last.threshold_m},
+            {"base_ned", boost::json::array{last.base_ned_n, last.base_ned_e, last.base_ned_d}},
+            {"applied_ned", boost::json::array{last.applied_ned_n, last.applied_ned_e, last.applied_ned_d}},
+            {"offset_n", last.offset_n},
+            {"offset_e", last.offset_e},
+            {"offset_d", last.offset_d},
+            {"activated", last.activated},
+            {"restored", last.restored},
+            {"valid", last.valid},
+        }},
     };
 }
 
@@ -744,6 +1275,7 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
         double y = get_number(msg, "y", 0.0);
         double z = get_number(msg, "z", 0.0);
         int drone_id = drone_id_from_string(drone_id_str);
+        spdlog::info("[WS] MOVE  drone_id={}  x={:.1f}  y={:.1f}  z={:.1f}", drone_id, x, y, z);
         if (!drone_mgr_.ProcessMoveCommand(drone_id, x, y, z)) {
             ws_manager_.send(session, json_stringify(boost::json::object{
                 {"type", "error"}, {"code", 404}, {"message", "drone not found"}}));
@@ -762,12 +1294,19 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     if (type == "pause") {
         bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            std::string ids_str;
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                if (!ids_str.empty()) ids_str += ",";
+                ids_str += value_to_string(id_value);
+            }
+            spdlog::info("[WS] PAUSE  drone_ids=[{}]", ids_str);
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
                 any_ok = drone_mgr_.ProcessPauseCommand(
                     drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            spdlog::info("[WS] PAUSE  drone_id={}", drone_id_str);
             any_ok = drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
         }
         if (!any_ok) {
@@ -786,12 +1325,19 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
     if (type == "resume") {
         bool any_ok = false;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
+            std::string ids_str;
+            for (const auto& id_value : msg.at("drone_ids").as_array()) {
+                if (!ids_str.empty()) ids_str += ",";
+                ids_str += value_to_string(id_value);
+            }
+            spdlog::info("[WS] RESUME  drone_ids=[{}]", ids_str);
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
                 any_ok = drone_mgr_.ProcessResumeCommand(
                     drone_id_from_string(value_to_string(id_value))) || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
+            spdlog::info("[WS] RESUME  drone_id={}", drone_id_str);
             any_ok = drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
         }
         if (!any_ok) {
@@ -830,6 +1376,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
     }
 
     auto session = ws_manager_.add(&ws);
+    spdlog::info("[WS] Client connected. Active sessions: {}", ws_manager_.count());
     beast::flat_buffer buf;
 
     while (true) {
@@ -867,6 +1414,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
 
     session->alive = false;
     ws_manager_.remove(&ws);
+    spdlog::info("[WS] Client disconnected. Active sessions: {}", ws_manager_.count());
 }
 
 // ============================================================
@@ -908,11 +1456,24 @@ void HttpServer::RunHttpServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.http_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[HTTP] Listening on 0.0.0.0:{}", config_.http_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec) {
+            if (ec == net::error::would_block || ec == net::error::try_again) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            if (running_) {
+                spdlog::warn("[HTTP] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            continue;
+        }
         std::thread(HandleHttpConnection, std::move(socket), this).detach();
     }
 }
@@ -922,11 +1483,24 @@ void HttpServer::RunWsServer() {
     tcp::acceptor acceptor(ctx, tcp::endpoint{net::ip::make_address("0.0.0.0"),
                                                static_cast<unsigned short>(config_.ws_port)});
     acceptor.set_option(net::socket_base::reuse_address(true));
+    acceptor.non_blocking(true);
     spdlog::info("[WS] Listening on 0.0.0.0:{}", config_.ws_port);
 
     while (running_) {
         tcp::socket socket(ctx);
-        acceptor.accept(socket);
+        boost::system::error_code ec;
+        acceptor.accept(socket, ec);
+        if (ec) {
+            if (ec == net::error::would_block || ec == net::error::try_again) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            if (running_) {
+                spdlog::warn("[WS] accept error: {}", ec.message());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            continue;
+        }
         std::thread(HandleWsConnection, std::move(socket), this).detach();
     }
 }

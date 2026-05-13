@@ -7,6 +7,7 @@
 #include "drone/heartbeat_manager.h"
 #include "drone/drone_manager.h"
 #include "execution/assembly_controller.h"
+#include "execution/execution_engine.h"
 #include "http/http_server.h"
 #include <spdlog/spdlog.h>
 #include <csignal>
@@ -48,12 +49,15 @@ int main(int argc, char* argv[])
 
     // 6. 创建各模块
     UdpSender          udp_sender(io_context);
-    HeartbeatManager   hb_manager(udp_sender);
-    DroneManager       drone_mgr(hb_manager);
-    AssemblyController assembly_ctrl(config.assembly_timeout_sec);
+    HeartbeatManager   hb_manager(udp_sender, config.heartbeat_hz);
+    DroneManager       drone_mgr(hb_manager, config.low_battery_threshold);
+    AssemblyController assembly_ctrl(config.assembly_timeout_sec, config.arrival_threshold_m);
+    ExecutionEngine    exec_engine(config.arrival_threshold_m,
+                                   config.avoidance_radius_m,
+                                   config.avoidance_lookahead_sec);
     UdpReceiver        udp_receiver(io_context);
     WsManager          ws_manager;
-    HttpServer         http_server(config, drone_mgr, assembly_ctrl, ws_manager);
+    HttpServer         http_server(config, drone_mgr, assembly_ctrl, exec_engine, ws_manager);
 
     // 7. 配置 UDP 遥测接收
     for (const auto& [slot, mapping] : config.port_map) {
@@ -65,17 +69,38 @@ int main(int argc, char* argv[])
         udp_sender.SetTarget(slot, config.jetson_host, mapping.send_port);
     }
 
-    // 9. 遥测回调 → DroneManager
+    // 8b. 配置 ExecutionEngine 回调
+    exec_engine.SetMoveCallback([&](int drone_id, double ned_n, double ned_e, double ned_d) {
+        drone_mgr.ProcessMoveCommandNed(drone_id, ned_n, ned_e, ned_d);
+    });
+    exec_engine.SetTelemetryGetter([&](int drone_id) {
+        return drone_mgr.GetLatestTelemetry(drone_id);
+    });
+    exec_engine.SetStateGetter([&](int drone_id) {
+        return drone_mgr.GetConnectionState(drone_id);
+    });
+
+    // 8c. 配置 AssemblyController 集结指令回调
+    assembly_ctrl.SetMoveCommandCallback([&](int drone_id, double ned_n, double ned_e, double ned_d) {
+        drone_mgr.ProcessMoveCommandNed(drone_id, ned_n, ned_e, ned_d);
+    });
+
+    // 9. 遥测回调 → DroneManager + ExecutionEngine
     udp_receiver.SetCallback([&](int slot, const TelemetryData& tel) {
         drone_mgr.OnTelemetryReceivedBySlot(slot, tel);
 
-        if (assembly_ctrl.GetState() == AssemblyState::Assembling) {
-            int drone_id = drone_mgr.ResolveDroneIdBySlot(slot);
-            assembly_ctrl.UpdateDronePosition(
-                drone_id > 0 ? drone_id : slot,
-                tel.position_ned[0],
-                tel.position_ned[1],
-                tel.position_ned[2]);
+        int drone_id = drone_mgr.ResolveDroneIdBySlot(slot);
+        if (drone_id > 0) {
+            if (assembly_ctrl.GetState() == AssemblyState::Assembling) {
+                assembly_ctrl.UpdateDronePosition(
+                    drone_id,
+                    tel.position_ned[0],
+                    tel.position_ned[1],
+                    tel.position_ned[2]);
+            }
+            if (exec_engine.IsRunning()) {
+                exec_engine.OnTelemetry(drone_id, tel);
+            }
         }
     });
 

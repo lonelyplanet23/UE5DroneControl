@@ -18,7 +18,7 @@
 
 AMultiDroneCharacter::AMultiDroneCharacter()
 {
-	PrimaryActorTick.bCanEverTick = true;  // remote: Tick 需要
+	PrimaryActorTick.bCanEverTick = true;  // remote: Tick 需要  // remote: Tick 需要
 
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
@@ -27,9 +27,11 @@ AMultiDroneCharacter::AMultiDroneCharacter()
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
 		// 保持 Pawn 配置，但确保 Visibility 通道阻塞（鼠标检测需要）
+		// 保持 Pawn 配置，但确保 Visibility 通道阻塞（鼠标检测需要）
 		Capsule->SetCollisionProfileName(TEXT("Pawn"));
 		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		// 【关键】确保 Visibility 通道阻塞 - 鼠标悬停检测需要
 		// 【关键】确保 Visibility 通道阻塞 - 鼠标悬停检测需要
 		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 		Capsule->SetSimulatePhysics(false);
@@ -83,6 +85,7 @@ void AMultiDroneCharacter::BeginPlay()
 	}
 
 	// remote: Registry 存为成员变量，供 Tick 使用
+	// remote: Registry 存为成员变量，供 Tick 使用
 	Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
 	if (!Registry)
 	{
@@ -105,7 +108,28 @@ void AMultiDroneCharacter::BeginPlay()
 		*DroneName, DroneId, BitIndex);
 
 	// remote: 订阅 assembly 事件
+	// remote: 订阅 assembly 事件
 	SubscribeToAssemblyEvents();
+
+	// local: 订阅 power_on/reconnect 事件，用于上电时位置对齐
+	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+	{
+		NetMgr->OnDroneWsEvent.AddUObject(this, &AMultiDroneCharacter::OnDroneWsEvent);
+	}
+}
+
+void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			NetMgr->OnDroneWsEvent.RemoveAll(this);
+			// 如果 assembly 事件也需要手动解绑，在这里补充
+		}
+	}
 
 	// local: 订阅 power_on/reconnect 事件，用于上电时位置对齐
 	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())

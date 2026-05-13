@@ -28,8 +28,9 @@ DroneControlPacket make_packet(double ned_n, double ned_e, double ned_d, uint32_
 
 } // namespace
 
-DroneManager::DroneManager(HeartbeatManager& hb_manager)
+DroneManager::DroneManager(HeartbeatManager& hb_manager, int low_battery_threshold)
     : hb_manager_(hb_manager)
+    , low_battery_threshold_(low_battery_threshold)
 {
     spdlog::info("DroneManager created");
 }
@@ -236,7 +237,23 @@ bool DroneManager::ProcessMoveCommand(int drone_id, double ue_x, double ue_y, do
     hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
 
     ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
-    spdlog::debug("MoveCommand drone={}: NED({:.2f}, {:.2f}, {:.2f})",
+    spdlog::info("MoveCommand drone={}: NED({:.2f}, {:.2f}, {:.2f})",
+                  drone_id, ned_n, ned_e, ned_d);
+    return true;
+}
+
+bool DroneManager::ProcessMoveCommandNed(int drone_id, double ned_n, double ned_e, double ned_d)
+{
+    auto* ctx = GetContext(drone_id);
+    if (!ctx) return false;
+
+    ctx->last_ned_x = ned_n;
+    ctx->last_ned_y = ned_e;
+    ctx->last_ned_z = ned_d;
+    hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
+
+    ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
+    spdlog::info("MoveCommandNed drone={}: NED({:.2f}, {:.2f}, {:.2f})",
                   drone_id, ned_n, ned_e, ned_d);
     return true;
 }
@@ -330,10 +347,10 @@ void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
     hb_manager_.UpdateLastPosition(
         drone_id, data.position_ned[0], data.position_ned[1], data.position_ned[2]);
 
-    if (data.battery >= 0 && data.battery > 20) {
+    if (data.battery >= 0 && data.battery > low_battery_threshold_) {
         ctx.low_battery_alert_active = false;
     }
-    if (data.battery >= 0 && data.battery <= 20 &&
+    if (data.battery >= 0 && data.battery <= low_battery_threshold_ &&
         !ctx.low_battery_alert_active && alert_cb_) {
         ctx.low_battery_alert_active = true;
         alert_cb_(drone_id, "low_battery", data.battery);

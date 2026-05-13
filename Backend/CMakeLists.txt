@@ -33,6 +33,7 @@ set(SOURCES
     drone/heartbeat_manager.cpp
     drone/drone_manager.cpp
     execution/assembly_controller.cpp
+    execution/execution_engine.cpp
     http/http_server.cpp
 )
 
@@ -52,6 +53,7 @@ set(HEADERS
     drone/drone_context.h
     drone/drone_manager.h
     execution/assembly_controller.h
+    execution/execution_engine.h
     http/http_server.h
 )
 
@@ -106,3 +108,8 @@ target_link_libraries(${PROJECT_NAME}_tests PRIVATE
 # ============================================================
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.yaml
     ${CMAKE_CURRENT_BINARY_DIR}/config.yaml COPYONLY)
+
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/config.yaml
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>/config.yaml)

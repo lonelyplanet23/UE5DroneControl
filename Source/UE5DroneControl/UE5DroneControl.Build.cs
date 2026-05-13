@@ -29,7 +29,8 @@ public class UE5DroneControl : ModuleRules
 			"WebSockets",
 			"Json",
 			"JsonUtilities",
-			"CesiumRuntime"
+			"CesiumRuntime",
+			"HTTP"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

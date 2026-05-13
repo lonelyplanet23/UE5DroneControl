@@ -1,0 +1,28 @@
+{
+  "array_id": "mock-attack-1",
+  "mode": "attack",
+  "paths": [
+    {
+      "pathId": 1,
+      "drone_id": "d1",
+      "bClosedLoop": false,
+      "waypoints": [
+        {
+          "location": { "x": 0, "y": 0, "z": 0 },
+          "segmentSpeed": 3,
+          "waitTime": 0
+        },
+        {
+          "location": { "x": 300, "y": 0, "z": -200 },
+          "segmentSpeed": 3,
+          "waitTime": 0
+        },
+        {
+          "location": { "x": 600, "y": 300, "z": -400 },
+          "segmentSpeed": 5,
+          "waitTime": 0
+        }
+      ]
+    }
+  ]
+}
