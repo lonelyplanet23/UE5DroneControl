@@ -127,7 +127,6 @@ void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 		{
 			NetMgr->OnDroneWsEvent.RemoveAll(this);
-			// 如果 assembly 事件也需要手动解绑，在这里补充
 		}
 	}
 
