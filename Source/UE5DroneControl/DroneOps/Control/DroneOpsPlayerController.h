@@ -42,8 +42,8 @@ protected:
 	void OnTopDownToggle();
 	void OnSwitchToTopDown();
 	void OnSwitchToRealTimeDrone();
-	void OnShiftPressed()  { bShiftHeld = true; }
-	void OnShiftReleased() { bShiftHeld = false; }
+	void OnShiftPressed();
+	void OnShiftReleased();
 	void OnTestToast();
 
 	/** B 键：返回主菜单关卡 */

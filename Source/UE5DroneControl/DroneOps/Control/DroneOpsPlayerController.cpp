@@ -287,14 +287,18 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 	// FR-04: Free camera control
 	if (CameraModeState.CameraMode == EDroneCameraMode::Free && FreeCamActor && IsValid(FreeCamActor))
 	{
-		// 鼠标旋转视角
-		float MouseX = 0.0f, MouseY = 0.0f;
-		GetInputMouseDelta(MouseX, MouseY);
-		if (MouseX != 0.0f || MouseY != 0.0f)
+		// 按住Shift时冻结视角，显示鼠标用于点选无人机
+		if (!bShiftHeld)
 		{
-			FreeCamRotation.Yaw += MouseX * FreeCamMouseSensitivity * 100.0f;
-			FreeCamRotation.Pitch = FMath::Clamp(FreeCamRotation.Pitch - MouseY * FreeCamMouseSensitivity * 100.0f, -89.0f, 89.0f);
-			FreeCamActor->SetActorRotation(FreeCamRotation);
+			// 鼠标旋转视角
+			float MouseX = 0.0f, MouseY = 0.0f;
+			GetInputMouseDelta(MouseX, MouseY);
+			if (MouseX != 0.0f || MouseY != 0.0f)
+			{
+				FreeCamRotation.Yaw += MouseX * FreeCamMouseSensitivity * 100.0f;
+				FreeCamRotation.Pitch = FMath::Clamp(FreeCamRotation.Pitch - MouseY * FreeCamMouseSensitivity * 100.0f, -89.0f, 89.0f);
+				FreeCamActor->SetActorRotation(FreeCamRotation);
+			}
 		}
 
 		// WASD/QE 移动（相对于当前视角方向）
@@ -385,6 +389,12 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 	if (DroneActor)
 	{
 		HandleDroneClick(DroneActor);
+		return;
+	}
+
+	// 自由视角旋转模式下（未按Shift、鼠标不可见），禁止派发目标点
+	if (CameraModeState.CameraMode == EDroneCameraMode::Free && !bShiftHeld)
+	{
 		return;
 	}
 
@@ -562,6 +572,32 @@ void ADroneOpsPlayerController::OnFreeCamToggle()
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("FR-04: Switched back to Follow Camera (DroneId=%d)"), CameraModeState.FollowDroneId);
+	}
+}
+
+void ADroneOpsPlayerController::OnShiftPressed()
+{
+	bShiftHeld = true;
+
+	if (CameraModeState.CameraMode == EDroneCameraMode::Free)
+	{
+		bShowMouseCursor = true;
+
+		FInputModeGameAndUI InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		InputMode.SetHideCursorDuringCapture(false);
+		SetInputMode(InputMode);
+	}
+}
+
+void ADroneOpsPlayerController::OnShiftReleased()
+{
+	bShiftHeld = false;
+
+	if (CameraModeState.CameraMode == EDroneCameraMode::Free)
+	{
+		bShowMouseCursor = false;
+		SetInputMode(FInputModeGameOnly());
 	}
 }
 
