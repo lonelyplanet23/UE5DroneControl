@@ -1,6 +1,7 @@
 #include "DroneRuntimeInteractionPlayerController.h"
 
 #include "InputCoreTypes.h"
+#include "Kismet/GameplayStatics.h"
 #include "../PathEditor/DronePathActor.h"
 #include "../PathEditor/DroneWaypointActor.h"
 
@@ -87,6 +88,7 @@ void ADroneRuntimeInteractionPlayerController::SetupInputComponent()
 	InputComponent->BindKey(ToggleEditModeChord, IE_Pressed, this, &ADroneRuntimeInteractionPlayerController::HandleToggleEditMode);
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ADroneRuntimeInteractionPlayerController::HandleLeftMousePressed);
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &ADroneRuntimeInteractionPlayerController::HandleLeftMouseReleased);
+	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ADroneRuntimeInteractionPlayerController::HandleReturnToMainMenu);
 }
 
 void ADroneRuntimeInteractionPlayerController::PlayerTick(float DeltaTime)
@@ -317,4 +319,15 @@ void ADroneRuntimeInteractionPlayerController::SetActiveAxis(EGizmoAxis NewActiv
 	{
 		CurrentWaypoint->SetActiveGizmoAxis(ActiveAxis);
 	}
+}
+
+void ADroneRuntimeInteractionPlayerController::ReturnToMainMenu()
+{
+	UGameplayStatics::OpenLevel(this, MainMenuLevelName);
+}
+
+void ADroneRuntimeInteractionPlayerController::HandleReturnToMainMenu()
+{
+	UE_LOG(LogTemp, Log, TEXT("DroneRuntimeInteractionPlayerController: B key pressed, returning to MainMenu"));
+	ReturnToMainMenu();
 }

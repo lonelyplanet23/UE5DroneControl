@@ -46,6 +46,9 @@ protected:
 	void OnShiftReleased();
 	void OnTestToast();
 
+	/** B 键：返回主菜单关卡 */
+	void OnReturnToMainMenu();
+
 	// Click handling
 	void HandleMapClick(const FVector& WorldLocation);
 	void HandleDroneClick(AActor* ClickedActor);
@@ -98,6 +101,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
 	TSubclassOf<UUserWidget> DroneInfoPanelWidgetClass;
 
+	/** 主菜单关卡名称，B 键跳转目标 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Navigation")
+	FName MainMenuLevelName = FName("MainMenu");
+
 private:
 	AActor* GetSelectableDroneUnderCursor(FVector* OutFallbackWorldLocation = nullptr) const;
 	AActor* FindNearestSelectableDroneOnScreen(float MaxScreenDistance) const;
@@ -145,6 +152,16 @@ private:
 
 	/** Tracks which drones are currently paused (toggled by P key) */
 	TSet<int32> PausedDroneIds;
+
+	/** True = Follow视角当前处于纯俯视(-90°)，false = 斜视(-60°) */
+	bool bFollowTopDownPitch = false;
+
+	/** SpringArm俯仰角插值目标值 */
+	float FollowTargetPitch = -60.f;
+
+	/** SpringArm俯仰角插值速度（度/秒） */
+	UPROPERTY(EditAnywhere, Category = "Camera")
+	float CameraPitchInterpSpeed = 5.f;
 
 	/** Whether Shift is held — used for multi-select on click */
 	bool bShiftHeld = false;

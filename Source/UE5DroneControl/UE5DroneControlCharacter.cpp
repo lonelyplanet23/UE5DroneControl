@@ -186,14 +186,16 @@ void AUE5DroneControlCharacter::ToggleCameraView()
         // 根据状态设置相机角度
         if (TargetCharacter->bIsTopDownView)
         {
-            // 纯俯视视角（-90度）
+            // 纯俯视视角（-90度），缩短臂长贴近无人机
             TargetCameraBoom->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f));
+            TargetCameraBoom->TargetArmLength = 400.f;
             UE_LOG(LogTemp, Log, TEXT("Camera switched to Top-Down view (-90 degrees) on %s"), *TargetCharacter->GetName());
         }
         else
         {
-            // 斜视角（-60度）
+            // 斜视角（-60度），恢复原始臂长
             TargetCameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
+            TargetCameraBoom->TargetArmLength = 1200.f;
             UE_LOG(LogTemp, Log, TEXT("Camera switched to Angled view (-60 degrees) on %s"), *TargetCharacter->GetName());
         }
     }
