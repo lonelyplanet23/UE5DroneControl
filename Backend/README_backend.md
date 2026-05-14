@@ -410,14 +410,4 @@ UE5                          Backend                         Jetson/PX4
 
 ---
 
-## 已知问题
-
-当前代码审查发现以下需关注的问题（详情见代码内注释）：
-
-| 严重度 | 数量 | 主要涉及 |
-|--------|------|---------|
-| High | 10 | drone_manager 缺锁、UdpReceiver data race、heartbeat_manager StopInternal 未加锁、http_server 线程生命周期、jetson_bridge system_id 硬编码 |
-| Medium | 6 | SegmentSegmentDistance 精度、ExecutionEngine OnTelemetry 空实现、assembly_controller→exec engine 集成缺口 |
-| Low | 6 | Pop/Peek 不一致、BFS/DFS 标记错误、keep-alive 未实现 |
-
 建议在首次联调前优先修复 High 级别的线程安全问题。
