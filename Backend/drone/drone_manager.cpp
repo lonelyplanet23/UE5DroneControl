@@ -40,29 +40,19 @@ DroneManager::~DroneManager()
     spdlog::info("DroneManager destroyed");
 }
 
-void DroneManager::SetTelemetryCallback(TelemetryCallback cb)
-{
-    telemetry_cb_ = std::move(cb);
-}
+void DroneManager::SetTelemetryCallback(TelemetryCallback cb)   { telemetry_cb_ = std::move(cb); }
+void DroneManager::SetStateChangeCallback(StateChangeCallback cb) { state_change_cb_ = std::move(cb); }
+void DroneManager::SetAlertCallback(AlertCallback cb)           { alert_cb_ = std::move(cb); }
+void DroneManager::SetAssemblyCallback(AssemblyCallback cb)     { assembly_cb_ = std::move(cb); }
 
-void DroneManager::SetStateChangeCallback(StateChangeCallback cb)
-{
-    state_change_cb_ = std::move(cb);
-}
-
-void DroneManager::SetAlertCallback(AlertCallback cb)
-{
-    alert_cb_ = std::move(cb);
-}
-
-void DroneManager::SetAssemblyCallback(AssemblyCallback cb)
-{
-    assembly_cb_ = std::move(cb);
-}
-
+// ========================================================
+// 无人机管理（线程安全）
+// ========================================================
 bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
                             const std::string& jetson_ip, int send_port)
 {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+
     if (drones_.find(drone_id) != drones_.end()) {
         spdlog::warn("Drone {} already exists", drone_id);
         return false;
@@ -115,6 +105,8 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
 
 bool DroneManager::RemoveDrone(int drone_id)
 {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+
     auto it = drones_.find(drone_id);
     if (it == drones_.end()) return false;
 
@@ -127,25 +119,34 @@ bool DroneManager::RemoveDrone(int drone_id)
 
 bool DroneManager::HasDrone(int drone_id) const
 {
-    return GetContext(drone_id) != nullptr;
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    return drones_.find(drone_id) != drones_.end();
 }
 
 std::vector<DroneStatus> DroneManager::GetAllStatus() const
 {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
     std::vector<DroneStatus> result;
     result.reserve(drones_.size());
     for (const auto& [id, ctx] : drones_) {
-        result.push_back(GetStatus(id));
+        result.push_back(GetStatusInternal(id));
     }
     return result;
 }
 
 DroneStatus DroneManager::GetStatus(int drone_id) const
 {
-    DroneStatus s;
-    const auto* ctx = GetContext(drone_id);
-    if (!ctx) return s;
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    return GetStatusInternal(drone_id);
+}
 
+DroneStatus DroneManager::GetStatusInternal(int drone_id) const
+{
+    DroneStatus s;
+    auto it = drones_.find(drone_id);
+    if (it == drones_.end()) return s;
+
+    const auto& ctx = it->second;
     s.id = "d" + std::to_string(drone_id);
     s.name = ctx->name;
     s.slot = ctx->slot;
@@ -168,28 +169,30 @@ DroneStatus DroneManager::GetStatus(int drone_id) const
         s.speed = QuaternionUtils::SpeedFromVelocity(
             tel.velocity[0], tel.velocity[1], tel.velocity[2]);
     }
-
     s.anchor = anchor_manager_.GetAnchor(drone_id);
     return s;
 }
 
 std::vector<DroneControlPacket> DroneManager::GetCommandQueueSnapshot(int drone_id) const
 {
-    const auto* ctx = GetContext(drone_id);
-    if (!ctx || !ctx->command_queue) return {};
-    return ctx->command_queue->Snapshot();
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto it = drones_.find(drone_id);
+    if (it == drones_.end() || !it->second->command_queue) return {};
+    return it->second->command_queue->Snapshot();
 }
 
 bool DroneManager::IsCommandQueuePaused(int drone_id) const
 {
-    const auto* ctx = GetContext(drone_id);
-    return ctx && ctx->command_queue && ctx->command_queue->IsPaused();
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto it = drones_.find(drone_id);
+    return it != drones_.end() && it->second->command_queue && it->second->command_queue->IsPaused();
 }
 
 size_t DroneManager::GetCommandQueueSize(int drone_id) const
 {
-    const auto* ctx = GetContext(drone_id);
-    return (ctx && ctx->command_queue) ? ctx->command_queue->Size() : 0;
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto it = drones_.find(drone_id);
+    return (it != drones_.end() && it->second->command_queue) ? it->second->command_queue->Size() : 0;
 }
 
 HeartbeatStats DroneManager::GetHeartbeatStats(int drone_id) const
@@ -197,9 +200,13 @@ HeartbeatStats DroneManager::GetHeartbeatStats(int drone_id) const
     return hb_manager_.GetStats(drone_id);
 }
 
+// ========================================================
+// 遥测接收
+// ========================================================
 void DroneManager::OnTelemetryReceived(int drone_id, const TelemetryData& data)
 {
-    auto* ctx = GetContext(drone_id);
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto* ctx = GetContextUnsafe(drone_id);
     if (!ctx) {
         spdlog::warn("Telemetry for unknown drone {}", drone_id);
         return;
@@ -209,6 +216,7 @@ void DroneManager::OnTelemetryReceived(int drone_id, const TelemetryData& data)
 
 void DroneManager::OnTelemetryReceivedBySlot(int slot, const TelemetryData& data)
 {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
     auto* ctx = GetContextBySlot(slot);
     if (!ctx) {
         spdlog::warn("Telemetry for unregistered slot {}", slot);
@@ -219,23 +227,25 @@ void DroneManager::OnTelemetryReceivedBySlot(int slot, const TelemetryData& data
 
 int DroneManager::ResolveDroneIdBySlot(int slot) const
 {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
     const auto* ctx = GetContextBySlot(slot);
     return ctx ? ctx->drone_id : 0;
 }
 
+// ========================================================
+// 控制指令
+// ========================================================
 bool DroneManager::ProcessMoveCommand(int drone_id, double ue_x, double ue_y, double ue_z)
 {
-    auto* ctx = GetContext(drone_id);
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto* ctx = GetContextUnsafe(drone_id);
     if (!ctx) return false;
 
     double ned_n, ned_e, ned_d;
     CoordinateConverter::UeOffsetToNed(ue_x, ue_y, ue_z, ned_n, ned_e, ned_d);
 
-    ctx->last_ned_x = ned_n;
-    ctx->last_ned_y = ned_e;
-    ctx->last_ned_z = ned_d;
+    ctx->last_ned_x = ned_n;  ctx->last_ned_y = ned_e;  ctx->last_ned_z = ned_d;
     hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
-
     ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
     spdlog::info("MoveCommand drone={}: NED({:.2f}, {:.2f}, {:.2f})",
                   drone_id, ned_n, ned_e, ned_d);
@@ -244,14 +254,12 @@ bool DroneManager::ProcessMoveCommand(int drone_id, double ue_x, double ue_y, do
 
 bool DroneManager::ProcessMoveCommandNed(int drone_id, double ned_n, double ned_e, double ned_d)
 {
-    auto* ctx = GetContext(drone_id);
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto* ctx = GetContextUnsafe(drone_id);
     if (!ctx) return false;
 
-    ctx->last_ned_x = ned_n;
-    ctx->last_ned_y = ned_e;
-    ctx->last_ned_z = ned_d;
+    ctx->last_ned_x = ned_n;  ctx->last_ned_y = ned_e;  ctx->last_ned_z = ned_d;
     hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
-
     ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
     spdlog::info("MoveCommandNed drone={}: NED({:.2f}, {:.2f}, {:.2f})",
                   drone_id, ned_n, ned_e, ned_d);
@@ -260,7 +268,8 @@ bool DroneManager::ProcessMoveCommandNed(int drone_id, double ned_n, double ned_
 
 bool DroneManager::ProcessPauseCommand(int drone_id)
 {
-    auto* ctx = GetContext(drone_id);
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto* ctx = GetContextUnsafe(drone_id);
     if (!ctx) return false;
 
     ctx->command_queue->SetPaused(true);
@@ -271,7 +280,8 @@ bool DroneManager::ProcessPauseCommand(int drone_id)
 
 bool DroneManager::ProcessResumeCommand(int drone_id)
 {
-    auto* ctx = GetContext(drone_id);
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto* ctx = GetContextUnsafe(drone_id);
     if (!ctx) return false;
 
     ctx->command_queue->SetPaused(false);
@@ -281,14 +291,16 @@ bool DroneManager::ProcessResumeCommand(int drone_id)
 
 DroneConnectionState DroneManager::GetConnectionState(int drone_id) const
 {
-    const auto* ctx = GetContext(drone_id);
-    return ctx ? ctx->state_machine->GetState() : DroneConnectionState::Offline;
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto it = drones_.find(drone_id);
+    return (it != drones_.end()) ? it->second->state_machine->GetState() : DroneConnectionState::Offline;
 }
 
 TelemetryData DroneManager::GetLatestTelemetry(int drone_id) const
 {
-    const auto* ctx = GetContext(drone_id);
-    return ctx ? ctx->latest_telemetry : TelemetryData{};
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto it = drones_.find(drone_id);
+    return (it != drones_.end()) ? it->second->latest_telemetry : TelemetryData{};
 }
 
 GpsAnchor DroneManager::GetAnchor(int drone_id) const
@@ -298,21 +310,25 @@ GpsAnchor DroneManager::GetAnchor(int drone_id) const
 
 void DroneManager::CheckTimeouts(int timeout_sec)
 {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
     for (auto& [id, ctx] : drones_) {
         ctx->state_machine->CheckTimeout(timeout_sec);
     }
 }
 
+// ========================================================
+// 内部辅助（不加锁）
+// ========================================================
 DroneContext* DroneManager::GetContext(int drone_id)
 {
-    auto it = drones_.find(drone_id);
-    return (it != drones_.end()) ? it->second.get() : nullptr;
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    return GetContextUnsafe(drone_id);
 }
 
 const DroneContext* DroneManager::GetContext(int drone_id) const
 {
-    auto it = drones_.find(drone_id);
-    return (it != drones_.end()) ? it->second.get() : nullptr;
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    return GetContextUnsafe(drone_id);
 }
 
 DroneContext* DroneManager::GetContextBySlot(int slot)
@@ -331,6 +347,15 @@ const DroneContext* DroneManager::GetContextBySlot(int slot) const
     return nullptr;
 }
 
+DroneContext* DroneManager::GetContextUnsafe(int drone_id) const
+{
+    auto it = drones_.find(drone_id);
+    return (it != drones_.end()) ? it->second.get() : nullptr;
+}
+
+// ========================================================
+// 遥测处理（调用者持有锁）
+// ========================================================
 void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
 {
     const int drone_id = ctx.drone_id;

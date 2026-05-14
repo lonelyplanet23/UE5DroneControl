@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -54,12 +55,15 @@ public:
 private:
     DroneContext* GetContext(int drone_id);
     const DroneContext* GetContext(int drone_id) const;
+    DroneContext* GetContextUnsafe(int drone_id) const;
     DroneContext* GetContextBySlot(int slot);
     const DroneContext* GetContextBySlot(int slot) const;
+    DroneStatus GetStatusInternal(int drone_id) const;
     void HandleTelemetry(DroneContext& ctx, const TelemetryData& data);
 
     HeartbeatManager& hb_manager_;
     int low_battery_threshold_ = 20;
+    mutable std::mutex drones_mutex_;
     std::unordered_map<int, std::unique_ptr<DroneContext>> drones_;
     GpsAnchorManager anchor_manager_;
 

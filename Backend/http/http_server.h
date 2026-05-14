@@ -151,6 +151,8 @@ private:
     std::atomic<bool>     running_{false};
     std::thread           http_thread_;
     std::thread           ws_thread_;
+    mutable std::mutex    conn_threads_mutex_;
+    std::vector<std::thread> conn_threads_;
 
     // 无人机注册表（持久化用）
     struct DroneRecord {

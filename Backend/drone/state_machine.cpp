@@ -1,10 +1,17 @@
 #include "state_machine.h"
 #include <spdlog/spdlog.h>
 
+namespace {
+int64_t now_us() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+} // namespace
+
 StateMachine::StateMachine(OnStateChange on_change)
     : on_state_change_(std::move(on_change))
 {
-    last_telemetry_time_ = std::chrono::steady_clock::now();
+    last_telemetry_us_ = now_us();
 }
 
 DroneConnectionState StateMachine::GetState() const
@@ -14,24 +21,21 @@ DroneConnectionState StateMachine::GetState() const
 
 void StateMachine::OnTelemetryReceived()
 {
-    last_telemetry_time_ = std::chrono::steady_clock::now();
+    last_telemetry_us_ = now_us();
 
     if (state_ == DroneConnectionState::Offline) {
-        // Offline → Online: PowerOn
         state_ = DroneConnectionState::Online;
         spdlog::info("[StateMachine] Offline → Online (PowerOn)");
         if (on_state_change_) {
             on_state_change_(StateEvent::PowerOn);
         }
     } else if (state_ == DroneConnectionState::Lost) {
-        // Lost → Online: Reconnect
         state_ = DroneConnectionState::Online;
         spdlog::info("[StateMachine] Lost → Online (Reconnect)");
         if (on_state_change_) {
             on_state_change_(StateEvent::Reconnect);
         }
     }
-    // Online → Online: 无事件，只更新时间戳
 }
 
 bool StateMachine::CheckTimeout(int timeout_sec)
@@ -40,13 +44,12 @@ bool StateMachine::CheckTimeout(int timeout_sec)
         return false;
     }
 
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-        now - last_telemetry_time_).count();
+    int64_t elapsed_us = now_us() - last_telemetry_us_.load();
+    int64_t elapsed_sec = elapsed_us / 1000000;
 
-    if (elapsed >= timeout_sec) {
+    if (elapsed_sec >= timeout_sec) {
         state_ = DroneConnectionState::Lost;
-        spdlog::warn("[StateMachine] Online → Lost ({}s timeout)", elapsed);
+        spdlog::warn("[StateMachine] Online → Lost ({}s timeout)", elapsed_sec);
         if (on_state_change_) {
             on_state_change_(StateEvent::LostConnection);
         }
@@ -59,6 +62,6 @@ bool StateMachine::CheckTimeout(int timeout_sec)
 void StateMachine::Reset()
 {
     state_ = DroneConnectionState::Offline;
-    last_telemetry_time_ = std::chrono::steady_clock::now();
+    last_telemetry_us_ = now_us();
     spdlog::info("[StateMachine] Reset → Offline");
 }

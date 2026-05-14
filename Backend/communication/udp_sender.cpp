@@ -1,6 +1,7 @@
 #include "udp_sender.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
+#include <mutex>
 
 UdpSender::UdpSender(boost::asio::io_context& io_context)
     : io_context_(io_context)
@@ -27,13 +28,19 @@ void UdpSender::SetTarget(int drone_id, const std::string& host, int port)
         target->initialized = false;
     }
 
+    std::lock_guard<std::mutex> lock(targets_mutex_);
     targets_[drone_id] = std::move(target);
     spdlog::info("[UdpSender] Drone {} target set: {}:{}", drone_id, host, port);
 }
 
 bool UdpSender::Send(int drone_id, const DroneControlPacket& packet)
 {
-    auto target = GetOrCreateTarget(drone_id);
+    Target* target = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(targets_mutex_);
+        auto it = targets_.find(drone_id);
+        if (it != targets_.end()) target = it->second.get();
+    }
     if (!target || !target->initialized) return false;
 
     try {
@@ -70,13 +77,4 @@ void UdpSender::SendHover(int drone_id)
         ).count()) / 1000000.0;
     pkt.mode = 0;
     Send(drone_id, pkt);
-}
-
-UdpSender::Target* UdpSender::GetOrCreateTarget(int drone_id)
-{
-    auto it = targets_.find(drone_id);
-    if (it != targets_.end()) {
-        return it->second.get();
-    }
-    return nullptr;
 }

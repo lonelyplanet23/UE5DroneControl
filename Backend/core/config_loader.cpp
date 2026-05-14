@@ -24,9 +24,10 @@ AppConfig LoadConfig(const std::string& path)
             cfg.lost_timeout_sec        = d["lost_timeout_sec"].as<int>(cfg.lost_timeout_sec);
             cfg.arrival_threshold_m     = d["arrival_threshold_m"].as<double>(cfg.arrival_threshold_m);
             cfg.assembly_timeout_sec    = d["assembly_timeout_sec"].as<int>(cfg.assembly_timeout_sec);
-            cfg.avoidance_radius_m      = d["avoidance_radius_m"].as<double>(cfg.avoidance_radius_m);
-            cfg.avoidance_lookahead_sec = d["avoidance_lookahead_sec"].as<double>(cfg.avoidance_lookahead_sec);
-            cfg.low_battery_threshold   = d["low_battery_threshold"].as<int>(cfg.low_battery_threshold);
+            cfg.avoidance_radius_m           = d["avoidance_radius_m"].as<double>(cfg.avoidance_radius_m);
+            cfg.avoidance_lookahead_sec      = d["avoidance_lookahead_sec"].as<double>(cfg.avoidance_lookahead_sec);
+            cfg.assembly_safety_cylinder_m   = d["assembly_safety_cylinder_m"].as<double>(cfg.assembly_safety_cylinder_m);
+            cfg.low_battery_threshold        = d["low_battery_threshold"].as<int>(cfg.low_battery_threshold);
         }
 
         // --- port_map ---

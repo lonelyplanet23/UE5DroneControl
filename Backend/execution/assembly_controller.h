@@ -1,9 +1,11 @@
 #pragma once
 
 #include "core/types.h"
+#include "assembly_planner.h"
 #include <string>
 #include <vector>
 #include <functional>
+#include <mutex>
 #include <chrono>
 #include <atomic>
 
@@ -15,8 +17,6 @@ enum class AssemblyState : uint8_t {
     Executing,
     Timeout
 };
-
-using MoveCommandCallback = std::function<void(int drone_id, double ned_n, double ned_e, double ned_d)>;
 
 /// 集结任务配置
 struct AssemblyConfig {
@@ -52,13 +52,15 @@ class AssemblyController {
 public:
     using ProgressCallback = std::function<void(const AssemblyProgress&)>;
     using TimeoutCallback = std::function<void(const AssemblyProgress&)>;
+    using MoveCommandCallback = std::function<void(int drone_id, double ned_n, double ned_e, double ned_d)>;
+    using DronePositionGetter = std::function<TelemetryData(int drone_id)>;
 
     explicit AssemblyController(int timeout_sec = 60, double arrival_threshold_m = 1.0);
 
     /// 开始集结
     /// @param config  集结任务配置
     /// @return true 如果成功启动
-    bool Start(const AssemblyConfig& config);
+    bool Start(const AssemblyConfig& config, double safety_cylinder_m = 2.0);
 
     /// 更新无人机位置（由 DroneManager 遥测回调调用）
     /// @param drone_id  无人机 ID
@@ -74,7 +76,7 @@ public:
     /// 获取当前集结状态
     AssemblyState GetState() const { return state_; }
 
-    /// 获取集结任务配置（用于执行引擎）
+    /// 获取集结任务配置（供执行引擎读取）
     const AssemblyConfig& GetConfig() const { return config_; }
 
     /// 获取集结进度
@@ -84,6 +86,7 @@ public:
     void SetProgressCallback(ProgressCallback cb);
     void SetTimeoutCallback(TimeoutCallback cb);
     void SetMoveCommandCallback(MoveCommandCallback cb);
+    void SetPositionGetter(DronePositionGetter cb);
 
 private:
     AssemblyState state_ = AssemblyState::Idle;
@@ -99,8 +102,11 @@ private:
     };
     std::vector<DroneArrival> arrivals_;
 
+    mutable std::mutex state_mutex_;
     std::chrono::steady_clock::time_point start_time_;
+    AssemblyPlanner planner_;
     ProgressCallback progress_cb_;
     TimeoutCallback timeout_cb_;
     MoveCommandCallback move_cmd_cb_;
+    DronePositionGetter position_getter_;
 };

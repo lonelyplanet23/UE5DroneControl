@@ -37,6 +37,6 @@ public:
 
 private:
     std::atomic<DroneConnectionState> state_{DroneConnectionState::Offline};
-    std::chrono::steady_clock::time_point last_telemetry_time_;
+    std::atomic<int64_t> last_telemetry_us_{0};  // 微秒 since steady_clock epoch
     OnStateChange on_state_change_;
 };
