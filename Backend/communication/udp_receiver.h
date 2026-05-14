@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include <boost/asio.hpp>
+#include <atomic>
 #include <functional>
 #include <thread>
 #include <memory>
@@ -52,5 +53,6 @@ private:
     boost::asio::io_context& io_context_;
     std::vector<std::unique_ptr<PortListener>> listeners_;
     ReceiveCallback callback_;
-    bool running_ = false;
+    mutable std::mutex callback_mutex_;
+    std::atomic<bool> running_{false};
 };

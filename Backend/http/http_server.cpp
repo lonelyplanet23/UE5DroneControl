@@ -66,10 +66,12 @@ std::string get_string(const boost::json::object& obj, const char* key,
 HttpServer::HttpServer(const AppConfig& config,
                        DroneManager& drone_mgr,
                        AssemblyController& assembly_ctrl,
+                       ExecutionEngine& exec_engine,
                        WsManager& ws_manager)
     : config_(config)
     , drone_mgr_(drone_mgr)
     , assembly_ctrl_(assembly_ctrl)
+    , exec_engine_(exec_engine)
     , ws_manager_(ws_manager)
 {
     // 注册 DroneManager 回调 → WS 推送
@@ -155,6 +157,8 @@ HttpServer::HttpServer(const AppConfig& config,
                 {"array_id", progress.array_id},
             };
             ws_manager_.broadcast(json_stringify(done_msg));
+            // 集结完成 → 启动执行引擎
+            exec_engine_.StartTasks(assembly_ctrl_.GetConfig());
         }
     });
 
@@ -184,6 +188,15 @@ void HttpServer::Run() {
 
 void HttpServer::Stop() {
     running_ = false;
+    // 等待连接处理线程退出（HTTP 单次请求很快退出，WS 会话在 running_=false 后关闭）
+    std::vector<std::thread> threads;
+    {
+        std::lock_guard<std::mutex> lock(conn_threads_mutex_);
+        threads = std::move(conn_threads_);
+    }
+    for (auto& t : threads) {
+        if (t.joinable()) t.join();
+    }
 }
 
 // ============================================================
@@ -500,13 +513,14 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
         }
     }
 
-    if (!assembly_ctrl_.Start(cfg))
+    if (!assembly_ctrl_.Start(cfg, config_.assembly_safety_cylinder_m))
         throw ApiError(409, "assembly already in progress");
 
     return boost::json::object{{"array_id", cfg.array_id}, {"status", "assembling"}};
 }
 
 boost::json::value HttpServer::ApiStopArray(const std::string& id) {
+    exec_engine_.StopAll();
     assembly_ctrl_.Stop();
     return boost::json::object{{"array_id", id}, {"status", "stopped"}};
 }
@@ -649,7 +663,13 @@ boost::json::value HttpServer::DebugSingleArray(const std::string& id, const boo
 }
 
 boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::json::object& body) {
-    return DebugMove(id, body);
+    int drone_id = drone_id_from_string(id);
+    if (!drone_mgr_.HasDrone(drone_id)) throw ApiError(404, "drone not found: " + id);
+    double x = get_number(body, "x", 0.0);
+    double y = get_number(body, "y", 0.0);
+    double z = get_number(body, "z", 0.0);
+    exec_engine_.InjectTarget(drone_id, x, y, z);
+    return boost::json::object{{"target_injected", id}, {"x", x}, {"y", y}, {"z", z}};
 }
 
 boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
@@ -703,7 +723,7 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
     if (cfg.paths.empty()) {
         throw ApiError(400, "batch array requires at least one path with waypoints");
     }
-    if (!assembly_ctrl_.Start(cfg)) {
+    if (!assembly_ctrl_.Start(cfg, config_.assembly_safety_cylinder_m)) {
         throw ApiError(409, "assembly already in progress");
     }
 
@@ -913,7 +933,10 @@ void HttpServer::RunHttpServer() {
     while (running_) {
         tcp::socket socket(ctx);
         acceptor.accept(socket);
-        std::thread(HandleHttpConnection, std::move(socket), this).detach();
+        {
+            std::lock_guard<std::mutex> lock(conn_threads_mutex_);
+            conn_threads_.emplace_back(HandleHttpConnection, std::move(socket), this);
+        }
     }
 }
 
@@ -927,7 +950,10 @@ void HttpServer::RunWsServer() {
     while (running_) {
         tcp::socket socket(ctx);
         acceptor.accept(socket);
-        std::thread(HandleWsConnection, std::move(socket), this).detach();
+        {
+            std::lock_guard<std::mutex> lock(conn_threads_mutex_);
+            conn_threads_.emplace_back(HandleWsConnection, std::move(socket), this);
+        }
     }
 }
 
@@ -952,10 +978,16 @@ void HttpServer::SaveDrones() {
                 {"video_url", rec.video_url},
             });
         }
-        std::ofstream f(config_.storage_path);
-        f << arr.dump(2);
+        std::string data = arr.dump(2);
+        std::ofstream f(config_.storage_path, std::ios::trunc);
+        f.exceptions(std::ios::failbit | std::ios::badbit);
+        f << data;
+        f.close();
+        if (!f) {
+            throw std::runtime_error("write verification failed");
+        }
     } catch (const std::exception& e) {
-        spdlog::warn("[Storage] save failed: {}", e.what());
+        spdlog::error("[Storage] save failed: {}", e.what());
     }
 }
 

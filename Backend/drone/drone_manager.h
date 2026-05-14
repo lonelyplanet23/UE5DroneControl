@@ -7,13 +7,14 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 class DroneManager {
 public:
-    explicit DroneManager(HeartbeatManager& hb_manager);
+    explicit DroneManager(HeartbeatManager& hb_manager, int low_battery_threshold = 20);
     ~DroneManager();
 
     void SetTelemetryCallback(TelemetryCallback cb);
@@ -39,6 +40,7 @@ public:
     int ResolveDroneIdBySlot(int slot) const;
 
     bool ProcessMoveCommand(int drone_id, double ue_x, double ue_y, double ue_z);
+    bool ProcessMoveCommandNed(int drone_id, double ned_n, double ned_e, double ned_d);
     bool ProcessPauseCommand(int drone_id);
     bool ProcessResumeCommand(int drone_id);
 
@@ -53,11 +55,15 @@ public:
 private:
     DroneContext* GetContext(int drone_id);
     const DroneContext* GetContext(int drone_id) const;
+    DroneContext* GetContextUnsafe(int drone_id) const;
     DroneContext* GetContextBySlot(int slot);
     const DroneContext* GetContextBySlot(int slot) const;
+    DroneStatus GetStatusInternal(int drone_id) const;
     void HandleTelemetry(DroneContext& ctx, const TelemetryData& data);
 
     HeartbeatManager& hb_manager_;
+    int low_battery_threshold_ = 20;
+    mutable std::mutex drones_mutex_;
     std::unordered_map<int, std::unique_ptr<DroneContext>> drones_;
     GpsAnchorManager anchor_manager_;
 

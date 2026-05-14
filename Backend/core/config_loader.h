@@ -20,6 +20,7 @@ struct AppConfig {
     int assembly_timeout_sec = 60;
     double avoidance_radius_m = 3.0;
     double avoidance_lookahead_sec = 2.0;
+    double assembly_safety_cylinder_m = 2.0;  // 集结安全圆柱半径（米）
     int low_battery_threshold = 20;
 
     // Port mapping

@@ -1,10 +1,12 @@
 #include "heartbeat_manager.h"
 #include <spdlog/spdlog.h>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
-HeartbeatManager::HeartbeatManager(UdpSender& sender)
+HeartbeatManager::HeartbeatManager(UdpSender& sender, int heartbeat_hz)
     : sender_(sender)
+    , heartbeat_interval_ms_(std::max(1, 1000 / std::max(heartbeat_hz, 1)))
 {
 }
 
@@ -82,21 +84,27 @@ void HeartbeatManager::Stop(int drone_id)
 
 void HeartbeatManager::StopInternal(int drone_id)
 {
-    // 仅在内部使用：不锁定 mutex，调用前必须已持有锁或确保单线程
-    auto state_it = states_.find(drone_id);
-    if (state_it != states_.end()) {
-        state_it->second->running = false;
-    }
+    std::shared_ptr<HeartbeatState> state;
+    std::unique_ptr<std::thread> thread;
 
-    auto thread_it = threads_.find(drone_id);
-    if (thread_it != threads_.end()) {
-        if (thread_it->second->joinable()) {
-            thread_it->second->join();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto state_it = states_.find(drone_id);
+        if (state_it != states_.end()) {
+            state_it->second->running = false;
+            state = state_it->second;
+            states_.erase(state_it);
         }
-        threads_.erase(thread_it);
+        auto thread_it = threads_.find(drone_id);
+        if (thread_it != threads_.end()) {
+            thread = std::move(thread_it->second);
+            threads_.erase(thread_it);
+        }
     }
 
-    states_.erase(drone_id);
+    if (thread && thread->joinable()) {
+        thread->join();
+    }
 }
 
 void HeartbeatManager::StopAll()
@@ -186,7 +194,6 @@ void HeartbeatManager::HeartbeatLoop(int drone_id)
         state->last_sent_time.store(ts);
         state->sent_count.fetch_add(1);
 
-        // 2Hz 心跳
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(heartbeat_interval_ms_));
     }
 }

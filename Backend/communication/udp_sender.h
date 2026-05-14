@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include <boost/asio.hpp>
+#include <mutex>
 #include <string>
 #include <memory>
 
@@ -47,5 +48,6 @@ private:
     Target* GetOrCreateTarget(int drone_id);
 
     boost::asio::io_context& io_context_;
+    mutable std::mutex targets_mutex_;
     std::unordered_map<int, std::unique_ptr<Target>> targets_;
 };

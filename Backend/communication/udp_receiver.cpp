@@ -28,6 +28,7 @@ void UdpReceiver::AddPort(int slot, int port, int drone_id)
 
 void UdpReceiver::SetCallback(ReceiveCallback cb)
 {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
     callback_ = std::move(cb);
 }
 
@@ -154,9 +155,12 @@ void UdpReceiver::HandleReceive(PortListener& listener,
             if (auto arm = root["arming_state"]) tel.arming_state = arm.as<uint8_t>(0);
             if (auto nav = root["nav_state"])    tel.nav_state    = nav.as<uint8_t>(0);
 
-            // 回调通知
-            if (callback_) {
-                callback_(listener.slot, tel);
+            // 回调通知（线程安全）
+            {
+                std::lock_guard<std::mutex> lock(callback_mutex_);
+                if (callback_) {
+                    callback_(listener.slot, tel);
+                }
             }
 
         } catch (const YAML::Exception& e) {

@@ -62,6 +62,7 @@ def parse_control_packet(data: bytes):
 # ============================================================
 class JetsonBridge(Node):
     def __init__(self, slot: int = 1):
+        self.slot = slot
         topic_prefix = f"/px4_{slot}"
         super().__init__(f"jetson_bridge_{slot}")
 
@@ -157,10 +158,7 @@ class JetsonBridge(Node):
             data["gps_lat"] = self.global_pos.latitude_deg
             data["gps_lon"] = self.global_pos.longitude_deg
             data["gps_alt"] = self.global_pos.altitude_amsl
-            data["gps_fix"] = (
-                self.global_pos.valid and
-                abs(self.global_pos.latitude_deg) > 1.0
-            )
+            data["gps_fix"] = bool(self.global_pos.valid)
 
         if self.battery:
             data["battery"] = int(
@@ -228,7 +226,7 @@ class JetsonBridge(Node):
 
     def _get_system_id(self) -> int:
         """从话题前缀推导 MAVLink system ID（px4_1→2, px4_2→3, ...）"""
-        return 2  # 默认 px4_1
+        return self.slot + 1  # slot 1 → system_id 2, slot 2 → 3, ...
 
     def cleanup(self):
         self.ctrl_sock.close()
