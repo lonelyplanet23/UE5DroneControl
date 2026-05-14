@@ -34,6 +34,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Waypoint Editing")
 	void SetSelectedWaypoint(ADroneWaypointActor* NewWaypoint);
 
+	/** B 键：返回主菜单关卡 */
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	void ReturnToMainMenu();
+
+	/** 主菜单关卡名称，B 键跳转目标 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Navigation")
+	FName MainMenuLevelName = FName("MainMenu");
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -44,6 +52,7 @@ private:
 	void HandleToggleEditMode();
 	void HandleLeftMousePressed();
 	void HandleLeftMouseReleased();
+	void HandleReturnToMainMenu();
 	void SetWaypointDragging(bool bEnableDragging);
 	void UpdateDraggedWaypointLocation();
 	float ResolveAxisDragDelta();

@@ -13,6 +13,7 @@
 #include "RealTimeDroneReceiver.h"
 #include "MultiDroneManager.h"
 #include "UE5DroneControlCharacter.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/OverlapResult.h"
@@ -232,6 +233,7 @@ void ADroneOpsPlayerController::SetupInputComponent()
 		InputComponent->BindKey(EKeys::LeftShift, IE_Released, this, &ADroneOpsPlayerController::OnShiftReleased);
 		InputComponent->BindKey(EKeys::RightShift, IE_Pressed, this, &ADroneOpsPlayerController::OnShiftPressed);
 		InputComponent->BindKey(EKeys::RightShift, IE_Released, this, &ADroneOpsPlayerController::OnShiftReleased);
+		InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ADroneOpsPlayerController::OnReturnToMainMenu);
 		UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: Input bindings installed"));
 	}
 	else
@@ -245,14 +247,40 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// SpaceBar: Follow <-> TopDown only. Free mode is intentionally ignored.
+	// SpaceBar: 单选时在Follow模式下切换SpringArm俯仰角(-60° <-> -90°)；多选时忽略。
 	// Polled here (not BindKey) because BindKey misses some edges depending on InputMode.
 	if (WasInputKeyJustPressed(EKeys::SpaceBar))
 	{
-		if (CameraModeState.CameraMode == EDroneCameraMode::Follow ||
-			CameraModeState.CameraMode == EDroneCameraMode::TopDown)
+		if (CameraModeState.CameraMode == EDroneCameraMode::Follow)
 		{
-			OnTopDownToggle();
+			const TArray<int32> MultiSelected = DroneRegistry ? DroneRegistry->GetMultiSelectedDrones() : TArray<int32>();
+			const bool bSingleSelect = MultiSelected.Num() <= 1;
+
+			if (bSingleSelect)
+			{
+				bFollowTopDownPitch = !bFollowTopDownPitch;
+				FollowTargetPitch = bFollowTopDownPitch ? -90.f : -60.f;
+				UE_LOG(LogTemp, Log, TEXT("SpaceBar: Follow pitch target -> %.0f"), FollowTargetPitch);
+			}
+			// 多选时不做任何操作，视角继续跟随当前无人机
+		}
+	}
+
+	// Follow模式下平滑插值SpringArm俯仰角
+	if (CameraModeState.CameraMode == EDroneCameraMode::Follow)
+	{
+		AActor* ViewTarget = GetViewTarget();
+		if (AUE5DroneControlCharacter* DroneChar = Cast<AUE5DroneControlCharacter>(ViewTarget))
+		{
+			if (USpringArmComponent* Boom = DroneChar->GetCameraBoom())
+			{
+				const float CurrentPitch = Boom->GetRelativeRotation().Pitch;
+				const float NewPitch = FMath::FInterpTo(CurrentPitch, FollowTargetPitch, DeltaTime, CameraPitchInterpSpeed);
+				if (!FMath::IsNearlyEqual(CurrentPitch, NewPitch, 0.01f))
+				{
+					Boom->SetRelativeRotation(FRotator(NewPitch, 0.f, 0.f));
+				}
+			}
 		}
 	}
 
@@ -907,6 +935,17 @@ void ADroneOpsPlayerController::ApplyFollowViewTarget(int32 DroneId)
 	CameraModeState.LastFollowLocation = FollowTarget->GetActorLocation();
 	CameraModeState.LastFollowRotation = FollowTarget->GetActorRotation();
 
+	// 切换跟随目标时重置俯仰角到斜视(-60°)
+	bFollowTopDownPitch = false;
+	FollowTargetPitch = -60.f;
+	if (AUE5DroneControlCharacter* DroneChar = Cast<AUE5DroneControlCharacter>(FollowTarget))
+	{
+		if (DroneChar->GetCameraBoom())
+		{
+			DroneChar->GetCameraBoom()->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
+		}
+	}
+
 	SetViewTargetWithBlend(FollowTarget, 0.35f);
 
 	UE_LOG(LogTemp, Log, TEXT("Switched to Follow Camera (FollowDroneId=%d, Target=%s)"),
@@ -1133,4 +1172,10 @@ void ADroneOpsPlayerController::OnTestArrayTaskComplete(bool bSuccess, const FSt
 void ADroneOpsPlayerController::OnTestToast()
 {
 	UUIManagerBlueprintLibrary::ShowToast(this, TEXT("测试：无人机注册成功"), 2.0f);
+}
+
+void ADroneOpsPlayerController::OnReturnToMainMenu()
+{
+	UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: B key pressed, returning to MainMenu"));
+	UGameplayStatics::OpenLevel(this, MainMenuLevelName);
 }

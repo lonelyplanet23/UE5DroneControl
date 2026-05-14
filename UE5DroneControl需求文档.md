@@ -248,6 +248,239 @@ UE端
 5. 里程碑验证： 每周末进行周会，验证本周目标完成度，及时调整下周计划
 
 ---
+---
+第一次整合新增待实现需求
+
+以下需求来自三个关卡整合阶段（主菜单 + 队列编辑 + 预演），包含 UI 与非 UI 部分。
+
+**分工总览**
+
+| 负责人 | 负责模块 | 工作量 |
+|--------|----------|--------|
+| 柯垣丞 | 主菜单关卡（WBP_MainMenu 全部区域）、队列编辑保存命名弹窗（WBP_SaveNameDialog）、队列编辑返回按钮 | 主力 |
+| 杨璞 | 预演关卡：Shift 鼠标交互（C++）、常驻无人机状态面板（WBP_DroneStatusPanel）、返回主菜单按钮 | 中等 |
+| 李昊泽 | 预演关卡：阵列播放模块（WBP_ArrayPlayback，仅 UI 布局和槽位映射逻辑）、通信协议 `type→mode` 字段变更（前端侧） | 轻量 |
+
+> 集结弹窗（WBP_AssemblyProgress）和告警弹窗已有现成基类（`UAssemblyPopupWidget` / `UToastWidget`），建议柯垣丞在主菜单完成后接手，或由杨璞在状态面板完成后接手，视进度决定。
+
+---
+
+### 一、通信协议变更（前后端均需修改）【前端：李昊泽 / 后端：各自负责】
+
+**背景**：当前 UE5→后端控制指令中 `type` 字段语义不清，无法区分移动指令与任务模式。
+
+**变更内容**：
+- 将控制指令中的 `type` 字段重命名为 `mode`
+- `mode` 枚举值扩展为以下四种：
+  - `move`：普通移动指令（原有行为不变）
+  - `scout`：侦察模式
+  - `patrol`：巡逻模式
+  - `attack`：攻击模式
+
+**影响范围**：
+- 后端：解析控制指令时将 `type` 改为 `mode`，字段含义不变，仍需接收目标坐标 `x/y/z`
+- 前端（UE5）：`DroneCommandSenderComponent` 发送指令时将字段名改为 `mode`，并在 UI 中提供模式切换入口
+
+**当前阶段实现约定**：
+- 四种模式（`move` / `scout` / `patrol` / `attack`）的后端执行逻辑暂时相同，均按 move 处理（移动到目标坐标）
+- 模式字段仅作为标记保留，供后续扩展差异化行为
+- 单点指令（点选无人机派发指令）和阵列播放派发指令均使用此格式
+
+**指令格式**（更新后）：
+```json
+{
+  "mode": "move",
+  "drone_id": "d1",
+  "x": 1000.0,
+  "y": 2000.0,
+  "z": 500.0
+}
+```
+
+**负责人**：前后端各自负责自己侧的修改，需联调确认字段对齐
+
+---
+
+### 二、主菜单关卡（新关卡：MainMenu）【负责人：柯垣丞】
+
+**关卡类型**：纯 2D UI，无 3D 场景，无 Pawn
+
+**C++ 框架已完成**：`AMainMenuGameMode`、`AMainMenuPlayerController`、`UMainMenuWidget`（位于 `Source/UE5DroneControl/MainMenu/`）
+
+#### 2.1 Widget：WBP_MainMenu
+
+**父类**：`UMainMenuWidget`
+
+**布局区域**：
+
+**区域 0：项目标题**
+- 一个 Text 控件，显示项目名称（如"无人机数字孪生平台"），居中置顶
+
+**区域 A：无人机注册模块**
+
+| 控件 | 类型 | 说明 |
+|------|------|------|
+| DroneId 输入框 | UEditableTextBox | 输入整数，如 1、2 |
+| IP 地址输入框 | UEditableTextBox | 输入字符串，如 192.168.30.104 |
+| 注册按钮 | UButton | OnClicked → 调用 `RegisterDrone(DroneId, IpAddress)` |
+| 已注册列表 | UScrollBox | 每行显示 `ID:X  Name:UAV-X`，行末有删除按钮 |
+| 删除按钮（每行） | UButton | OnClicked → 调用 `UnregisterDrone(DroneId)` |
+
+事件响应：
+- 重写 `OnDroneRegistered(DroneId)` → 调用 `GetRegisteredDronesSummary()` 刷新列表
+- 重写 `OnDroneUnregistered(DroneId)` → 同上
+
+**区域 B：基础设置模块**
+
+| 控件 | 类型 | 说明 |
+|------|------|------|
+| 后端 WebSocket 地址 | UEditableTextBox | 默认 `ws://192.168.30.104:8080` |
+| UE 端接收端口 | UEditableTextBox | 默认 `8888`，整数 |
+| 预演模块中心纬度 | UEditableTextBox | 浮点数 |
+| 预演模块中心经度 | UEditableTextBox | 浮点数 |
+| 预演模块中心海拔 | UEditableTextBox | 单位：米，WGS84 椭球高，默认 43 |
+| 保存按钮 | UButton | OnClicked → 调用 `SaveSettings(...)`，设置立即对预演关卡生效 |
+
+初始化：Widget Construct 事件中调用 `LoadSettings(...)` 填充各输入框（不保存则使用当前默认值）。
+
+事件响应：重写 `OnSettingsSaved()` → 显示 Toast 提示"设置已保存"。
+
+**区域 C：导航按钮**
+
+| 控件 | 类型 | 说明 |
+|------|------|------|
+| 队列编辑按钮 | UButton | OnClicked → 调用 `OnGoToQueueEditorClicked()` |
+| 预演按钮 | UButton | OnClicked → 调用 `OnGoToPreviewClicked()` |
+
+---
+
+### 三、队列编辑关卡（RuntimeInteraction）新增需求【负责人：柯垣丞】
+
+#### 3.1 保存时命名弹窗
+
+- 用户点击"保存"按钮后，弹出命名弹窗（`WBP_SaveNameDialog`）
+- 弹窗包含：文本输入框（支持键盘输入）、确认按钮、取消按钮
+- 确认后以输入的名称作为文件名保存 JSON 到 `Saved/DronePaths/` 目录
+- 取消则关闭弹窗，不保存
+- 文件名不允许为空，为空时确认按钮置灰或显示提示文字
+- 文件名需校验非法字符，Windows 路径不允许 `\ / : * ? " < > |`，检测到非法字符时提示用户并阻止保存
+
+#### 3.2 返回主菜单按钮
+
+- 常驻悬浮按钮，固定在屏幕角落（建议左上角）
+- 显示文字"返回主菜单 [B]"
+- OnClicked → 调用 `ADroneRuntimeInteractionPlayerController::ReturnToMainMenu()`
+- B 键的 C++ 绑定已完成，按钮为视觉辅助
+
+---
+
+### 四、预演关卡（CesiumWorld / DroneOps）新增需求
+
+#### 4.1 鼠标交互规则【负责人：杨璞（C++ 实现）】
+
+- 默认状态：隐藏鼠标光标，游戏输入模式（Game Only）
+- 长按 Shift 键：显示鼠标光标，切换为 Game And UI 输入模式
+  - 此时鼠标悬停在 UI 上：点击操作 UI 控件（UI 层遮挡无人机，不会误触无人机）
+  - 此时鼠标悬停在场景中（无 UI 遮挡）：点击无人机执行多选逻辑（与原有 Shift+点击多选行为一致）
+- 松开 Shift 键：恢复隐藏光标，切换回 Game Only 输入模式
+
+**C++ 实现位置**：`ADroneOpsPlayerController::Tick` 中检测 `bShiftHeld` 状态变化，调用 `SetInputMode(FInputModeGameAndUI)` / `SetInputMode(FInputModeGameOnly)` 切换，同时控制 `bShowMouseCursor`。
+
+#### 4.2 常驻无人机状态面板（WBP_DroneStatusPanel）【负责人：杨璞】
+
+显示当前所有已注册无人机的状态，常驻屏幕（建议右侧竖排列表）。
+
+每行显示一架无人机，包含：
+
+| 字段 | 说明 |
+|------|------|
+| ID | 无人机编号 |
+| 名称 | 如 UAV-1 |
+| 连接状态 | 在线 / 失联 / 断联（对应 EDroneAvailability） |
+| 当前移动模式 | 侦察 / 巡逻 / 攻击，可点击切换 |
+
+模式切换逻辑：
+- 点击模式标签后循环切换三种模式（或弹出下拉选择）
+- 切换后记录该无人机的当前模式，后续通过 UE 点选派发单点指令时，`mode` 字段使用该模式值
+- 当前阶段四种模式执行逻辑相同（均执行 move），模式字段仅作标记
+- 依赖通信协议变更（见第一节）
+
+**注意**：模式切换本身不立即向后端发送指令，仅更新本地状态；下次点选无人机派发移动指令时才携带该模式值。
+
+数据来源：订阅 `UDroneRegistrySubsystem::OnTelemetryUpdated` 事件刷新显示，与 `WBP_DroneInfoPanel` 显示字段保持一致。
+
+#### 4.3 阵列播放模块（WBP_ArrayPlayback）【负责人：李昊泽】
+
+入口：预演关卡内的一个按钮或常驻面板区域。
+
+**步骤 1：选择阵列文件**
+- 列出 `Saved/DronePaths/` 目录下所有 JSON 文件
+- 用户点击选中某个文件
+
+**步骤 2：无人机槽位映射**
+- 读取 JSON 中需要的无人机数量和编号
+- 为每个"阵列无人机槽位"提供一个下拉菜单，选项为当前场景中已注册的真实无人机
+- 约束：每架真实无人机只能被映射到一个槽位（已选的从其他下拉菜单中移除）
+- 提供"一键自动对应"按钮：系统随机将已注册无人机与槽位一一对应
+
+**步骤 3：移动模式设置**
+- 提供模式选择控件（下拉或三选一按钮组）：侦察 / 巡逻 / 攻击
+- 此模式将作为 `mode` 字段随阵列指令一起下发
+- 当前阶段三种模式执行逻辑与 move 相同，字段仅作标记
+
+**步骤 4：执行方式选择**
+
+| 按钮 | 行为 |
+|------|------|
+| 本地预演 | 仅在 UE 端渲染动画：影子机按 JSON 中设定的速度和点位信息在本地执行飞行动画，不向后端发送任何指令，镜像机保持当前位置不动 |
+| 派发指令 | 向后端发送阵列任务并触发集结流程（见 4.5）；集结完成后，影子机按 JSON 点位和速度在本地执行预演动画，镜像机同时根据后端 WebSocket 推送的遥测数据实时更新位置；两者独立运动，不强制位置重合 |
+
+#### 4.4 返回主菜单按钮【负责人：杨璞】
+
+- 长按 Shift 显示鼠标后可见此按钮（或始终显示，不受 Shift 影响，由 UI 程序员决定）
+- 显示文字"返回主菜单 [B]"
+- OnClicked → 调用 `ADroneOpsPlayerController::OnReturnToMainMenu()`
+- B 键的 C++ 绑定已完成
+
+#### 4.5 集结流程弹窗（WBP_AssemblyProgress）【负责人：视进度由柯垣丞或杨璞接手】
+
+触发条件：用户在阵列播放模块选择"派发指令"后触发。
+
+弹窗内容：
+- 标题："集结中..."
+- 每架无人机的集结状态列表（已到位 / 集结中 / 超时）
+- 整体进度条（已到位数 / 总数）
+- 集结完成后自动关闭或显示"开始执行"按钮
+- 集结超时时显示警告并提供"强制开始"或"取消"选项
+
+数据来源：订阅后端通过 WebSocket 推送的集结进度事件。
+
+现有 `UAssemblyPopupWidget` 可作为基础扩展。
+
+#### 4.6 告警弹窗【负责人：视进度由柯垣丞或杨璞接手】
+
+触发条件：后端通过 WebSocket 推送告警信息（低电量、断联、碰撞预警等）。
+
+弹窗要求：
+- 非阻塞式，不打断操作
+- 显示告警类型、涉及无人机 ID、时间戳
+- 同类告警合并显示（不重复堆叠）
+- 可手动关闭
+
+现有 `UToastWidget` 可用于轻量提示，严重告警需独立弹窗。
+
+---
+
+### 五、待办事项（非 UI，需后续跟进）
+
+1. `FDroneDescriptor` 目前无 IP 地址字段，如需持久化注册信息中的 IP，需在 `DroneOpsTypes.h` 中扩展该结构体
+2. `SaveSettings` / `LoadSettings` 目前为占位实现，需在 GameInstance 或 `USaveGame` 中实现真正的跨关卡持久化
+3. 关卡名称（`MainMenuLevelName`、`QueueEditorLevelName`、`PreviewLevelName`）需在蓝图子类中与实际 `.umap` 文件名对齐
+4. Shift 键显示/隐藏鼠标的输入模式切换逻辑需在 `ADroneOpsPlayerController` 中实现：`bShiftHeld` 状态已有，需在 Tick 中检测状态变化并调用 `SetInputMode` + `bShowMouseCursor` 切换
+5. 通信协议 `type` → `mode` 字段变更需前后端同步修改并联调验证
+
+---
+
 附加需求：Cesium 场景地面海拔配置
 
 背景：
