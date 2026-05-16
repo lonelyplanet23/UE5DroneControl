@@ -215,6 +215,9 @@ void ADroneOpsPlayerController::BeginPlay()
 			UE_LOG(LogTemp, Error, TEXT("DroneOpsPlayerController: Failed to create HUD widget"));
 		}
 	}
+
+	// Create Sequence Dispatch Panel (persistent, bottom-right)
+	UUIManagerBlueprintLibrary::ShowSequenceDispatchPanel(this);
 }
 
 void ADroneOpsPlayerController::SetupInputComponent()

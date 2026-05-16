@@ -447,3 +447,52 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTask: POST /api/arrays, %d paths"), PathMap.Num());
 	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
 }
+
+void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, FOnHttpResponse OnComplete)
+{
+	if (!HttpClient)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] SendArrayTaskFromData: HttpClient not ready"));
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> PathsArray;
+
+	for (const TPair<int32, FDronePathSaveData>& Pair : PathDataMap)
+	{
+		const int32 DroneId = Pair.Key;
+		const FDronePathSaveData& PathData = Pair.Value;
+
+		TSharedPtr<FJsonObject> PathObj = MakeShared<FJsonObject>();
+		PathObj->SetNumberField(TEXT("pathId"), PathData.PathId);
+		PathObj->SetStringField(TEXT("drone_id"), FString::FromInt(DroneId));
+		PathObj->SetBoolField(TEXT("bClosedLoop"), PathData.bClosedLoop);
+
+		TArray<TSharedPtr<FJsonValue>> WaypointsArray;
+		for (const FDroneWaypointSaveData& Wp : PathData.Waypoints)
+		{
+			TSharedPtr<FJsonObject> WpObj = MakeShared<FJsonObject>();
+			TSharedPtr<FJsonObject> LocObj = MakeShared<FJsonObject>();
+			LocObj->SetNumberField(TEXT("x"), Wp.Location.X);
+			LocObj->SetNumberField(TEXT("y"), Wp.Location.Y);
+			LocObj->SetNumberField(TEXT("z"), Wp.Location.Z);
+			WpObj->SetObjectField(TEXT("location"), LocObj);
+			WpObj->SetNumberField(TEXT("segmentSpeed"), Wp.SegmentSpeed);
+			WpObj->SetNumberField(TEXT("waitTime"), Wp.WaitTime);
+			WaypointsArray.Add(MakeShared<FJsonValueObject>(WpObj));
+		}
+
+		PathObj->SetArrayField(TEXT("waypoints"), WaypointsArray);
+		PathsArray.Add(MakeShared<FJsonValueObject>(PathObj));
+	}
+
+	Root->SetArrayField(TEXT("paths"), PathsArray);
+
+	FString Body;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTaskFromData: POST /api/arrays, %d paths"), PathDataMap.Num());
+	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
+}

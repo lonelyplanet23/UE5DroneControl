@@ -31,14 +31,24 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UI Manager", meta = (WorldContext = "WorldContextObject"))
     static void ShowAssemblyDemo(UObject* WorldContextObject, int32 TotalCount = 3, float StepInterval = 1.0f);
 
+    /** 显示序列派发面板 */
+    UFUNCTION(BlueprintCallable, Category = "UI Manager", meta = (WorldContext = "WorldContextObject"))
+    static void ShowSequenceDispatchPanel(UObject* WorldContextObject);
+
+    /** 隐藏序列派发面板 */
+    UFUNCTION(BlueprintCallable, Category = "UI Manager", meta = (WorldContext = "WorldContextObject"))
+    static void HideSequenceDispatchPanel(UObject* WorldContextObject);
+
 private:
     // 缓存当前显示的Widget引用
     static TWeakObjectPtr<class UDroneListWidget> CurrentDroneList;
     static TWeakObjectPtr<class UToastWidget> CurrentToast;
     static TWeakObjectPtr<class UAssemblyPopupWidget> CurrentAssemblyPopup;
+    static TWeakObjectPtr<class USequenceDispatchPanelWidget> CurrentSequenceDispatchPanel;
 
     // Widget 类引用（自动加载）
     static TSubclassOf<class UDroneListWidget> GetDroneListClass();
     static TSubclassOf<class UToastWidget> GetToastClass();
     static TSubclassOf<class UAssemblyPopupWidget> GetAssemblyPopupClass();
+    static TSubclassOf<class USequenceDispatchPanelWidget> GetSequenceDispatchPanelClass();
 };
