@@ -18,6 +18,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/OverlapResult.h"
 #include "UI/UIManagerBlueprintLibrary.h"
+#include "UI/SequenceDispatchPanelWidget.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Blueprint/UserWidget.h"
@@ -215,6 +216,19 @@ void ADroneOpsPlayerController::BeginPlay()
 			UE_LOG(LogTemp, Error, TEXT("DroneOpsPlayerController: Failed to create HUD widget"));
 		}
 	}
+
+	// Create Sequence Dispatch Panel (persistent, bottom-right)
+	UUIManagerBlueprintLibrary::ShowSequenceDispatchPanel(this);
+
+	FTimerHandle InitialFollowViewTimer;
+	GetWorldTimerManager().SetTimer(
+		InitialFollowViewTimer,
+		[this]()
+		{
+			SwitchToNextMultiDroneFollowView(0.0f);
+		},
+		0.2f,
+		false);
 }
 
 void ADroneOpsPlayerController::SetupInputComponent()
@@ -364,6 +378,12 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 
 void ADroneOpsPlayerController::OnPrimaryClick()
 {
+	// 面板处于交互状态时不处理游戏点击
+	if (USequenceDispatchPanelWidget::IsPanelInteractive())
+	{
+		return;
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: OnPrimaryClick"));
 	FVector WorldLocation = FVector::ZeroVector;
 
@@ -1135,6 +1155,11 @@ void ADroneOpsPlayerController::OnPauseToggle()
 
 void ADroneOpsPlayerController::OnSwitchToTopDown()
 {
+	SwitchToNextMultiDroneFollowView(0.35f);
+}
+
+void ADroneOpsPlayerController::SwitchToNextMultiDroneFollowView(float BlendTime)
+{
 	TArray<AMultiDroneCharacter*> Actors;
 	for (TActorIterator<AMultiDroneCharacter> It(GetWorld()); It; ++It)
 	{
@@ -1154,7 +1179,7 @@ void ADroneOpsPlayerController::OnSwitchToTopDown()
 	CameraModeState.CameraMode = EDroneCameraMode::Follow;
 	bShowMouseCursor = true;
 	SetInputMode(FInputModeGameAndUI());
-	SetViewTargetWithBlend(Target, 0.35f);
+	SetViewTargetWithBlend(Target, BlendTime);
 	UE_LOG(LogTemp, Log, TEXT("Camera switched to MultiDroneCharacter[%d]: %s (key 0)"),
 		MultiDroneCharacterIndex - 1, *Target->GetName());
 }

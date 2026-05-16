@@ -4,6 +4,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "DroneOps/Network/DroneHttpClient.h"
 #include "DroneOps/Network/DroneWebSocketClient.h"
+#include "PathEditor/DronePathSaveLibrary.h"
 #include "DroneNetworkManager.generated.h"
 
 class ADronePathActor;
@@ -65,6 +66,13 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, FOnHttpResponse OnComplete);
+
+	/**
+	 * Submit an array task from pre-loaded path save data (no actors needed).
+	 * PathDataMap maps drone id -> FDronePathSaveData (waypoints already in world space).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Network")
+	void SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, FOnHttpResponse OnComplete);
 
 	// ---- Events ----
 

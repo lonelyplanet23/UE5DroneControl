@@ -41,6 +41,7 @@ protected:
 	void OnPauseToggle();
 	void OnTopDownToggle();
 	void OnSwitchToTopDown();
+	void SwitchToNextMultiDroneFollowView(float BlendTime);
 	void OnSwitchToRealTimeDrone();
 	void OnShiftPressed();
 	void OnShiftReleased();

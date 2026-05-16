@@ -4,6 +4,7 @@
 #include "DroneListWidget.h"
 #include "ToastWidget.h"
 #include "AssemblyPopupWidget.h"
+#include "SequenceDispatchPanelWidget.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 
@@ -11,6 +12,7 @@
 TWeakObjectPtr<UDroneListWidget> UUIManagerBlueprintLibrary::CurrentDroneList;
 TWeakObjectPtr<UToastWidget> UUIManagerBlueprintLibrary::CurrentToast;
 TWeakObjectPtr<UAssemblyPopupWidget> UUIManagerBlueprintLibrary::CurrentAssemblyPopup;
+TWeakObjectPtr<USequenceDispatchPanelWidget> UUIManagerBlueprintLibrary::CurrentSequenceDispatchPanel;
 
 TSubclassOf<UDroneListWidget> UUIManagerBlueprintLibrary::GetDroneListClass()
 {
@@ -105,5 +107,40 @@ void UUIManagerBlueprintLibrary::ShowAssemblyDemo(UObject* WorldContextObject, i
         Popup->StartAutoDemo(StepInterval);
         CurrentAssemblyPopup = Popup;
         UE_LOG(LogTemp, Log, TEXT("UIManager: Assembly demo started, TotalCount=%d"), TotalCount);
+    }
+}
+
+TSubclassOf<USequenceDispatchPanelWidget> UUIManagerBlueprintLibrary::GetSequenceDispatchPanelClass()
+{
+    UClass* Class = LoadClass<USequenceDispatchPanelWidget>(nullptr, TEXT("/Game/DroneOps/UI/WBP_SequenceDispatchPanel.WBP_SequenceDispatchPanel_C"));
+    return Class ? Class : USequenceDispatchPanelWidget::StaticClass();
+}
+
+void UUIManagerBlueprintLibrary::ShowSequenceDispatchPanel(UObject* WorldContextObject)
+{
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World) return;
+
+    if (CurrentSequenceDispatchPanel.IsValid())
+    {
+        CurrentSequenceDispatchPanel->SetVisibility(ESlateVisibility::Visible);
+        return;
+    }
+
+    USequenceDispatchPanelWidget* Panel = CreateWidget<USequenceDispatchPanelWidget>(World, GetSequenceDispatchPanelClass());
+    if (Panel)
+    {
+        Panel->AddToViewport();
+        CurrentSequenceDispatchPanel = Panel;
+        UE_LOG(LogTemp, Log, TEXT("UIManager: SequenceDispatchPanel created"));
+    }
+}
+
+void UUIManagerBlueprintLibrary::HideSequenceDispatchPanel(UObject* WorldContextObject)
+{
+    if (CurrentSequenceDispatchPanel.IsValid())
+    {
+        CurrentSequenceDispatchPanel->RemoveFromParent();
+        CurrentSequenceDispatchPanel = nullptr;
     }
 }
