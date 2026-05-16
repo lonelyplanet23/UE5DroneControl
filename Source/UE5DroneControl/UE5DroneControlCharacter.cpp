@@ -46,7 +46,7 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->SetUsingAbsoluteRotation(true);
-    CameraBoom->TargetArmLength = 1200.f; // 稍微拉远一点视角
+    CameraBoom->TargetArmLength = 3500.f; // CesiumWorld 初始视角拉高，避免贴地/地下
     CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
     CameraBoom->bDoCollisionTest = false;
 
@@ -61,7 +61,7 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     PrimaryActorTick.bStartWithTickEnabled = true;
 
     // --- 初始化我们的变量 ---
-    TargetHeight = 1000.0f;
+    TargetHeight = 3000.0f;
     LiftSpeed = 300.0f;
     InterpSpeed = 4.0f;
     MinHeight = 50.0f;
@@ -78,11 +78,21 @@ void AUE5DroneControlCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 关卡或蓝图实例可能保存了旧的低高度；进入 CesiumWorld 时做一次安全兜底。
+    TargetHeight = FMath::Max(TargetHeight, 3000.0f);
+
     // 游戏开始时，让 Mesh 直接对齐到目标高度
     if (USkeletalMeshComponent* MyMesh = GetMesh())
     {
         FVector CurrentRelLoc = MyMesh->GetRelativeLocation();
         MyMesh->SetRelativeLocation(FVector(CurrentRelLoc.X, CurrentRelLoc.Y, TargetHeight));
+    }
+
+    if (CameraBoom)
+    {
+        FVector BoomLoc = CameraBoom->GetRelativeLocation();
+        CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, TargetHeight));
+        CameraBoom->TargetArmLength = FMath::Max(CameraBoom->TargetArmLength, 3500.0f);
     }
 
     // --- 【修改】使用 Builder 创建 UDP Socket (更稳健) ---

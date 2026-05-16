@@ -22,6 +22,9 @@ class UE5DRONECONTROL_API USequenceDispatchPanelWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	/** 当面板处于交互状态时返回 true，供 PlayerController 判断是否跳过游戏点击 */
+	static bool IsPanelInteractive();
+
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UButton* OpenButton;
 
@@ -63,12 +66,16 @@ private:
 	ESequencePanelState CurrentState = ESequencePanelState::Collapsed;
 	FDronePathsSaveData LoadedPathsData;
 	TMap<int32, int32> MatchedPairs; // PathIndex -> DroneId
+	int32 SelectedPathIndex = INDEX_NONE; // 当前选中的 path（等待分配 drone）
+
+	static bool bStaticPanelInteractive;
 
 	void SetPanelState(ESequencePanelState NewState);
 	void ScanDronePathFiles();
 	void OnFileSelected(const FString& FilePath);
 	void PopulateMatchingView();
-	void OnMatchMade(int32 PathIndex, int32 DroneId);
+	void OnItemClicked(bool bIsPath, int32 IndexOrId);
+	void UpdateMatchVisuals();
 	void UpdateDispatchButtonState();
 	void SetStatusMessage(const FString& Message);
 

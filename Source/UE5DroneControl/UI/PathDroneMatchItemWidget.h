@@ -2,12 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Input/Events.h"
 #include "PathDroneMatchItemWidget.generated.h"
 
-class UDragDropOperation;
-
-DECLARE_DELEGATE_TwoParams(FOnMatchCompleted, int32 /*PathIndex*/, int32 /*DroneId*/);
+DECLARE_DELEGATE_TwoParams(FOnMatchItemClicked, bool /*bIsPath*/, int32 /*Index or Id*/);
 
 UCLASS()
 class UE5DRONECONTROL_API UPathDroneMatchItemWidget : public UUserWidget
@@ -28,19 +25,16 @@ public:
 	void SetAsDroneItem(int32 InDroneId, const FString& InDroneName);
 	void SetMatchedLabel(const FString& Label);
 	void ClearMatch();
+	void SetSelected(bool bSelected);
 
 	bool IsPathItem() const { return bIsPathItem; }
 	int32 GetItemId() const { return ItemId; }
 	int32 GetPathIndex() const { return PathIndex; }
 
-	FOnMatchCompleted OnMatchCompleted;
+	FOnMatchItemClicked OnItemClicked;
 
 protected:
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
-	virtual bool NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
-	virtual void NativeOnDragEnter(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
-	virtual void NativeOnDragLeave(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
 
 private:
 	bool bIsPathItem = false;

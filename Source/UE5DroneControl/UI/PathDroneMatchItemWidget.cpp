@@ -1,9 +1,7 @@
 #include "PathDroneMatchItemWidget.h"
-#include "PathDragDropOperation.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
-#include "Blueprint/WidgetBlueprintLibrary.h"
-#include "Blueprint/DragDropOperation.h"
+#include "InputCoreTypes.h"
 
 void UPathDroneMatchItemWidget::SetAsPathItem(int32 InPathId, int32 InPathIndex)
 {
@@ -59,61 +57,22 @@ void UPathDroneMatchItemWidget::ClearMatch()
 	}
 }
 
-FReply UPathDroneMatchItemWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+void UPathDroneMatchItemWidget::SetSelected(bool bSelected)
 {
-	if (bIsPathItem && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-	{
-		FEventReply Reply = UWidgetBlueprintLibrary::DetectDragIfPressed(InMouseEvent, this, EKeys::LeftMouseButton);
-		return Reply.NativeReply;
-	}
-	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
-}
-
-void UPathDroneMatchItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation)
-{
-	if (!bIsPathItem) return;
-
-	UPathDragDropOperation* DragOp = NewObject<UPathDragDropOperation>();
-	DragOp->SourcePathId = ItemId;
-	DragOp->SourcePathIndex = PathIndex;
-	DragOp->Pivot = EDragPivot::CenterCenter;
-	OutOperation = DragOp;
-}
-
-bool UPathDroneMatchItemWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
-{
-	if (bIsPathItem) return false;
-
-	UPathDragDropOperation* DragOp = Cast<UPathDragDropOperation>(InOperation);
-	if (!DragOp) return false;
-
-	OnMatchCompleted.ExecuteIfBound(DragOp->SourcePathIndex, ItemId);
-
 	if (HighlightBorder)
 	{
-		HighlightBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.5f));
-	}
-	return true;
-}
-
-void UPathDroneMatchItemWidget::NativeOnDragEnter(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
-{
-	if (!bIsPathItem && Cast<UPathDragDropOperation>(InOperation))
-	{
-		if (HighlightBorder)
-		{
-			HighlightBorder->SetBrushColor(FLinearColor(0.3f, 0.6f, 1.0f, 0.4f));
-		}
+		HighlightBorder->SetBrushColor(bSelected
+			? FLinearColor(0.3f, 0.6f, 1.0f, 0.5f)
+			: FLinearColor(0.1f, 0.1f, 0.1f, 0.5f));
 	}
 }
 
-void UPathDroneMatchItemWidget::NativeOnDragLeave(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+FReply UPathDroneMatchItemWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	if (!bIsPathItem)
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
-		if (HighlightBorder)
-		{
-			HighlightBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.5f));
-		}
+		OnItemClicked.ExecuteIfBound(bIsPathItem, bIsPathItem ? PathIndex : ItemId);
+		return FReply::Handled();
 	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 }

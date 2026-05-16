@@ -15,19 +15,13 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UTextBlock* FileNameText;
 
-	UPROPERTY(meta = (BindWidgetOptional))
-	class UButton* SelectButton;
-
 	void SetFileInfo(const FString& InFileName, const FString& InFilePath);
 
 	FOnPathFileItemClicked OnClicked;
 
 protected:
-	virtual void NativeConstruct() override;
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
 	FString FilePath;
-
-	UFUNCTION()
-	void HandleButtonClicked();
 };
