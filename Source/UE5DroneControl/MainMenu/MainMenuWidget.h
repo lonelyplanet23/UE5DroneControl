@@ -34,6 +34,13 @@ class UE5DRONECONTROL_API UMainMenuWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+
+
+	UPROPERTY() FString BackendAddress;
+	UPROPERTY() float MapCenterLat;
+	UPROPERTY() float MapCenterLon;
+	UPROPERTY() bool bUseCesium;
+	
 	// -----------------------------------------------------------------------
 	// 生命周期
 	// -----------------------------------------------------------------------
@@ -75,7 +82,7 @@ public:
 	 * @param bUseCesium      是否使用 Cesium 坐标服务
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MainMenu|Settings")
-	void SaveSettings(const FString& BackendAddress, float MapCenterLat, float MapCenterLon, bool bUseCesium);
+	void SaveSettings(const FString& InBackendAddress, float InMapCenterLat, float InMapCenterLon, bool InbUseCesium);
 
 	/**
 	 * 从 GameInstance 读取已保存的设置，填充到输出参数
