@@ -6,7 +6,7 @@
 
 - HTTP REST：`/api/drones`、`/api/arrays`、`/api/drones/{id}/anchor`
 - WebSocket：`ws://{backend_ip}:8081/`
-- UE -> 后端：`move` / `pause` / `resume`
+- UE -> 后端：`mode=move/scout/patrol/attack` 目标点指令 / `pause` / `resume`
 - 后端 -> UE：`telemetry` / `event` / `alert` / `assembling` / `assembly_complete` / `assembly_timeout`
 
 也就是说，它模拟的是“前端通讯层 + 本地注册表 + 锚点/告警状态缓存”，而不是调用后端调试接口冒充后端内部模块。

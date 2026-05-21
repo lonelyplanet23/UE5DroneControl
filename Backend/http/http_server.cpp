@@ -3,6 +3,8 @@
 #include "conversion/quaternion_utils.h"
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
@@ -56,6 +58,26 @@ std::string get_string(const boost::json::object& obj, const char* key,
     if (!obj.contains(key)) return fallback;
     auto value = value_to_string(obj.at(key));
     return value.empty() ? fallback : value;
+}
+
+std::string normalize_command_mode(const std::string& raw, const std::string& fallback = "move")
+{
+    std::string mode = raw.empty() ? fallback : raw;
+    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (mode == "recon") return "scout";
+    return mode;
+}
+
+bool is_target_command_mode(const std::string& mode)
+{
+    return mode == "move" || mode == "scout" || mode == "patrol" || mode == "attack";
+}
+
+bool is_array_mode(const std::string& mode)
+{
+    return mode == "scout" || mode == "patrol" || mode == "attack";
 }
 
 } // namespace
@@ -472,7 +494,10 @@ boost::json::value HttpServer::ApiGetAnchor(const std::string& id) {
 boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
     AssemblyConfig cfg;
     cfg.array_id = body.contains("array_id") ? std::string(body.at("array_id").as_string()) : "a1";
-    cfg.mode     = body.contains("mode")     ? std::string(body.at("mode").as_string())     : "recon";
+    cfg.mode     = normalize_command_mode(get_string(body, "mode", "scout"), "scout");
+    if (!is_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid mode: " + cfg.mode);
+    }
 
     if (body.contains("paths") && body.at("paths").is_array()) {
         for (const auto& p : body.at("paths").as_array()) {
@@ -675,7 +700,7 @@ boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::j
 boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
     AssemblyConfig cfg;
     cfg.array_id = "debug_batch";
-    cfg.mode = "recon";
+    cfg.mode = "scout";
 
     int path_id = 1;
     for (const auto& item : body) {
@@ -689,7 +714,7 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
         path.closed_loop = get_bool(obj, "bClosedLoop", false) ||
                            get_bool(obj, "closed_loop", false);
         if (obj.contains("mode")) {
-            cfg.mode = get_string(obj, "mode", cfg.mode);
+            cfg.mode = normalize_command_mode(get_string(obj, "mode", cfg.mode), cfg.mode);
         }
 
         if (obj.contains("waypoints") && obj.at("waypoints").is_array()) {
@@ -723,6 +748,9 @@ boost::json::value HttpServer::DebugBatchArray(const boost::json::array& body) {
     if (cfg.paths.empty()) {
         throw ApiError(400, "batch array requires at least one path with waypoints");
     }
+    if (!is_array_mode(cfg.mode)) {
+        throw ApiError(400, "invalid mode: " + cfg.mode);
+    }
     if (!assembly_ctrl_.Start(cfg, config_.assembly_safety_cylinder_m)) {
         throw ApiError(409, "assembly already in progress");
     }
@@ -750,15 +778,14 @@ boost::json::value HttpServer::DebugArrayState(const std::string& id) {
 void HttpServer::HandleWsCommand(const boost::json::object& msg,
                                   const std::shared_ptr<WsSession>& session)
 {
-    if (!msg.contains("type")) {
-        ws_manager_.send(session, json_stringify(boost::json::object{
-            {"type", "error"}, {"code", 400}, {"message", "missing type"}}));
-        return;
-    }
+    if (msg.contains("mode")) {
+        const std::string mode = normalize_command_mode(value_to_string(msg.at("mode")), "move");
+        if (!is_target_command_mode(mode)) {
+            ws_manager_.send(session, json_stringify(boost::json::object{
+                {"type", "error"}, {"code", 400}, {"message", "unknown mode: " + mode}}));
+            return;
+        }
 
-    std::string type = std::string(msg.at("type").as_string());
-
-    if (type == "move") {
         std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
         double x = get_number(msg, "x", 0.0);
         double y = get_number(msg, "y", 0.0);
@@ -770,12 +797,27 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
         } else if (msg.contains("request_id")) {
             ws_manager_.send(session, json_stringify(boost::json::object{
                 {"type", "command_ack"},
-                {"command", "move"},
+                {"command", mode},
+                {"mode", mode},
                 {"request_id", value_to_string(msg.at("request_id"))},
                 {"drone_id", drone_id},
                 {"drone_id_str", drone_id_string(drone_id)},
             }));
         }
+        return;
+    }
+
+    if (!msg.contains("type")) {
+        ws_manager_.send(session, json_stringify(boost::json::object{
+            {"type", "error"}, {"code", 400}, {"message", "missing mode or type"}}));
+        return;
+    }
+
+    std::string type = std::string(msg.at("type").as_string());
+
+    if (type == "move") {
+        ws_manager_.send(session, json_stringify(boost::json::object{
+            {"type", "error"}, {"code", 400}, {"message", "move command must use mode field"}}));
         return;
     }
 

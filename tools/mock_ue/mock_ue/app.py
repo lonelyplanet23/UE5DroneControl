@@ -141,7 +141,7 @@ class MockUEApp:
     def move(self, drone_id: str, x: float, y: float, z: float) -> None:
         self.ws.wait_connected()
         self.ws.send_json({
-            "type": "move",
+            "mode": "move",
             "drone_id": drone_id,
             "x": x,
             "y": y,

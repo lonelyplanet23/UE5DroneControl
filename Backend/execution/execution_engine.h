@@ -16,7 +16,7 @@
 /// 单机执行任务
 struct DroneTask {
     int drone_id = 0;
-    std::string mode;       // "recon" / "patrol" / "attack"
+    std::string mode;       // "scout" / "patrol" / "attack"
     bool closed_loop = false;
     std::vector<AssemblyConfig::Path::Waypoint> waypoints;
     int current_wp = 0;
@@ -73,7 +73,7 @@ struct ExecutionTaskSnapshot {
 ///
 /// 职责：
 ///   1. 接收集结完成信号，按模式启动各机执行线程
-///   2. 侦察模式：按航点序列依次飞行，支持循环
+///   2. 侦察模式（scout）：按航点序列依次飞行，支持循环
 ///   3. 巡逻模式：侦察基础上支持目标识别事件中断
 ///   4. 攻击模式：按航点序列飞行，到达最后航点后悬停
 ///   5. 实时避障：监控所有在线无人机，预测碰撞并临时调整目标

@@ -16,7 +16,7 @@
 /// 单机执行任务
 struct DroneTask {
     int drone_id = 0;
-    std::string mode;       // "recon" / "patrol" / "attack"
+    std::string mode;       // "scout" / "patrol" / "attack"
     bool closed_loop = false;
     std::vector<AssemblyConfig::Path::Waypoint> waypoints;
     int current_wp = 0;

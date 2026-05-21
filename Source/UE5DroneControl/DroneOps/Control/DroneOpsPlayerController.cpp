@@ -832,9 +832,11 @@ void ADroneOpsPlayerController::SendTargetCommand(int32 DroneId, const FVector& 
 		{
 			if (NetworkManager->GetWebSocketClient() && NetworkManager->GetWebSocketClient()->IsConnected())
 			{
-				NetworkManager->SendMoveCommand(DroneId, TargetWorldLocation);
-				UE_LOG(LogTemp, Log, TEXT("Move command sent via WebSocket for Drone %d: (%.1f, %.1f, %.1f)"),
-					DroneId, TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z);
+				const EDroneCommandMode CommandMode = DroneRegistry->GetDroneCommandMode(DroneId);
+				NetworkManager->SendMoveCommand(DroneId, TargetWorldLocation, CommandMode);
+				UE_LOG(LogTemp, Log, TEXT("Move command sent via WebSocket for Drone %d: mode=%s (%.1f, %.1f, %.1f)"),
+					DroneId, *DroneCommandModeToProtocolString(CommandMode),
+					TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z);
 				return;
 			}
 		}
@@ -1220,7 +1222,7 @@ void ADroneOpsPlayerController::TestSendArrayTask()
 
 	FOnHttpResponse Cb;
 	Cb.BindDynamic(this, &ADroneOpsPlayerController::OnTestArrayTaskComplete);
-	NetMgr->SendArrayTask(TMap<int32, ADronePathActor*>(), Cb);
+	NetMgr->SendArrayTask(TMap<int32, ADronePathActor*>(), EDroneCommandMode::Scout, Cb);
 	UE_LOG(LogTemp, Log, TEXT("[TestSendArrayTask] Called SendArrayTask"));
 }
 

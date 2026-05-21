@@ -209,7 +209,7 @@ async def test_assembly_and_recon(ws: Any) -> None:
     # 对应 NED (m)：d1→(1,0,5)，d2→(-1,0,5)
     array_payload = {
         "array_id": "w4-recon",
-        "mode": "recon",
+        "mode": "scout",
         "paths": [
             {
                 "pathId": 1, "drone_id": "d1", "bClosedLoop": False,
@@ -266,7 +266,7 @@ async def test_recon_loop(ws: Any) -> None:
 
     # 直接启动执行引擎（跳过集结）
     result = request("POST", "/api/debug/cmd/1/array", {
-        "mode": "recon",
+        "mode": "scout",
         "loop": True,
         "waypoints": [
             {"x": 50, "y": 0, "z": -300},
@@ -366,7 +366,7 @@ async def test_multi_drone_concurrent(ws: Any) -> None:
     batch = request("POST", "/api/debug/cmd/batch/array", [
         {
             "drone_id": "d1",
-            "mode": "recon",
+            "mode": "scout",
             "waypoints": [{"x": 100, "y": 0, "z": -300}],
         },
         {
@@ -412,7 +412,7 @@ async def test_assembly_timeout(ws: Any) -> None:
     # 下发集结任务，但不注入到达遥测
     request("POST", "/api/arrays", {
         "array_id": "w4-timeout",
-        "mode": "recon",
+        "mode": "scout",
         "paths": [
             {
                 "pathId": 1, "drone_id": "d1", "bClosedLoop": False,
@@ -439,7 +439,7 @@ async def test_pause_resume_during_exec(ws: Any) -> None:
     inject(1, 0, 0, -5)
 
     request("POST", "/api/debug/cmd/1/array", {
-        "mode": "recon",
+        "mode": "scout",
         "loop": False,
         "waypoints": [{"x": 500, "y": 0, "z": -300}],
     })

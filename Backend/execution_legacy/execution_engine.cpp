@@ -351,7 +351,7 @@ void ExecutionEngine::RunDroneTask(int drone_id)
 
         int wp_idx = task.current_wp;
         if (wp_idx >= static_cast<int>(task.waypoints.size())) {
-            if (task.mode == "recon" && task.closed_loop) {
+            if (task.mode == "scout" && task.closed_loop) {
                 std::lock_guard<std::mutex> lock(tasks_mutex_);
                 auto it = tasks_.find(drone_id);
                 if (it != tasks_.end()) {
@@ -402,7 +402,7 @@ void ExecutionEngine::RunDroneTask(int drone_id)
             auto it = tasks_.find(drone_id);
             if (it != tasks_.end()) {
                 it->second.current_wp++;
-                if (it->second.mode == "recon" && it->second.closed_loop &&
+                if (it->second.mode == "scout" && it->second.closed_loop &&
                     it->second.current_wp >= static_cast<int>(it->second.waypoints.size())) {
                     it->second.current_wp = 0;
                 }

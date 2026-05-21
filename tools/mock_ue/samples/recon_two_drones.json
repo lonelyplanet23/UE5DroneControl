@@ -1,6 +1,6 @@
 {
   "array_id": "mock-recon-2",
-  "mode": "recon",
+  "mode": "scout",
   "paths": [
     {
       "pathId": 1,

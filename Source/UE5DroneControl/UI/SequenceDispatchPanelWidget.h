@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "DroneOps/Core/DroneOpsTypes.h"
+#include "Components/ComboBoxString.h"
 #include "PathEditor/DronePathSaveLibrary.h"
 #include "SequenceDispatchPanelWidget.generated.h"
 
@@ -52,6 +54,9 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UTextBlock* StatusText;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UComboBoxString* ModeComboBox;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceDispatch")
 	TSubclassOf<UPathFileListItemWidget> FileListItemClass;
 
@@ -67,6 +72,7 @@ private:
 	FDronePathsSaveData LoadedPathsData;
 	TMap<int32, int32> MatchedPairs; // PathIndex -> DroneId
 	int32 SelectedPathIndex = INDEX_NONE; // 当前选中的 path（等待分配 drone）
+	EDroneCommandMode DispatchMode = EDroneCommandMode::Scout;
 
 	static bool bStaticPanelInteractive;
 
@@ -74,6 +80,7 @@ private:
 	void ScanDronePathFiles();
 	void OnFileSelected(const FString& FilePath);
 	void PopulateMatchingView();
+	void PopulateModeComboBox();
 	void OnItemClicked(bool bIsPath, int32 IndexOrId);
 	void UpdateMatchVisuals();
 	void UpdateDispatchButtonState();
@@ -87,6 +94,9 @@ private:
 
 	UFUNCTION()
 	void OnBackClicked();
+
+	UFUNCTION()
+	void OnModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
 	UFUNCTION()
 	void OnDispatchResponse(bool bSuccess, const FString& ResponseBody);

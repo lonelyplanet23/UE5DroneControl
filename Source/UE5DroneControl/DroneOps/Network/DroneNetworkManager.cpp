@@ -344,7 +344,7 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 
 // ---- Control commands ----
 
-void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetWorldLocation)
+void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetWorldLocation, EDroneCommandMode Mode)
 {
 	if (!WsClient || !WsClient->IsConnected())
 	{
@@ -352,11 +352,13 @@ void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetW
 		return;
 	}
 
-	// { "type": "move", "drone_id": "N", "x": ..., "y": ..., "z": ... }
+	// { "mode": "move|scout|patrol|attack", "drone_id": "N", "x": ..., "y": ..., "z": ... }
 	// Coordinates should be relative to the drone's anchor (AnchorWorldLocation).
 	// TODO: subtract AnchorWorldLocation once the Cesium anchor flow (柯垣丞) is ready.
+	const FString ProtocolMode = DroneCommandModeToProtocolString(Mode);
 	const FString Json = FString::Printf(
-		TEXT("{\"type\":\"move\",\"drone_id\":\"%d\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}"),
+		TEXT("{\"mode\":\"%s\",\"drone_id\":\"%d\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}"),
+		*ProtocolMode,
 		DroneId,
 		TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z);
 
@@ -386,7 +388,7 @@ void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool 
 	WsClient->SendMessage(Json);
 }
 
-void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, FOnHttpResponse OnComplete)
+void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete)
 {
 	if (!HttpClient)
 	{
@@ -395,10 +397,11 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 	}
 
 	// Build JSON body:
-	// { "paths": [ { "pathId": N, "drone_id": "N", "bClosedLoop": bool,
+	// { "mode": "scout|patrol|attack", "paths": [ { "pathId": N, "drone_id": "N", "bClosedLoop": bool,
 	//                "waypoints": [ { "location": {"x":..,"y":..,"z":..},
 	//                                 "segmentSpeed": .., "waitTime": .. } ] } ] }
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("mode"), DroneCommandModeToProtocolString(Mode));
 	TArray<TSharedPtr<FJsonValue>> PathsArray;
 
 	for (const TPair<int32, ADronePathActor*>& Pair : PathMap)
@@ -444,11 +447,12 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 
-	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTask: POST /api/arrays, %d paths"), PathMap.Num());
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTask: POST /api/arrays, %d paths, mode=%s"),
+		PathMap.Num(), *DroneCommandModeToProtocolString(Mode));
 	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
 }
 
-void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, FOnHttpResponse OnComplete)
+void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete)
 {
 	if (!HttpClient)
 	{
@@ -457,6 +461,7 @@ void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSav
 	}
 
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("mode"), DroneCommandModeToProtocolString(Mode));
 	TArray<TSharedPtr<FJsonValue>> PathsArray;
 
 	for (const TPair<int32, FDronePathSaveData>& Pair : PathDataMap)
@@ -493,6 +498,7 @@ void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSav
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 
-	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTaskFromData: POST /api/arrays, %d paths"), PathDataMap.Num());
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTaskFromData: POST /api/arrays, %d paths, mode=%s"),
+		PathDataMap.Num(), *DroneCommandModeToProtocolString(Mode));
 	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
 }

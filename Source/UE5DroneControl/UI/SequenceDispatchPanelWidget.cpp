@@ -3,6 +3,7 @@
 #include "PathDroneMatchItemWidget.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
+#include "Components/ComboBoxString.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -55,6 +56,7 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 	{
 		BackButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnBackClicked);
 	}
+	PopulateModeComboBox();
 
 	SetPanelState(ESequencePanelState::Collapsed);
 }
@@ -237,6 +239,21 @@ void USequenceDispatchPanelWidget::PopulateMatchingView()
 	UpdateDispatchButtonState();
 }
 
+void USequenceDispatchPanelWidget::PopulateModeComboBox()
+{
+	if (!ModeComboBox)
+	{
+		return;
+	}
+
+	ModeComboBox->ClearOptions();
+	ModeComboBox->AddOption(TEXT("scout"));
+	ModeComboBox->AddOption(TEXT("patrol"));
+	ModeComboBox->AddOption(TEXT("attack"));
+	ModeComboBox->SetSelectedOption(DroneCommandModeToProtocolString(DispatchMode));
+	ModeComboBox->OnSelectionChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnModeSelectionChanged);
+}
+
 void USequenceDispatchPanelWidget::OnItemClicked(bool bIsPath, int32 IndexOrId)
 {
 	if (bIsPath)
@@ -366,10 +383,15 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 
 	FOnHttpResponse Callback;
 	Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnDispatchResponse);
-	NetMgr->SendArrayTaskFromData(DispatchMap, Callback);
+	NetMgr->SendArrayTaskFromData(DispatchMap, DispatchMode, Callback);
 
-	SetStatusMessage(TEXT("正在派发..."));
+	SetStatusMessage(FString::Printf(TEXT("正在派发... mode=%s"), *DroneCommandModeToProtocolString(DispatchMode)));
 	if (DispatchButton) DispatchButton->SetIsEnabled(false);
+}
+
+void USequenceDispatchPanelWidget::OnModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	DispatchMode = DroneCommandModeFromProtocolString(SelectedItem);
 }
 
 void USequenceDispatchPanelWidget::OnDispatchResponse(bool bSuccess, const FString& ResponseBody)

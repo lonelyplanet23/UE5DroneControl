@@ -191,9 +191,10 @@ async def ws_handler(websocket):
         async for msg in websocket:
             try:
                 data = json.loads(msg)
+                mode = data.get("mode")
                 msg_type = data.get("type", "unknown")
-                if msg_type == "move":
-                    print(f"[WS] MOVE  drone_id={data.get('drone_id')}  "
+                if mode in ("move", "scout", "patrol", "attack"):
+                    print(f"[WS] {mode.upper()}  drone_id={data.get('drone_id')}  "
                           f"x={data.get('x'):.1f}  y={data.get('y'):.1f}  z={data.get('z'):.1f}")
                 elif msg_type in ("pause", "resume"):
                     print(f"[WS] {msg_type.upper()}  drone_ids={data.get('drone_ids')}")

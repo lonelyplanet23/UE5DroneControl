@@ -208,7 +208,7 @@ async def run_checks() -> None:
         assert anchor["valid"] is True
         assert math.isclose(anchor["gps_lon"], 116.4074)
 
-        await ws.send(json.dumps({"type": "move", "request_id": "move-1", "drone_id": "1", "x": 1000, "y": 2000, "z": 500}))
+        await ws.send(json.dumps({"mode": "move", "request_id": "move-1", "drone_id": "1", "x": 1000, "y": 2000, "z": 500}))
         await expect_ws(
             ws,
             lambda m: m.get("type") == "command_ack" and m.get("request_id") == "move-1",
@@ -246,7 +246,7 @@ async def run_checks() -> None:
             "resume command applied",
         )
 
-        await ws.send(json.dumps({"type": "move", "drone_id": "99", "x": 0, "y": 0, "z": 0}))
+        await ws.send(json.dumps({"mode": "move", "drone_id": "99", "x": 0, "y": 0, "z": 0}))
         await expect_ws(
             ws,
             lambda m: m.get("type") == "error" and m.get("code") == 404,
@@ -292,7 +292,7 @@ async def run_checks() -> None:
 
         array_payload = {
             "array_id": "a-week3",
-            "mode": "recon",
+            "mode": "scout",
             "paths": [
                 {
                     "pathId": 1,
@@ -324,7 +324,7 @@ async def run_checks() -> None:
             "/api/arrays",
             {
                 "array_id": "a-timeout-week3",
-                "mode": "recon",
+                "mode": "scout",
                 "paths": [
                     {
                         "pathId": 1,

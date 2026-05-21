@@ -40,6 +40,69 @@ enum class EDroneControlLockReason : uint8
 };
 
 /**
+ * UE -> Backend command mode for target-point commands.
+ * Protocol strings are: move / scout / patrol / attack.
+ */
+UENUM(BlueprintType)
+enum class EDroneCommandMode : uint8
+{
+	Move UMETA(DisplayName = "Move"),
+	Scout UMETA(DisplayName = "Scout"),
+	Patrol UMETA(DisplayName = "Patrol"),
+	Attack UMETA(DisplayName = "Attack")
+};
+
+static inline FString DroneCommandModeToProtocolString(EDroneCommandMode Mode)
+{
+	switch (Mode)
+	{
+	case EDroneCommandMode::Scout:
+		return TEXT("scout");
+	case EDroneCommandMode::Patrol:
+		return TEXT("patrol");
+	case EDroneCommandMode::Attack:
+		return TEXT("attack");
+	case EDroneCommandMode::Move:
+	default:
+		return TEXT("move");
+	}
+}
+
+static inline EDroneCommandMode DroneCommandModeFromProtocolString(const FString& ModeText)
+{
+	const FString Normalized = ModeText.ToLower();
+	if (Normalized == TEXT("scout") || Normalized == TEXT("recon"))
+	{
+		return EDroneCommandMode::Scout;
+	}
+	if (Normalized == TEXT("patrol"))
+	{
+		return EDroneCommandMode::Patrol;
+	}
+	if (Normalized == TEXT("attack"))
+	{
+		return EDroneCommandMode::Attack;
+	}
+	return EDroneCommandMode::Move;
+}
+
+static inline FText DroneCommandModeToDisplayText(EDroneCommandMode Mode)
+{
+	switch (Mode)
+	{
+	case EDroneCommandMode::Scout:
+		return FText::FromString(TEXT("侦察"));
+	case EDroneCommandMode::Patrol:
+		return FText::FromString(TEXT("巡逻"));
+	case EDroneCommandMode::Attack:
+		return FText::FromString(TEXT("攻击"));
+	case EDroneCommandMode::Move:
+	default:
+		return FText::FromString(TEXT("移动"));
+	}
+}
+
+/**
  * Drone descriptor - static identity information
  */
 USTRUCT(BlueprintType)

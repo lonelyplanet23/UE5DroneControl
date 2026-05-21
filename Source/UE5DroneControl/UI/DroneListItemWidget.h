@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "DroneOps/Core/DroneOpsTypes.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "DroneListItemWidget.generated.h"
@@ -30,10 +31,31 @@ public:
     UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
     UTextBlock* StatusText = nullptr;
 
+    /** 当前移动模式 - 蓝图绑定到 Text */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* ModeText = nullptr;
+
+    /** 模式切换按钮 - 蓝图绑定到 Button */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    class UButton* ModeButton = nullptr;
+
     /** 设置无人机数据 */
     UFUNCTION(BlueprintCallable, Category = "UI")
     void SetDroneData(const FString& Name, bool bOnline);
 
+    /** 设置真实无人机数据，并显示/切换当前指令模式 */
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void SetDroneDataWithMode(int32 InDroneId, const FString& Name, bool bOnline, EDroneCommandMode InMode);
+
 protected:
     virtual void NativeConstruct() override;
+
+private:
+    int32 DroneId = 0;
+    EDroneCommandMode CurrentMode = EDroneCommandMode::Move;
+
+    UFUNCTION()
+    void OnModeButtonClicked();
+
+    void UpdateModeText();
 };

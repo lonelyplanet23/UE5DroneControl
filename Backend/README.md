@@ -358,7 +358,7 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 ```json
 {
   "array_id": "a1",
-  "mode": "recon",
+  "mode": "scout",
   "valid": false,
   "warnings": [],
   "collision_risks": [
@@ -385,7 +385,7 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 ```json
 {
   "array_id": "a1",
-  "mode": "recon",
+  "mode": "scout",
   "paths": [
     {
       "drone_id": "d1",
@@ -422,7 +422,7 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 **`/api/debug/cmd/{id}/array` 请求体示例：**
 ```json
 {
-  "mode": "recon",
+  "mode": "scout",
   "loop": false,
   "waypoints": [
     {"x": 1000, "y": 0, "z": -500},
@@ -430,7 +430,7 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
   ]
 }
 ```
-- `mode`：`"recon"`（侦察）/ `"patrol"`（巡逻）/ `"attack"`（攻击）
+- `mode`：`"scout"`（侦察）/ `"patrol"`（巡逻）/ `"attack"`（攻击）
 - `loop`：`true` 表示侦察模式循环（到末航点后回到第一个）
 - `waypoints`：UE 偏移坐标（厘米），后端自动转换为 NED
 
@@ -472,7 +472,7 @@ Copy-Item BackEnd\config.yaml BackEnd\build\config.yaml
 
 ```jsonc
 // 移动（UE 偏移坐标，单位：厘米）
-{ "type": "move", "drone_id": 1, "x": 1000.0, "y": 2000.0, "z": -500.0 }
+{ "mode": "move", "drone_id": 1, "x": 1000.0, "y": 2000.0, "z": -500.0 }
 
 // 暂停 / 恢复（支持批量）
 { "type": "pause",  "drone_ids": [1, 2] }
@@ -981,7 +981,7 @@ udp.port == 8888 || udp.port == 8889 || udp.port == 8890 || udp.port == 8891
 | 低电量 | 注入 `battery <= threshold` | UE 观察告警 | `alert=low_battery` |
 | 集结 | `POST /api/arrays` | 阵列 UI 或 HTTP | `assembling` → `assembly_complete` |
 | 集结超时 | 不注入到达 | UE 观察 | `assembly_timeout` |
-| 侦察 | `mode=recon` | 阵列任务 | 按航点推进，支持循环 |
+| 侦察 | `mode=scout` | 阵列任务 | 按航点推进，支持循环 |
 | 巡逻 | `mode=patrol` + target | 目标识别事件 | 中断巡逻飞目标 |
 | 攻击 | `mode=attack` | 阵列任务 | 到末航点悬停 |
 | 多机并发 | 多 paths | 多机任务 | 各机队列独立推进 |

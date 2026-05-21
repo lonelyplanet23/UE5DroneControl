@@ -1393,7 +1393,7 @@ cmd：
 curl -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV1\",\"slot\":1}"
 curl -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-10],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85,\"gps_lat\":39.9,\"gps_lon\":116.3,\"gps_alt\":50}"
 curl -X POST http://localhost:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d "{\"x\":1000,\"y\":0,\"z\":-500}"
-curl -X POST http://localhost:8080/api/arrays -H "Content-Type: application/json" -d "{\"array_id\":\"a1\",\"mode\":\"recon\",\"paths\":[{\"drone_id\":\"d1\",\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":1000,\"z\":-500}]}]}"
+curl -X POST http://localhost:8080/api/arrays -H "Content-Type: application/json" -d "{\"array_id\":\"a1\",\"mode\":\"scout\",\"paths\":[{\"drone_id\":\"d1\",\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":1000,\"z\":-500}]}]}"
 ```
 
 PowerShell：
@@ -1402,7 +1402,7 @@ PowerShell：
 curl.exe -X POST http://localhost:8080/api/drones -H "Content-Type: application/json" -d '{"name":"UAV1","slot":1}'
 curl.exe -X POST http://localhost:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d '{"position":[0,0,-10],"q":[1,0,0,0],"velocity":[0,0,0],"battery":85,"gps_lat":39.9,"gps_lon":116.3,"gps_alt":50}'
 curl.exe -X POST http://localhost:8080/api/debug/cmd/1/move -H "Content-Type: application/json" -d '{"x":1000,"y":0,"z":-500}'
-curl.exe -X POST http://localhost:8080/api/arrays -H "Content-Type: application/json" -d '{"array_id":"a1","mode":"recon","paths":[{"drone_id":"d1","waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}]}'
+curl.exe -X POST http://localhost:8080/api/arrays -H "Content-Type: application/json" -d '{"array_id":"a1","mode":"scout","paths":[{"drone_id":"d1","waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}]}'
 ```
 
 详细测试步骤见 [BackEnd/TEST_GUIDE.md](BackEnd/TEST_GUIDE.md) 和 [BackEnd/README.md](BackEnd/README.md#手工测试指南无-ue5--无-jetson)。

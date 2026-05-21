@@ -305,7 +305,7 @@ curl -X POST http://localhost:8080/api/debug/cmd/batch/array \
 ### UE5 → 后端
 
 ```json
-{"type":"move",    "drone_id":"d1", "x":1000.0, "y":2000.0, "z":500.0}
+{"mode":"move",    "drone_id":"d1", "x":1000.0, "y":2000.0, "z":500.0}
 {"type":"pause",   "drone_ids":["d1","d2"]}
 {"type":"resume",  "drone_ids":["d1","d2"]}
 ```

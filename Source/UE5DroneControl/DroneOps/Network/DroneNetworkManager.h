@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "DroneOps/Core/DroneOpsTypes.h"
 #include "DroneOps/Network/DroneHttpClient.h"
 #include "DroneOps/Network/DroneWebSocketClient.h"
 #include "PathEditor/DronePathSaveLibrary.h"
@@ -47,9 +48,10 @@ public:
 	 * Send a move command for the given drone via WebSocket.
 	 * @param DroneId  Target drone id (from registry)
 	 * @param TargetWorldLocation  UE world coordinates (cm)
+	 * @param Mode  Protocol mode: move / scout / patrol / attack
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
-	void SendMoveCommand(int32 DroneId, const FVector& TargetWorldLocation);
+	void SendMoveCommand(int32 DroneId, const FVector& TargetWorldLocation, EDroneCommandMode Mode = EDroneCommandMode::Move);
 
 	/**
 	 * Send pause or resume command for the selected drones.
@@ -65,14 +67,14 @@ public:
 	 * OnComplete is called with (bSuccess, ResponseBody).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
-	void SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, FOnHttpResponse OnComplete);
+	void SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete);
 
 	/**
 	 * Submit an array task from pre-loaded path save data (no actors needed).
 	 * PathDataMap maps drone id -> FDronePathSaveData (waypoints already in world space).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
-	void SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, FOnHttpResponse OnComplete);
+	void SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete);
 
 	// ---- Events ----
 

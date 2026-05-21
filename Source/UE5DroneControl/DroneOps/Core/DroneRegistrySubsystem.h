@@ -32,6 +32,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTelemetryUpdated, int32, DroneId
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnControlLockChanged, int32, DroneId, EDroneControlLockReason, LockReason, bool, bLocked);
 
 /**
+ * Delegate for command mode changes.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneCommandModeChanged, int32, DroneId, EDroneCommandMode, Mode);
+
+/**
  * Global drone registry and state management subsystem
  * Central hub for all drone-related state and events
  */
@@ -100,6 +105,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
 	bool IsControlLocked(int32 DroneId, EDroneControlLockReason& OutReason) const;
 
+	// Command mode management
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void SetDroneCommandMode(int32 DroneId, EDroneCommandMode Mode);
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void SetDroneCommandModeFromString(int32 DroneId, const FString& Mode);
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void CycleDroneCommandMode(int32 DroneId);
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	EDroneCommandMode GetDroneCommandMode(int32 DroneId) const;
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	FString GetDroneCommandModeString(int32 DroneId) const;
+
 	// Mask generation for multi-drone control
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
 	int32 GetSelectedDroneMask() const;
@@ -139,6 +160,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
 	FOnControlLockChanged OnControlLockChanged;
 
+	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
+	FOnDroneCommandModeChanged OnDroneCommandModeChanged;
+
 private:
 	// Coordinate service
 	UPROPERTY()
@@ -168,4 +192,8 @@ private:
 	// Control lock state
 	UPROPERTY()
 	TMap<int32, EDroneControlLockReason> ControlLocks;
+
+	// Current per-drone command mode used by point dispatch.
+	UPROPERTY()
+	TMap<int32, EDroneCommandMode> CommandModes;
 };

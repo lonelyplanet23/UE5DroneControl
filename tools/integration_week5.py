@@ -150,7 +150,7 @@ async def run_checks() -> None:
             "/api/arrays/preview",
             {
                 "array_id": "w5-preview",
-                "mode": "recon",
+                "mode": "scout",
                 "paths": [
                     {
                         "pathId": 1,
@@ -179,7 +179,7 @@ async def run_checks() -> None:
             "/api/arrays/preview",
             {
                 "array_id": "w5-clean",
-                "mode": "recon",
+                "mode": "scout",
                 "paths": [
                     {
                         "pathId": 1,
@@ -208,7 +208,7 @@ async def run_checks() -> None:
             "/api/arrays",
             {
                 "array_id": "w5-run",
-                "mode": "recon",
+                "mode": "scout",
                 "paths": [
                     {
                         "pathId": 1,

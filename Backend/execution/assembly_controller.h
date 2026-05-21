@@ -21,7 +21,7 @@ enum class AssemblyState : uint8_t {
 /// 集结任务配置
 struct AssemblyConfig {
     std::string array_id;
-    std::string mode;  // "recon" / "patrol" / "attack"
+    std::string mode;  // "scout" / "patrol" / "attack"
 
     struct Path {
         int path_id;

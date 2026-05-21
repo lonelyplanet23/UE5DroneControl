@@ -22,6 +22,7 @@ void UDroneRegistrySubsystem::Deinitialize()
 	ReceiverActors.Empty();
 	TelemetryCache.Empty();
 	ControlLocks.Empty();
+	CommandModes.Empty();
 
 	Super::Deinitialize();
 }
@@ -46,6 +47,10 @@ void UDroneRegistrySubsystem::RegisterDrone(const FDroneDescriptor& Descriptor)
 	}
 
 	DroneDescriptors.Add(Descriptor.DroneId, Descriptor);
+	if (!CommandModes.Contains(Descriptor.DroneId))
+	{
+		CommandModes.Add(Descriptor.DroneId, EDroneCommandMode::Move);
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("Drone registered: %s (ID=%d, BitIndex=%d)"),
 		*Descriptor.Name, Descriptor.DroneId, Descriptor.BitIndex);
@@ -84,6 +89,7 @@ void UDroneRegistrySubsystem::UnregisterDrone(int32 DroneId)
 	ReceiverActors.Remove(DroneId);
 	TelemetryCache.Remove(DroneId);
 	ControlLocks.Remove(DroneId);
+	CommandModes.Remove(DroneId);
 
 	UE_LOG(LogTemp, Log, TEXT("Drone unregistered: %d"), DroneId);
 }
@@ -168,6 +174,56 @@ bool UDroneRegistrySubsystem::IsControlLocked(int32 DroneId, EDroneControlLockRe
 	}
 	OutReason = EDroneControlLockReason::None;
 	return false;
+}
+
+void UDroneRegistrySubsystem::SetDroneCommandMode(int32 DroneId, EDroneCommandMode Mode)
+{
+	if (DroneId <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SetDroneCommandMode: invalid DroneId %d"), DroneId);
+		return;
+	}
+
+	CommandModes.Add(DroneId, Mode);
+	UE_LOG(LogTemp, Log, TEXT("Drone %d command mode -> %s"),
+		DroneId, *DroneCommandModeToProtocolString(Mode));
+	OnDroneCommandModeChanged.Broadcast(DroneId, Mode);
+}
+
+void UDroneRegistrySubsystem::SetDroneCommandModeFromString(int32 DroneId, const FString& Mode)
+{
+	SetDroneCommandMode(DroneId, DroneCommandModeFromProtocolString(Mode));
+}
+
+void UDroneRegistrySubsystem::CycleDroneCommandMode(int32 DroneId)
+{
+	switch (GetDroneCommandMode(DroneId))
+	{
+	case EDroneCommandMode::Scout:
+		SetDroneCommandMode(DroneId, EDroneCommandMode::Patrol);
+		break;
+	case EDroneCommandMode::Patrol:
+		SetDroneCommandMode(DroneId, EDroneCommandMode::Attack);
+		break;
+	case EDroneCommandMode::Attack:
+		SetDroneCommandMode(DroneId, EDroneCommandMode::Scout);
+		break;
+	case EDroneCommandMode::Move:
+	default:
+		SetDroneCommandMode(DroneId, EDroneCommandMode::Scout);
+		break;
+	}
+}
+
+EDroneCommandMode UDroneRegistrySubsystem::GetDroneCommandMode(int32 DroneId) const
+{
+	const EDroneCommandMode* Found = CommandModes.Find(DroneId);
+	return Found ? *Found : EDroneCommandMode::Move;
+}
+
+FString UDroneRegistrySubsystem::GetDroneCommandModeString(int32 DroneId) const
+{
+	return DroneCommandModeToProtocolString(GetDroneCommandMode(DroneId));
 }
 
 int32 UDroneRegistrySubsystem::GetSelectedDroneMask() const

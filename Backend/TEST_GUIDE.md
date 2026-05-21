@@ -525,7 +525,7 @@ python tools\simulate_telemetry.py --register --transport udp --drones 1 2 --hz 
 curl -X POST http://127.0.0.1:8080/api/drones -H "Content-Type: application/json" -d "{\"name\":\"UAV2\",\"slot\":2}"
 curl -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type: application/json" -d "{\"position\":[0,0,-5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":85,\"gps_lat\":39.9,\"gps_lon\":116.3,\"gps_alt\":50}"
 curl -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d "{\"position\":[5,0,-5],\"q\":[1,0,0,0],\"velocity\":[0,0,0],\"battery\":90,\"gps_lat\":39.9,\"gps_lon\":116.31,\"gps_alt\":50}"
-curl -X POST http://127.0.0.1:8080/api/arrays -H "Content-Type: application/json" -d "{\"array_id\":\"a1\",\"mode\":\"recon\",\"paths\":[{\"pathId\":1,\"drone_id\":\"d1\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":2000,\"y\":1000,\"z\":-500}}]},{\"pathId\":2,\"drone_id\":\"d2\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":-1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":-2000,\"y\":1000,\"z\":-500}}]}]}"
+curl -X POST http://127.0.0.1:8080/api/arrays -H "Content-Type: application/json" -d "{\"array_id\":\"a1\",\"mode\":\"scout\",\"paths\":[{\"pathId\":1,\"drone_id\":\"d1\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":2000,\"y\":1000,\"z\":-500}}]},{\"pathId\":2,\"drone_id\":\"d2\",\"bClosedLoop\":false,\"waypoints\":[{\"location\":{\"x\":-1000,\"y\":0,\"z\":-500}},{\"location\":{\"x\":-2000,\"y\":1000,\"z\":-500}}]}]}"
 ```
 
 ```powershell
@@ -535,7 +535,7 @@ curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/1/inject -H "Content-Type
 curl.exe -X POST http://127.0.0.1:8080/api/debug/drone/2/inject -H "Content-Type: application/json" -d '{"position":[5,0,-5],"q":[1,0,0,0],"velocity":[0,0,0],"battery":90,"gps_lat":39.9,"gps_lon":116.31,"gps_alt":50}'
 curl.exe -X POST http://127.0.0.1:8080/api/arrays `
   -H "Content-Type: application/json" `
-  -d '{"array_id":"a1","mode":"recon","paths":[{"pathId":1,"drone_id":"d1","bClosedLoop":false,"waypoints":[{"location":{"x":1000,"y":0,"z":-500}},{"location":{"x":2000,"y":1000,"z":-500}}]},{"pathId":2,"drone_id":"d2","bClosedLoop":false,"waypoints":[{"location":{"x":-1000,"y":0,"z":-500}},{"location":{"x":-2000,"y":1000,"z":-500}}]}]}'
+  -d '{"array_id":"a1","mode":"scout","paths":[{"pathId":1,"drone_id":"d1","bClosedLoop":false,"waypoints":[{"location":{"x":1000,"y":0,"z":-500}},{"location":{"x":2000,"y":1000,"z":-500}}]},{"pathId":2,"drone_id":"d2","bClosedLoop":false,"waypoints":[{"location":{"x":-1000,"y":0,"z":-500}},{"location":{"x":-2000,"y":1000,"z":-500}}]}]}'
 ```
 
 **模拟到达首航点并查询集结状态**
@@ -578,14 +578,14 @@ curl.exe -X POST http://127.0.0.1:8080/api/arrays/a1/stop
 
 ```cmd
 :: cmd
-curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"recon\",\"loop\":true,\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":1000,\"z\":-500}]}"
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/1/array -H "Content-Type: application/json" -d "{\"mode\":\"scout\",\"loop\":true,\"waypoints\":[{\"x\":1000,\"y\":0,\"z\":-500},{\"x\":2000,\"y\":1000,\"z\":-500}]}"
 ```
 
 ```powershell
 # PowerShell
 curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
   -H "Content-Type: application/json" `
-  -d '{"mode":"recon","loop":true,"waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}'
+  -d '{"mode":"scout","loop":true,"waypoints":[{"x":1000,"y":0,"z":-500},{"x":2000,"y":1000,"z":-500}]}'
 ```
 
 **预期结果**：非循环侦察到末航点后悬停；`loop=true` 时到末航点后回到第一个航点。
@@ -634,14 +634,14 @@ curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/1/array `
 
 ```cmd
 :: cmd
-curl -X POST http://127.0.0.1:8080/api/debug/cmd/batch/array -H "Content-Type: application/json" -d "[{\"drone_id\":\"d1\",\"mode\":\"recon\",\"waypoints\":[{\"x\":100,\"y\":0,\"z\":-300}]},{\"drone_id\":\"d2\",\"mode\":\"recon\",\"waypoints\":[{\"x\":-100,\"y\":0,\"z\":-300}]}]"
+curl -X POST http://127.0.0.1:8080/api/debug/cmd/batch/array -H "Content-Type: application/json" -d "[{\"drone_id\":\"d1\",\"mode\":\"scout\",\"waypoints\":[{\"x\":100,\"y\":0,\"z\":-300}]},{\"drone_id\":\"d2\",\"mode\":\"scout\",\"waypoints\":[{\"x\":-100,\"y\":0,\"z\":-300}]}]"
 ```
 
 ```powershell
 # PowerShell
 curl.exe -X POST http://127.0.0.1:8080/api/debug/cmd/batch/array `
   -H "Content-Type: application/json" `
-  -d '[{"drone_id":"d1","mode":"recon","waypoints":[{"x":100,"y":0,"z":-300}]},{"drone_id":"d2","mode":"recon","waypoints":[{"x":-100,"y":0,"z":-300}]}]'
+  -d '[{"drone_id":"d1","mode":"scout","waypoints":[{"x":100,"y":0,"z":-300}]},{"drone_id":"d2","mode":"scout","waypoints":[{"x":-100,"y":0,"z":-300}]}]'
 ```
 
 **预期结果**：两架无人机进入同一集结任务；集结完成后，执行引擎为每架机启动独立线程。
@@ -668,14 +668,14 @@ curl.exe http://127.0.0.1:8080/api/debug/drone/2/queue
 
 ```cmd
 :: cmd
-curl -X POST http://127.0.0.1:8080/api/arrays/preview -H "Content-Type: application/json" -d "{\"array_id\":\"preview1\",\"mode\":\"recon\",\"paths\":[{\"pathId\":1,\"drone_id\":\"d1\",\"waypoints\":[{\"location\":{\"x\":100,\"y\":0,\"z\":-300}},{\"location\":{\"x\":300,\"y\":0,\"z\":-300}}]},{\"pathId\":2,\"drone_id\":\"d2\",\"waypoints\":[{\"location\":{\"x\":120,\"y\":0,\"z\":-300}},{\"location\":{\"x\":320,\"y\":0,\"z\":-300}}]}]}"
+curl -X POST http://127.0.0.1:8080/api/arrays/preview -H "Content-Type: application/json" -d "{\"array_id\":\"preview1\",\"mode\":\"scout\",\"paths\":[{\"pathId\":1,\"drone_id\":\"d1\",\"waypoints\":[{\"location\":{\"x\":100,\"y\":0,\"z\":-300}},{\"location\":{\"x\":300,\"y\":0,\"z\":-300}}]},{\"pathId\":2,\"drone_id\":\"d2\",\"waypoints\":[{\"location\":{\"x\":120,\"y\":0,\"z\":-300}},{\"location\":{\"x\":320,\"y\":0,\"z\":-300}}]}]}"
 ```
 
 ```powershell
 # PowerShell
 curl.exe -X POST http://127.0.0.1:8080/api/arrays/preview `
   -H "Content-Type: application/json" `
-  -d '{"array_id":"preview1","mode":"recon","paths":[{"pathId":1,"drone_id":"d1","waypoints":[{"location":{"x":100,"y":0,"z":-300}},{"location":{"x":300,"y":0,"z":-300}}]},{"pathId":2,"drone_id":"d2","waypoints":[{"location":{"x":120,"y":0,"z":-300}},{"location":{"x":320,"y":0,"z":-300}}]}]}'
+  -d '{"array_id":"preview1","mode":"scout","paths":[{"pathId":1,"drone_id":"d1","waypoints":[{"location":{"x":100,"y":0,"z":-300}},{"location":{"x":300,"y":0,"z":-300}}]},{"pathId":2,"drone_id":"d2","waypoints":[{"location":{"x":120,"y":0,"z":-300}},{"location":{"x":320,"y":0,"z":-300}}]}]}'
 ```
 
 **预期结果**：返回 JSON 中 `valid=false`，`collision_risks` 非空，`threshold_m` 对应 `config.yaml` 中的避障半径。
