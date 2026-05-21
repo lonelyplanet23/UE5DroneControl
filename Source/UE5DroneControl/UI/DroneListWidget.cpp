@@ -43,8 +43,7 @@ void UDroneListWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
-    // 先添加演示数据
-    AddDemoDrones();
+    
 
     // 启动刷新定时器
     if (RefreshInterval > 0)
@@ -64,28 +63,57 @@ void UDroneListWidget::NativeDestruct()
 
 void UDroneListWidget::OnRefreshTimer()
 {
-    // 发送HTTP请求轮询
-    FHttpModule& HttpModule = FHttpModule::Get();
-    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = HttpModule.CreateRequest();
-    Request->SetURL(TEXT("http://localhost:8000/api/drones"));
-    Request->SetVerb(TEXT("GET"));
-    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+    FHttpModule& HttpModule = FHttpModule::Get(); //
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = HttpModule.CreateRequest(); //
+    Request->SetURL(TEXT("http://127.0.0.1:8080/api/drones")); // 🌟 换成文档要求的正式后端BaseUrl
+    Request->SetVerb(TEXT("GET")); //
+    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json")); //
 
-    Request->OnProcessRequestComplete().BindLambda([this](FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSuccess)
-    {
-        if (bSuccess && HttpResponse.IsValid() && HttpResponse->GetResponseCode() == 200)
+    // 🌟 核心改动看这里：把原先的 [this] 改成 [this] 并且注意里面的变量名对应关系
+    Request->OnProcessRequestComplete().BindLambda([this](FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSuccess) //
         {
-            FString Response = HttpResponse->GetContentAsString();
-            UE_LOG(LogTemp, Log, TEXT("DroneListWidget: HTTP Success, Response: %s"), *Response);
-            // TODO: 解析JSON，这里先用演示数据
-            // AddDemoDrones(); // 有真实数据后替换
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("DroneListWidget: HTTP Failed, using demo data"));
-            // HTTP失败继续用演示数据，不影响演示
-        }
-    });
+            // 🌟 检查一下你这里是不是误写成了 Request，必须和上面括号里的参数名 (HttpRequest / HttpResponse) 保持一致！
+            if (bSuccess && HttpResponse.IsValid() && HttpResponse->GetResponseCode() == 200) //
+            {
+                FString ResponseStr = HttpResponse->GetContentAsString(); //
 
-    Request->ProcessRequest();
+                // 开始解析顶层 JSON 数组
+                TSharedPtr<FJsonValue> JsonValue;
+                TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseStr);
+
+                if (FJsonSerializer::Deserialize(Reader, JsonValue))
+                {
+                    TArray<FDroneRegistrationViewData> RealDronesArray;
+                    const TArray<TSharedPtr<FJsonValue>> JsonArray = JsonValue->AsArray();
+
+                    for (const auto& Element : JsonArray)
+                    {
+                        TSharedPtr<FJsonObject> Obj = Element->AsObject();
+                        FDroneRegistrationViewData Data;
+
+                        Data.Id = Obj->GetIntegerField(TEXT("id"));
+                        Data.IdStr = Obj->GetStringField(TEXT("id_str"));
+                        Data.Name = Obj->GetStringField(TEXT("name"));
+                        Data.Status = Obj->GetStringField(TEXT("status"));
+                        Data.Battery = Obj->GetIntegerField(TEXT("battery"));
+
+                        double X = Obj->GetNumberField(TEXT("x"));
+                        double Y = Obj->GetNumberField(TEXT("y"));
+                        double Z = Obj->GetNumberField(TEXT("z"));
+                        Data.WorldLocation = FVector(X, Y, Z);
+
+                        RealDronesArray.Add(Data);
+                    }
+
+                    // 成功抛出事件给蓝图
+                    OnDroneDataReceived(RealDronesArray);
+                }
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DroneListWidget: HTTP Failed")); //
+            }
+        });
+
+    Request->ProcessRequest(); //
 }

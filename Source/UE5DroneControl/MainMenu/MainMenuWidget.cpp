@@ -2,9 +2,16 @@
 
 #include "MainMenuWidget.h"
 #include "MainMenuPlayerController.h"
+#include "GameFramework/GameUserSettings.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/SaveGame.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include <fstream>
+#include <string>
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
-#include "Kismet/GameplayStatics.h"
+
 
 void UMainMenuWidget::NativeConstruct()
 {
@@ -67,26 +74,71 @@ TArray<FString> UMainMenuWidget::GetRegisteredDronesSummary() const
 // 通用设置
 // ---------------------------------------------------------------------------
 
-void UMainMenuWidget::SaveSettings(const FString& BackendAddress, float MapCenterLat, float MapCenterLon, bool bUseCesium)
-{
-	// TODO: 将设置存入自定义 GameInstance 或 USaveGame 对象
-	// 当前以 UE_LOG 占位，待 GameInstance 扩展后替换
-	UE_LOG(LogTemp, Log, TEXT("MainMenu SaveSettings: Backend=%s Lat=%.6f Lon=%.6f Cesium=%d"),
-		*BackendAddress, MapCenterLat, MapCenterLon, bUseCesium ? 1 : 0);
 
-	OnSettingsSaved();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// 替换掉原来的 SaveSettings
+void UMainMenuWidget::SaveSettings(const FString& InBackendAddress, float InMapCenterLat, float InMapCenterLon, bool bInUseCesium)
+{
+	// 1. 拼接字符串
+	FString SaveString = FString::Printf(TEXT("%s|%f|%f|%d"), *InBackendAddress, InMapCenterLat, InMapCenterLon, bInUseCesium ? 1 : 0);
+
+	// 2. 路径在 Saved/Settings.txt
+	FString SavePath = FPaths::ProjectSavedDir() + TEXT("Settings.txt");
+
+	// 3. 执行写入
+	bool bSuccess = FFileHelper::SaveStringToFile(SaveString, *SavePath);
+
+	if (bSuccess)
+	{
+		// 如果这里成功，输出日志并在界面显示提示
+		UE_LOG(LogTemp, Warning, TEXT("数据已保存至: %s"), *SavePath);
+		OnSettingsSaved();
+	}
 }
 
+// 替换掉原来的 LoadSettings
 void UMainMenuWidget::LoadSettings(FString& OutBackendAddress, float& OutMapCenterLat, float& OutMapCenterLon, bool& OutbUseCesium) const
 {
-	// TODO: 从自定义 GameInstance 或 USaveGame 读取
-	// 当前返回默认值占位
-	OutBackendAddress = TEXT("ws://192.168.30.104:8080");
-	OutMapCenterLat   = 40.0f;
-	OutMapCenterLon   = 116.0f;
-	OutbUseCesium     = true;
-}
+	FString SavePath = FPaths::ProjectSavedDir() + TEXT("Settings.txt");
+	FString LoadedString;
 
+	if (FFileHelper::LoadFileToString(LoadedString, *SavePath))
+	{
+		TArray<FString> Parsed;
+		LoadedString.ParseIntoArray(Parsed, TEXT("|"));
+		if (Parsed.Num() == 4)
+		{
+			OutBackendAddress = Parsed[0];
+			OutMapCenterLat = FCString::Atof(*Parsed[1]);
+			OutMapCenterLon = FCString::Atof(*Parsed[2]);
+			OutbUseCesium = (Parsed[3] == TEXT("1"));
+			UE_LOG(LogTemp, Log, TEXT("设置已读取"));
+			return;
+		}
+	}
+
+	// 默认值
+	OutBackendAddress = TEXT("ws://192.168.30.104:8080");
+	OutMapCenterLat = 40.0f;
+	OutMapCenterLon = 116.0f;
+	OutbUseCesium = true;
+}
 // ---------------------------------------------------------------------------
 // 导航
 // ---------------------------------------------------------------------------
