@@ -27,7 +27,10 @@
       "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Source/Runtime/Core/Public/**)",
       "Bash(find /d/RedAlert/UE5DroneControl -name *Cesium* -o -name *cesium*)",
       "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Plugins/Marketplace/Cesiumfo9eaf76ca58f3V10/Source/CesiumRuntime/Public/**)",
-      "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Plugins/Marketplace/Cesiumfo9eaf76ca58f3V10/Source/CesiumRuntime/**)"
+      "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Plugins/Marketplace/Cesiumfo9eaf76ca58f3V10/Source/CesiumRuntime/**)",
+      "Bash(python -c \":*)",
+      "Bash(find d:/RedAlert/UE5DroneControl/BackEnd -name jetson_bridge* -o -name simulate_telemetry*)",
+      "Bash(where python:*)"
     ],
     "additionalDirectories": [
       "\\tmp",

@@ -3,6 +3,48 @@
 #include "DroneRegistrySubsystem.h"
 #include "ICoordinateService.h"
 #include "GameFramework/Pawn.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
+namespace
+{
+FString GetDroneRegistrySavePath()
+{
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("DroneRegistry.json"));
+}
+
+FString AvailabilityToString(EDroneAvailability Availability)
+{
+	switch (Availability)
+	{
+	case EDroneAvailability::Online:
+		return TEXT("online");
+	case EDroneAvailability::Lost:
+		return TEXT("lost");
+	case EDroneAvailability::Offline:
+	default:
+		return TEXT("offline");
+	}
+}
+
+EDroneAvailability AvailabilityFromString(const FString& Status)
+{
+	const FString Normalized = Status.ToLower();
+	if (Normalized == TEXT("online"))
+	{
+		return EDroneAvailability::Online;
+	}
+	if (Normalized == TEXT("lost") || Normalized == TEXT("lost_connection"))
+	{
+		return EDroneAvailability::Lost;
+	}
+	return EDroneAvailability::Offline;
+}
+}
 
 UDroneRegistrySubsystem::UDroneRegistrySubsystem()
 {
@@ -13,6 +55,7 @@ void UDroneRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 
 	UE_LOG(LogTemp, Log, TEXT("DroneRegistrySubsystem initialized"));
+	LoadRegisteredDrones();
 }
 
 void UDroneRegistrySubsystem::Deinitialize()
@@ -46,7 +89,22 @@ void UDroneRegistrySubsystem::RegisterDrone(const FDroneDescriptor& Descriptor)
 		return;
 	}
 
+	const FDroneDescriptor* Existing = DroneDescriptors.Find(Descriptor.DroneId);
+	const bool bWasRegistered = Existing != nullptr;
+	const bool bChanged = !Existing ||
+		Existing->Name != Descriptor.Name ||
+		Existing->Slot != Descriptor.Slot ||
+		Existing->BackendIdString != Descriptor.BackendIdString ||
+		Existing->IpAddress != Descriptor.IpAddress ||
+		Existing->ControlPort != Descriptor.ControlPort ||
+		Existing->MavlinkSystemId != Descriptor.MavlinkSystemId ||
+		Existing->BitIndex != Descriptor.BitIndex ||
+		Existing->UEReceivePort != Descriptor.UEReceivePort ||
+		Existing->TopicPrefix != Descriptor.TopicPrefix;
+
 	DroneDescriptors.Add(Descriptor.DroneId, Descriptor);
+	FDroneTelemetrySnapshot& Snapshot = TelemetryCache.FindOrAdd(Descriptor.DroneId);
+	Snapshot.DroneId = Descriptor.DroneId;
 	if (!CommandModes.Contains(Descriptor.DroneId))
 	{
 		CommandModes.Add(Descriptor.DroneId, EDroneCommandMode::Move);
@@ -55,7 +113,158 @@ void UDroneRegistrySubsystem::RegisterDrone(const FDroneDescriptor& Descriptor)
 	UE_LOG(LogTemp, Log, TEXT("Drone registered: %s (ID=%d, BitIndex=%d)"),
 		*Descriptor.Name, Descriptor.DroneId, Descriptor.BitIndex);
 
-	OnDroneRegistered.Broadcast(Descriptor.DroneId);
+	if (!bWasRegistered)
+	{
+		OnDroneRegistered.Broadcast(Descriptor.DroneId);
+	}
+	if (bChanged)
+	{
+		SaveRegisteredDrones();
+	}
+}
+
+bool UDroneRegistrySubsystem::SaveRegisteredDrones() const
+{
+	TArray<TSharedPtr<FJsonValue>> DroneArray;
+	for (const TPair<int32, FDroneDescriptor>& Pair : DroneDescriptors)
+	{
+		const FDroneDescriptor& Desc = Pair.Value;
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetNumberField(TEXT("drone_id"), Desc.DroneId);
+		Obj->SetStringField(TEXT("backend_id_str"), Desc.BackendIdString);
+		Obj->SetStringField(TEXT("name"), Desc.Name);
+		Obj->SetNumberField(TEXT("slot"), Desc.Slot);
+		Obj->SetStringField(TEXT("ip"), Desc.IpAddress);
+		Obj->SetNumberField(TEXT("control_port"), Desc.ControlPort);
+		Obj->SetNumberField(TEXT("mavlink_system_id"), Desc.MavlinkSystemId);
+		Obj->SetNumberField(TEXT("bit_index"), Desc.BitIndex);
+		Obj->SetNumberField(TEXT("ue_receive_port"), Desc.UEReceivePort);
+		Obj->SetStringField(TEXT("topic_prefix"), Desc.TopicPrefix);
+
+		const FDroneTelemetrySnapshot* Snapshot = TelemetryCache.Find(Desc.DroneId);
+		Obj->SetStringField(TEXT("availability"),
+			AvailabilityToString(Snapshot ? Snapshot->Availability : EDroneAvailability::Offline));
+
+		DroneArray.Add(MakeShared<FJsonValueObject>(Obj));
+	}
+
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetArrayField(TEXT("drones"), DroneArray);
+
+	FString Output;
+	TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Output);
+	if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Failed to serialize drone registry"));
+		return false;
+	}
+
+	const FString SavePath = GetDroneRegistrySavePath();
+	if (!FFileHelper::SaveStringToFile(Output, *SavePath))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Failed to save drone registry: %s"), *SavePath);
+		return false;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("Drone registry saved: %s"), *SavePath);
+	return true;
+}
+
+bool UDroneRegistrySubsystem::LoadRegisteredDrones()
+{
+	const FString SavePath = GetDroneRegistrySavePath();
+	FString Input;
+	if (!FFileHelper::LoadFileToString(Input, *SavePath))
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Root;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Input);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Failed to parse drone registry: %s"), *SavePath);
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* DroneArray = nullptr;
+	if (!Root->TryGetArrayField(TEXT("drones"), DroneArray))
+	{
+		return false;
+	}
+
+	for (const TSharedPtr<FJsonValue>& Value : *DroneArray)
+	{
+		const TSharedPtr<FJsonObject> Obj = Value.IsValid() ? Value->AsObject() : nullptr;
+		if (!Obj.IsValid())
+		{
+			continue;
+		}
+
+		FDroneDescriptor Desc;
+		Obj->TryGetNumberField(TEXT("drone_id"), Desc.DroneId);
+		if (Desc.DroneId <= 0)
+		{
+			continue;
+		}
+
+		Obj->TryGetStringField(TEXT("backend_id_str"), Desc.BackendIdString);
+		Obj->TryGetStringField(TEXT("name"), Desc.Name);
+		Obj->TryGetNumberField(TEXT("slot"), Desc.Slot);
+		Obj->TryGetStringField(TEXT("ip"), Desc.IpAddress);
+		Obj->TryGetNumberField(TEXT("control_port"), Desc.ControlPort);
+		Obj->TryGetNumberField(TEXT("mavlink_system_id"), Desc.MavlinkSystemId);
+		Obj->TryGetNumberField(TEXT("bit_index"), Desc.BitIndex);
+		Obj->TryGetNumberField(TEXT("ue_receive_port"), Desc.UEReceivePort);
+		Obj->TryGetStringField(TEXT("topic_prefix"), Desc.TopicPrefix);
+
+		DroneDescriptors.Add(Desc.DroneId, Desc);
+		if (!CommandModes.Contains(Desc.DroneId))
+		{
+			CommandModes.Add(Desc.DroneId, EDroneCommandMode::Move);
+		}
+
+		FString AvailabilityText;
+		Obj->TryGetStringField(TEXT("availability"), AvailabilityText);
+		FDroneTelemetrySnapshot Snapshot;
+		Snapshot.DroneId = Desc.DroneId;
+		Snapshot.Availability = AvailabilityFromString(AvailabilityText);
+		if (Snapshot.Availability == EDroneAvailability::Online)
+		{
+			// A saved "online" state is only historical. The current run must
+			// prove connectivity again through backend polling or telemetry.
+			Snapshot.Availability = EDroneAvailability::Lost;
+		}
+		TelemetryCache.Add(Desc.DroneId, Snapshot);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("Loaded %d drones from local registry"), DroneDescriptors.Num());
+	return true;
+}
+
+void UDroneRegistrySubsystem::MarkDroneAvailability(int32 DroneId, EDroneAvailability Availability)
+{
+	if (!DroneDescriptors.Contains(DroneId))
+	{
+		return;
+	}
+
+	FDroneTelemetrySnapshot Snapshot;
+	if (const FDroneTelemetrySnapshot* Existing = TelemetryCache.Find(DroneId))
+	{
+		Snapshot = *Existing;
+	}
+	if (Snapshot.DroneId == DroneId && Snapshot.Availability == Availability)
+	{
+		return;
+	}
+	Snapshot.DroneId = DroneId;
+	Snapshot.Availability = Availability;
+	Snapshot.LastUpdateTime = FPlatformTime::Seconds();
+	TelemetryCache.Add(DroneId, Snapshot);
+	OnTelemetryUpdated.Broadcast(DroneId, Snapshot);
+	SaveRegisteredDrones();
 }
 
 void UDroneRegistrySubsystem::RegisterSenderPawn(int32 DroneId, APawn* PawnRef)
@@ -92,12 +301,19 @@ void UDroneRegistrySubsystem::UnregisterDrone(int32 DroneId)
 	CommandModes.Remove(DroneId);
 
 	UE_LOG(LogTemp, Log, TEXT("Drone unregistered: %d"), DroneId);
+	SaveRegisteredDrones();
 }
 
 void UDroneRegistrySubsystem::UpdateTelemetry(int32 DroneId, const FDroneTelemetrySnapshot& Snapshot)
 {
+	const FDroneTelemetrySnapshot* Existing = TelemetryCache.Find(DroneId);
+	const bool bAvailabilityChanged = !Existing || Existing->Availability != Snapshot.Availability;
 	TelemetryCache.Add(DroneId, Snapshot);
 	OnTelemetryUpdated.Broadcast(DroneId, Snapshot);
+	if (bAvailabilityChanged)
+	{
+		SaveRegisteredDrones();
+	}
 }
 
 bool UDroneRegistrySubsystem::GetTelemetry(int32 DroneId, FDroneTelemetrySnapshot& OutSnapshot) const

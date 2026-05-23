@@ -31,11 +31,11 @@ FVector UCesiumCoordinateService::GeographicToWorld_Implementation(double Latitu
 		return FVector::ZeroVector;
 	}
 
-	// TransformLongitudeLatitudeHeightPositionToUnreal returns local coords relative to
-	// the CesiumGeoreference actor. We must then transform to world space.
-	FVector LocalPos = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(
+	// TransformLongitudeLatitudeHeightPositionToUnreal returns UE local coords relative to
+	// the CesiumGeoreference actor's coordinate system (i.e. UE world coords when the
+	// Georeference actor is at the world origin, which is the standard setup).
+	return Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(
 		FVector(Longitude, Latitude, Altitude));
-	return Georeference->GetActorTransform().TransformPosition(LocalPos);
 }
 
 FVector UCesiumCoordinateService::WorldToGeographic_Implementation(const FVector& WorldLocation) const
@@ -45,9 +45,7 @@ FVector UCesiumCoordinateService::WorldToGeographic_Implementation(const FVector
 		return FVector::ZeroVector;
 	}
 
-	// Inverse: world → local → LLH
-	FVector LocalPos = Georeference->GetActorTransform().InverseTransformPosition(WorldLocation);
-	return Georeference->TransformUnrealPositionToLongitudeLatitudeHeight(LocalPos);
+	return Georeference->TransformUnrealPositionToLongitudeLatitudeHeight(WorldLocation);
 }
 
 bool UCesiumCoordinateService::IsGeographicSupported_Implementation() const

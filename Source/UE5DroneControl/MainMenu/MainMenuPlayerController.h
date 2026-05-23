@@ -41,6 +41,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MainMenu|Navigation")
 	void GoToPreview();
 
+	/**
+	 * 跳转到预演关卡，同时将经纬度/海拔写入 DroneNetworkManager 供 CesiumGeoreference 使用。
+	 * 如果 Altitude < 0 则忽略，保持上次设置。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MainMenu|Navigation")
+	void GoToPreviewWithOrigin(double Latitude, double Longitude, double Altitude);
+
+	/**
+	 * 从已保存的 Settings.txt 读取经纬度/海拔，写入 DroneNetworkManager 后跳转预演关卡。
+	 * 如果文件不存在则直接跳转，不修改 CesiumGeoreference。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MainMenu|Navigation")
+	void GoToPreviewFromSavedSettings();
+
 	// -----------------------------------------------------------------------
 	// Widget 类引用（在蓝图子类中赋值）
 	// -----------------------------------------------------------------------

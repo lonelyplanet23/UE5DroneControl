@@ -64,6 +64,15 @@ public:
 	void RegisterDrone(const FDroneDescriptor& Descriptor);
 
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	bool SaveRegisteredDrones() const;
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	bool LoadRegisteredDrones();
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void MarkDroneAvailability(int32 DroneId, EDroneAvailability Availability);
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
 	void RegisterSenderPawn(int32 DroneId, APawn* PawnRef);
 
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")

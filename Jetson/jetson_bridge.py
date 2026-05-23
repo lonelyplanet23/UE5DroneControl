@@ -141,10 +141,10 @@ class JetsonBridge(Node):
         data["timestamp"] = self.get_clock().now().nanoseconds // 1000  # 微秒
 
         if self.odometry:
-            data["position"] = list(self.odometry.position)
-            data["q"] = list(self.odometry.q)
-            data["velocity"] = list(self.odometry.velocity)
-            data["angular_velocity"] = list(self.odometry.angular_velocity)
+            data["position"] = [float(v) for v in self.odometry.position]
+            data["q"] = [float(v) for v in self.odometry.q]
+            data["velocity"] = [float(v) for v in self.odometry.velocity]
+            data["angular_velocity"] = [float(v) for v in self.odometry.angular_velocity]
 
         if self.status_v1:
             data["arming_state"] = self.status_v1.arming_state
@@ -152,12 +152,12 @@ class JetsonBridge(Node):
 
         if self.local_pos:
             data["local_position"] = [
-                self.local_pos.x, self.local_pos.y, self.local_pos.z]
+                float(self.local_pos.x), float(self.local_pos.y), float(self.local_pos.z)]
 
         if self.global_pos:
-            data["gps_lat"] = self.global_pos.latitude_deg
-            data["gps_lon"] = self.global_pos.longitude_deg
-            data["gps_alt"] = self.global_pos.altitude_amsl
+            data["gps_lat"] = float(self.global_pos.latitude_deg)
+            data["gps_lon"] = float(self.global_pos.longitude_deg)
+            data["gps_alt"] = float(self.global_pos.altitude_amsl)
             data["gps_fix"] = bool(self.global_pos.valid)
 
         if self.battery:

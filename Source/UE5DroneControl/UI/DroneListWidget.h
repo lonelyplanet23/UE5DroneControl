@@ -63,6 +63,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UI") //
         void AddDroneItem(const FString& Name, bool bOnline); //
 
+    UFUNCTION(BlueprintCallable, Category = "UI")
+        void RefreshFromRegistry();
+
     /** 清空列表 */ //
     UFUNCTION(BlueprintCallable, Category = "UI") //
         void ClearList(); //

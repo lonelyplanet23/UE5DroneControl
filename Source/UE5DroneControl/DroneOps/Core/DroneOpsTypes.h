@@ -117,6 +117,18 @@ struct FDroneDescriptor
 	int32 DroneId = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone")
+	int32 Slot = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone")
+	FString BackendIdString;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone")
+	FString IpAddress;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone")
+	int32 ControlPort = 8889;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone")
 	int32 MavlinkSystemId = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone")

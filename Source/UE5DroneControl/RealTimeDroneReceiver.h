@@ -151,8 +151,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "RealTime Config")
 	bool IsPaused() const { return bIsPaused; }
 
+	UFUNCTION(BlueprintCallable, Category = "Drone Identity")
+	void ApplyDescriptor(const FDroneDescriptor& Descriptor, EDroneAvailability InitialAvailability);
+
 	// Override to block SetClickTargetLocation while paused
 	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
+
+	// GPS anchor (UE5 world coords, cm) set on power_on / reconnect.
+	// Exposed publicly so dispatch logic can use it for coordinate remapping.
+	FVector AnchorWorldLocation = FVector::ZeroVector;
+	bool bHasGpsAnchor = false;
 
 private:
 	bool bIsPaused = false;
@@ -171,14 +179,10 @@ private:
 	FVector ReferencePosition = FVector::ZeroVector;
 	bool bHasReceivedFirstData = false;
 
-	// GPS anchor (UE5 world coords, cm) set on power_on / reconnect
-	FVector AnchorWorldLocation = FVector::ZeroVector;
-	bool bHasGpsAnchor = false;
-
-	int32 CurrentDetectedPort = -1;
 	float AutoDetectStartTime = 0.0f;
 	bool bReceivedDataInAutoDetect = false;
 	float LastUpdateTime = 0.0f;
+	int32 CurrentDetectedPort = -1;
 
 	TArray<uint8> PendingData;
 	bool bHasPendingData = false;

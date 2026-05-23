@@ -29,7 +29,7 @@ void UDroneTelemetryComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const double Now = FPlatformTime::Seconds();
 	if ((Now - LastUpdateRealTime) > OfflineTimeoutSec)
 	{
-		if (CurrentSnapshot.Availability != EDroneAvailability::Lost)
+		if (CurrentSnapshot.Availability == EDroneAvailability::Online)
 		{
 			CurrentSnapshot.Availability = EDroneAvailability::Lost;
 			PropagateToRegistry();
@@ -40,7 +40,6 @@ void UDroneTelemetryComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 void UDroneTelemetryComponent::PushSnapshot(const FDroneTelemetrySnapshot& Snapshot)
 {
 	CurrentSnapshot = Snapshot;
-	CurrentSnapshot.Availability = EDroneAvailability::Online;
 
 	// LastUpdateRealTime uses FPlatformTime for interval calculations in C++
 	LastUpdateRealTime = FPlatformTime::Seconds();

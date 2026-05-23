@@ -19,7 +19,7 @@ class ADronePathActor;
  *   - Own the WebSocket connection; route incoming messages to the registry.
  *   - Expose SendMoveCommand / SendPauseCommand for the player controller.
  */
-UCLASS()
+UCLASS(config=Game)
 class UE5DRONECONTROL_API UDroneNetworkManager : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
@@ -31,16 +31,38 @@ public:
 	// ---- Configuration ----
 
 	/** Backend base URL, e.g. "http://127.0.0.1:8080" */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")
-	FString BackendBaseUrl = TEXT("http://127.0.0.1:8080");
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "Network")
+	FString BackendBaseUrl = TEXT("http://10.196.184.78:8080");
 
 	/** WebSocket URL, e.g. "ws://127.0.0.1:8081/ws" */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")
-	FString WebSocketUrl = TEXT("ws://127.0.0.1:8081/ws");
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "Network")
+	FString WebSocketUrl = TEXT("ws://10.196.184.78:8081/ws");
 
 	/** How often (seconds) to poll GET /api/drones */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Network")
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "Network")
 	float PollIntervalSec = 3.0f;
+
+	// ---- Pending Georeference Origin (set before transitioning to preview level) ----
+
+	/** Latitude to apply to CesiumGeoreference on preview level load. 0 = not set. */
+	UPROPERTY(BlueprintReadWrite, Category = "Network")
+	double PendingOriginLatitude = 0.0;
+
+	/** Longitude to apply to CesiumGeoreference on preview level load. 0 = not set. */
+	UPROPERTY(BlueprintReadWrite, Category = "Network")
+	double PendingOriginLongitude = 0.0;
+
+	/** Altitude (WGS84 ellipsoid height, metres) to apply to CesiumGeoreference on preview level load. -1 = not set. */
+	UPROPERTY(BlueprintReadWrite, Category = "Network")
+	double PendingOriginAltitude = -1.0;
+
+	/** Returns true if a pending origin has been written and not yet consumed. */
+	UFUNCTION(BlueprintPure, Category = "Network")
+	bool HasPendingGeoreferenceOrigin() const { return PendingOriginAltitude >= 0.0; }
+
+	/** Clear the pending origin after it has been consumed. */
+	UFUNCTION(BlueprintCallable, Category = "Network")
+	void ClearPendingGeoreferenceOrigin() { PendingOriginLatitude = 0.0; PendingOriginLongitude = 0.0; PendingOriginAltitude = -1.0; }
 
 	// ---- Control API ----
 
@@ -60,6 +82,13 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void SendPauseCommand(const TArray<int32>& DroneIds, bool bPause);
+
+	/**
+	 * Register a drone on the backend via HTTP POST /api/drones.
+	 * Slot is the backend port-map slot (1-6). The backend assigns the numeric id.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Network")
+	void RegisterDroneToBackend(int32 Slot, const FString& IpAddress, FOnHttpResponse OnComplete);
 
 	/**
 	 * Submit an array task to the backend via HTTP POST /api/arrays.
@@ -84,6 +113,13 @@ public:
 		int32 /*DroneId*/, const FString& /*Event*/,
 		double /*GpsLat*/, double /*GpsLon*/, double /*GpsAlt*/);
 	FOnDroneWsEvent OnDroneWsEvent;
+
+	/**
+	 * Returns the last GPS anchor received via power_on or reconnect for the given drone.
+	 * Returns false if no anchor has been received yet for that drone.
+	 * Actors can call this in BeginPlay to catch up on events that arrived before they spawned.
+	 */
+	bool GetCachedGpsAnchor(int32 DroneId, double& OutLat, double& OutLon, double& OutAlt) const;
 
 	// Fired when a WebSocket "alert" message arrives (low_battery / lost_connection).
 	// Value is battery % for low_battery, 0 otherwise.
@@ -123,6 +159,10 @@ private:
 
 	FTimerHandle PollTimer;
 
+	FOnHttpResponse PendingRegisterCallback;
+	int32 PendingRegisterSlot = 0;
+	FString PendingRegisterIpAddress;
+
 	void StartPolling();
 	void StopPolling();
 	void PollDroneList();
@@ -130,10 +170,22 @@ private:
 	UFUNCTION()
 	void OnDroneListResponse(bool bSuccess, const FString& Body);
 
+	UFUNCTION()
+	void OnRegisterDroneResponse(bool bSuccess, const FString& Body);
+
 	void ConnectWebSocket();
 
 	UFUNCTION()
 	void OnWsMessage(const FString& Message);
 
 	void SyncDroneListToRegistry(const TArray<TSharedPtr<FJsonObject>>& DroneObjects);
+
+	// Cached GPS anchors keyed by DroneId — updated on power_on / reconnect.
+	struct FGpsAnchorCache
+	{
+		double Lat = 0.0;
+		double Lon = 0.0;
+		double Alt = 0.0;
+	};
+	TMap<int32, FGpsAnchorCache> CachedGpsAnchors;
 };

@@ -3,6 +3,8 @@
 #include "PathDroneMatchItemWidget.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
+#include "RealTimeDroneReceiver.h"
+#include "MultiDroneCharacter.h"
 #include "Components/ComboBoxString.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
@@ -10,7 +12,9 @@
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "DroneOps/Network/DroneNetworkManager.h"
+#include "PathEditor/DronePathActor.h"
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
@@ -372,6 +376,10 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 	UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>();
 	if (!NetMgr) return;
 
+	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	if (!Registry) return;
+
+	// Build DroneId -> PathSaveData map
 	TMap<int32, FDronePathSaveData> DispatchMap;
 	for (const auto& Pair : MatchedPairs)
 	{
@@ -381,11 +389,67 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 		}
 	}
 
+	// Find reference drone: lowest DroneId among matched drones
+	int32 RefDroneId = MAX_int32;
+	for (const auto& Pair : DispatchMap)
+	{
+		if (Pair.Key < RefDroneId)
+		{
+			RefDroneId = Pair.Key;
+		}
+	}
+
+	// Get reference drone's GPS anchor (UE world location, cm)
+	FVector RefAnchor = FVector::ZeroVector;
+	bool bHasAnchor = false;
+	if (AActor* ReceiverActor = Registry->GetReceiverActor(RefDroneId))
+	{
+		if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(ReceiverActor))
+		{
+			if (Receiver->bHasGpsAnchor)
+			{
+				RefAnchor = Receiver->AnchorWorldLocation;
+				bHasAnchor = true;
+			}
+		}
+	}
+
+	if (!bHasAnchor)
+	{
+		SetStatusMessage(FString::Printf(TEXT("参考机 DroneId=%d 尚未获得GPS锚点，请等待上电信息"), RefDroneId));
+		return;
+	}
+
+	// Get reference path's first waypoint as the coordinate origin in edit-map space
+	const FDronePathSaveData& RefPath = DispatchMap[RefDroneId];
+	if (RefPath.Waypoints.IsEmpty())
+	{
+		SetStatusMessage(TEXT("参考机路径没有航点"));
+		return;
+	}
+	const FVector RefEditOrigin = RefPath.Waypoints[0].Location;
+
+	// Remap all waypoints: offset relative to ref path origin, then add ref anchor
+	TMap<int32, FDronePathSaveData> RemappedMap;
+	for (auto& Pair : DispatchMap)
+	{
+		FDronePathSaveData Remapped = Pair.Value;
+		for (FDroneWaypointSaveData& Wp : Remapped.Waypoints)
+		{
+			// (EditMap_Waypoint - EditMap_RefOrigin) gives shape-relative offset
+			// Add RefAnchor to place in Cesium world space
+			Wp.Location = (Wp.Location - RefEditOrigin) + RefAnchor;
+		}
+		RemappedMap.Add(Pair.Key, Remapped);
+	}
+
 	FOnHttpResponse Callback;
 	Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnDispatchResponse);
-	NetMgr->SendArrayTaskFromData(DispatchMap, DispatchMode, Callback);
+	PendingRemappedMap = RemappedMap;
+	NetMgr->SendArrayTaskFromData(RemappedMap, DispatchMode, Callback);
 
-	SetStatusMessage(FString::Printf(TEXT("正在派发... mode=%s"), *DroneCommandModeToProtocolString(DispatchMode)));
+	SetStatusMessage(FString::Printf(TEXT("正在派发... 参考机DroneId=%d  mode=%s"),
+		RefDroneId, *DroneCommandModeToProtocolString(DispatchMode)));
 	if (DispatchButton) DispatchButton->SetIsEnabled(false);
 }
 
@@ -399,12 +463,14 @@ void USequenceDispatchPanelWidget::OnDispatchResponse(bool bSuccess, const FStri
 	if (bSuccess)
 	{
 		SetStatusMessage(TEXT("派发成功"));
+		StartShadowDronePlayback();
 		MatchedPairs.Empty();
 		SetPanelState(ESequencePanelState::Collapsed);
 	}
 	else
 	{
 		SetStatusMessage(FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
+		PendingRemappedMap.Empty();
 		if (DispatchButton) DispatchButton->SetIsEnabled(true);
 	}
 }
@@ -415,4 +481,92 @@ void USequenceDispatchPanelWidget::SetStatusMessage(const FString& Message)
 	{
 		StatusText->SetText(FText::FromString(Message));
 	}
+}
+
+void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
+{
+	for (ADronePathActor* PathActor : ActiveDispatchPathActors)
+	{
+		if (IsValid(PathActor))
+		{
+			PathActor->StopMovement();
+			PathActor->Destroy();
+		}
+	}
+	ActiveDispatchPathActors.Empty();
+}
+
+void USequenceDispatchPanelWidget::StartShadowDronePlayback()
+{
+	ClearActiveDispatchPaths();
+
+	if (PendingRemappedMap.IsEmpty())
+	{
+		return;
+	}
+
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC) return;
+
+	UWorld* World = PC->GetWorld();
+	if (!World) return;
+
+	UGameInstance* GI = PC->GetGameInstance();
+	if (!GI) return;
+
+	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+	if (!Registry) return;
+
+	for (const TPair<int32, FDronePathSaveData>& Pair : PendingRemappedMap)
+	{
+		const int32 DroneId = Pair.Key;
+		const FDronePathSaveData& PathData = Pair.Value;
+
+		if (PathData.Waypoints.IsEmpty()) continue;
+
+		// 找到对应影子机（SenderPawn）
+		APawn* ShadowPawn = Registry->GetSenderPawn(DroneId);
+		if (!IsValid(ShadowPawn)) continue;
+
+		// 停止跟随镜像机，否则 Tick 会每帧把影子机拉回镜像机位置
+		if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
+		{
+			Shadow->bFollowingMirror = false;
+		}
+
+		// Spawn DronePathActor
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ADronePathActor* PathActor = World->SpawnActor<ADronePathActor>(
+			ADronePathActor::StaticClass(), FTransform::Identity, SpawnParams);
+		if (!IsValid(PathActor)) continue;
+
+		PathActor->SetPathNumericId(PathData.PathId);
+		PathActor->bClosedLoop = PathData.bClosedLoop;
+
+		// segmentSpeed=0 表示"使用默认速度"，DronePathActor 需要 >0 的速度才能正常计算 duration
+		constexpr float DefaultSpeedMps = 5.0f;
+
+		for (int32 i = 0; i < PathData.Waypoints.Num(); ++i)
+		{
+			const FDroneWaypointSaveData& WpData = PathData.Waypoints[i];
+			const float EffectiveSpeed = (i == 0) ? 0.0f : (WpData.SegmentSpeed > KINDA_SMALL_NUMBER ? WpData.SegmentSpeed : DefaultSpeedMps);
+			const int32 NewIdx = PathActor->AddWaypoint(WpData.Location, EffectiveSpeed);
+			if (PathActor->Waypoints.IsValidIndex(NewIdx))
+			{
+				PathActor->Waypoints[NewIdx].WaitTime = WpData.WaitTime;
+				PathActor->Waypoints[NewIdx].SegmentSpeed = EffectiveSpeed;
+			}
+		}
+
+		PathActor->RefreshPath();
+		PathActor->StartMovement(ShadowPawn);
+
+		ActiveDispatchPathActors.Add(PathActor);
+
+		UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Shadow drone DroneId=%d started playback along path %d"),
+			DroneId, PathData.PathId);
+	}
+
+	PendingRemappedMap.Empty();
 }

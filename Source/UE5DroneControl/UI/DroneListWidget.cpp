@@ -1,10 +1,9 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "DroneListWidget.h"
+#include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "Components/ScrollBox.h"
-#include "HttpModule.h"
-#include "Interfaces/IHttpRequest.h"
-#include "Interfaces/IHttpResponse.h"
+#include "Engine/GameInstance.h"
 
 void UDroneListWidget::AddDroneItem(const FString& Name, bool bOnline)
 {
@@ -39,11 +38,78 @@ void UDroneListWidget::AddDemoDrones()
     UE_LOG(LogTemp, Log, TEXT("DroneListWidget: Added 3 demo drones"));
 }
 
+void UDroneListWidget::RefreshFromRegistry()
+{
+    UGameInstance* GI = GetGameInstance();
+    UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+    if (!Registry)
+    {
+        return;
+    }
+
+    ClearList();
+
+    TArray<FDroneRegistrationViewData> ViewData;
+    TArray<FDroneDescriptor> Descriptors = Registry->GetAllDroneDescriptors();
+    Descriptors.Sort([](const FDroneDescriptor& A, const FDroneDescriptor& B)
+    {
+        const int32 AOrder = A.Slot > 0 ? A.Slot : A.DroneId;
+        const int32 BOrder = B.Slot > 0 ? B.Slot : B.DroneId;
+        return AOrder < BOrder;
+    });
+
+    for (const FDroneDescriptor& Desc : Descriptors)
+    {
+        FDroneTelemetrySnapshot Snapshot;
+        const bool bHasTelemetry = Registry->GetTelemetry(Desc.DroneId, Snapshot);
+        const EDroneAvailability Availability = bHasTelemetry
+            ? Snapshot.Availability
+            : EDroneAvailability::Lost;
+
+        if (ListItemClass && DroneScrollBox)
+        {
+            UDroneListItemWidget* Item = CreateWidget<UDroneListItemWidget>(GetWorld(), ListItemClass);
+            if (Item)
+            {
+                Item->SetDroneDataWithModeAndAvailability(
+                    Desc.DroneId,
+                    Desc.Name,
+                    Availability,
+                    Registry->GetDroneCommandMode(Desc.DroneId));
+                DroneScrollBox->AddChild(Item);
+            }
+        }
+
+        FDroneRegistrationViewData Data;
+		Data.Id = Desc.DroneId;
+		Data.IdStr = Desc.BackendIdString;
+		Data.Name = Desc.Name;
+		Data.Battery = -1; // battery comes from backend HTTP polling, not from local telemetry snapshot
+		Data.WorldLocation = Snapshot.WorldLocation;
+        switch (Availability)
+        {
+        case EDroneAvailability::Online:
+            Data.Status = TEXT("online");
+            break;
+        case EDroneAvailability::Lost:
+            Data.Status = TEXT("lost");
+            break;
+        case EDroneAvailability::Offline:
+        default:
+            Data.Status = TEXT("offline");
+            break;
+        }
+        ViewData.Add(Data);
+    }
+
+    OnDroneDataReceived(ViewData);
+}
+
 void UDroneListWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
-    
+    RefreshFromRegistry();
 
     // 启动刷新定时器
     if (RefreshInterval > 0)
@@ -63,57 +129,5 @@ void UDroneListWidget::NativeDestruct()
 
 void UDroneListWidget::OnRefreshTimer()
 {
-    FHttpModule& HttpModule = FHttpModule::Get(); //
-    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = HttpModule.CreateRequest(); //
-    Request->SetURL(TEXT("http://127.0.0.1:8080/api/drones")); // 🌟 换成文档要求的正式后端BaseUrl
-    Request->SetVerb(TEXT("GET")); //
-    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json")); //
-
-    // 🌟 核心改动看这里：把原先的 [this] 改成 [this] 并且注意里面的变量名对应关系
-    Request->OnProcessRequestComplete().BindLambda([this](FHttpRequestPtr HttpRequest, FHttpResponsePtr HttpResponse, bool bSuccess) //
-        {
-            // 🌟 检查一下你这里是不是误写成了 Request，必须和上面括号里的参数名 (HttpRequest / HttpResponse) 保持一致！
-            if (bSuccess && HttpResponse.IsValid() && HttpResponse->GetResponseCode() == 200) //
-            {
-                FString ResponseStr = HttpResponse->GetContentAsString(); //
-
-                // 开始解析顶层 JSON 数组
-                TSharedPtr<FJsonValue> JsonValue;
-                TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseStr);
-
-                if (FJsonSerializer::Deserialize(Reader, JsonValue))
-                {
-                    TArray<FDroneRegistrationViewData> RealDronesArray;
-                    const TArray<TSharedPtr<FJsonValue>> JsonArray = JsonValue->AsArray();
-
-                    for (const auto& Element : JsonArray)
-                    {
-                        TSharedPtr<FJsonObject> Obj = Element->AsObject();
-                        FDroneRegistrationViewData Data;
-
-                        Data.Id = Obj->GetIntegerField(TEXT("id"));
-                        Data.IdStr = Obj->GetStringField(TEXT("id_str"));
-                        Data.Name = Obj->GetStringField(TEXT("name"));
-                        Data.Status = Obj->GetStringField(TEXT("status"));
-                        Data.Battery = Obj->GetIntegerField(TEXT("battery"));
-
-                        double X = Obj->GetNumberField(TEXT("x"));
-                        double Y = Obj->GetNumberField(TEXT("y"));
-                        double Z = Obj->GetNumberField(TEXT("z"));
-                        Data.WorldLocation = FVector(X, Y, Z);
-
-                        RealDronesArray.Add(Data);
-                    }
-
-                    // 成功抛出事件给蓝图
-                    OnDroneDataReceived(RealDronesArray);
-                }
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("DroneListWidget: HTTP Failed")); //
-            }
-        });
-
-    Request->ProcessRequest(); //
+    RefreshFromRegistry();
 }

@@ -9,6 +9,7 @@
 
 class UPathFileListItemWidget;
 class UPathDroneMatchItemWidget;
+class ADronePathActor;
 
 UENUM()
 enum class ESequencePanelState : uint8
@@ -73,6 +74,19 @@ private:
 	TMap<int32, int32> MatchedPairs; // PathIndex -> DroneId
 	int32 SelectedPathIndex = INDEX_NONE; // 当前选中的 path（等待分配 drone）
 	EDroneCommandMode DispatchMode = EDroneCommandMode::Scout;
+
+	// 派发时缓存的重映射路径（DroneId -> PathSaveData），供成功回调后本地驱动影子机使用
+	TMap<int32, FDronePathSaveData> PendingRemappedMap;
+
+	// 当前派发产生的 PathActor（影子机路径），下次派发前清除
+	UPROPERTY()
+	TArray<TObjectPtr<ADronePathActor>> ActiveDispatchPathActors;
+
+	// 清除上次派发留下的 PathActor
+	void ClearActiveDispatchPaths();
+
+	// 派发成功后：为每个影子机 spawn DronePathActor 并驱动移动
+	void StartShadowDronePlayback();
 
 	static bool bStaticPanelInteractive;
 

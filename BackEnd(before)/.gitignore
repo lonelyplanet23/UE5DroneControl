@@ -1,7 +1,0 @@
-logs/
-cpp/logs/
-cpp/data/
-mock_ue/.venv/
-mock_ue/.pytest_cache/
-mock_ue/**/__pycache__/
-mock_ue/**/*.pyc

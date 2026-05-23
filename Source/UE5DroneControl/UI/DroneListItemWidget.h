@@ -43,9 +43,15 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UI")
     void SetDroneData(const FString& Name, bool bOnline);
 
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void SetDroneDataWithAvailability(const FString& Name, EDroneAvailability Availability);
+
     /** 设置真实无人机数据，并显示/切换当前指令模式 */
     UFUNCTION(BlueprintCallable, Category = "UI")
     void SetDroneDataWithMode(int32 InDroneId, const FString& Name, bool bOnline, EDroneCommandMode InMode);
+
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void SetDroneDataWithModeAndAvailability(int32 InDroneId, const FString& Name, EDroneAvailability Availability, EDroneCommandMode InMode);
 
 protected:
     virtual void NativeConstruct() override;

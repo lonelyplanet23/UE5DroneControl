@@ -105,6 +105,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Assembly")
 	void SetPaused(bool bPause);
 
+	/**
+	 * True while the shadow drone has not yet received a player command after power_on.
+	 * In this state the shadow drone follows the mirror drone every tick.
+	 * Automatically set to true on power_on/reconnect, false on first player command.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Assembly")
+	bool bFollowingMirror = true;
+
 	// ---- Delay metric ----
 
 	/**
@@ -126,8 +134,6 @@ public:
 	virtual void StopClickTargetSending() override;
 
 private:
-	// Called on power_on / reconnect to sync shadow drone position to mirror drone
-	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
 	bool bInAssemblyMode = false;
 	bool bIsPaused = false;
 	bool bWasMovingBeforePause = false;
@@ -144,4 +150,12 @@ private:
 	void OnAssemblingProgress(const FString& ArrayId, int32 ReadyCount, int32 TotalCount);
 	void OnAssemblyComplete(const FString& ArrayId);
 	void OnAssemblyTimeout(const FString& ArrayId, int32 ReadyCount, int32 TotalCount);
+
+	// Called on power_on / reconnect to sync shadow drone position to mirror drone
+	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
+
+	// Send a WebSocket move command to the backend with anchor subtraction applied.
+	void SendWebSocketMoveCommand();
+
+	float WsSendTimer = 0.0f;
 };

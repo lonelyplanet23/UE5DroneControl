@@ -254,7 +254,7 @@ async def run_ws():
     import websockets
     async with websockets.serve(ws_handler, "127.0.0.1", 8081):
         print("[WS] WebSocket server on ws://127.0.0.1:8081/ws")
-        await telemetry_push()
+        await telemetry_push_zero()
 
 if __name__ == "__main__":
     print("[HTTP] Starting REST server on http://127.0.0.1:8080")

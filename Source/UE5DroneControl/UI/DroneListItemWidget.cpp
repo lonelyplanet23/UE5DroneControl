@@ -9,6 +9,11 @@
 
 void UDroneListItemWidget::SetDroneData(const FString& Name, bool bOnline)
 {
+    SetDroneDataWithAvailability(Name, bOnline ? EDroneAvailability::Online : EDroneAvailability::Offline);
+}
+
+void UDroneListItemWidget::SetDroneDataWithAvailability(const FString& Name, EDroneAvailability Availability)
+{
     if (DroneNameText)
     {
         DroneNameText->SetText(FText::FromString(Name));
@@ -16,12 +21,36 @@ void UDroneListItemWidget::SetDroneData(const FString& Name, bool bOnline)
 
     if (StatusText)
     {
-        StatusText->SetText(bOnline ? FText::FromString(TEXT("在线")) : FText::FromString(TEXT("离线")));
+        switch (Availability)
+        {
+        case EDroneAvailability::Online:
+            StatusText->SetText(FText::FromString(TEXT("连接")));
+            break;
+        case EDroneAvailability::Lost:
+            StatusText->SetText(FText::FromString(TEXT("失联")));
+            break;
+        case EDroneAvailability::Offline:
+        default:
+            StatusText->SetText(FText::FromString(TEXT("离线")));
+            break;
+        }
     }
 
     if (StatusIndicator)
     {
-        StatusIndicator->SetBrushColor(bOnline ? FLinearColor::Green : FLinearColor::Red);
+        switch (Availability)
+        {
+        case EDroneAvailability::Online:
+            StatusIndicator->SetBrushColor(FLinearColor::Green);
+            break;
+        case EDroneAvailability::Lost:
+            StatusIndicator->SetBrushColor(FLinearColor(1.0f, 0.45f, 0.0f, 1.0f));
+            break;
+        case EDroneAvailability::Offline:
+        default:
+            StatusIndicator->SetBrushColor(FLinearColor::Red);
+            break;
+        }
     }
 
     UpdateModeText();
@@ -32,6 +61,13 @@ void UDroneListItemWidget::SetDroneDataWithMode(int32 InDroneId, const FString& 
     DroneId = InDroneId;
     CurrentMode = InMode;
     SetDroneData(Name, bOnline);
+}
+
+void UDroneListItemWidget::SetDroneDataWithModeAndAvailability(int32 InDroneId, const FString& Name, EDroneAvailability Availability, EDroneCommandMode InMode)
+{
+    DroneId = InDroneId;
+    CurrentMode = InMode;
+    SetDroneDataWithAvailability(Name, Availability);
 }
 
 void UDroneListItemWidget::NativeConstruct()

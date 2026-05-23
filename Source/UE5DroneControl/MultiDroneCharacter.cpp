@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MultiDroneCharacter.h"
+#include "RealTimeDroneReceiver.h"
 #include "DroneOps/Drone/DroneSelectionComponent.h"
 #include "DroneOps/Drone/DroneCommandSenderComponent.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
@@ -115,6 +116,14 @@ void AMultiDroneCharacter::BeginPlay()
 	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 	{
 		NetMgr->OnDroneWsEvent.AddUObject(this, &AMultiDroneCharacter::OnDroneWsEvent);
+
+		// Catch up: if power_on arrived before this actor spawned, apply cached anchor now.
+		double CachedLat, CachedLon, CachedAlt;
+		if (NetMgr->GetCachedGpsAnchor(DroneId, CachedLat, CachedLon, CachedAlt))
+		{
+			UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: Applying cached GPS anchor from before spawn"), *DroneName);
+			OnDroneWsEvent(DroneId, TEXT("power_on"), CachedLat, CachedLon, CachedAlt);
+		}
 	}
 }
 
@@ -133,11 +142,13 @@ void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMultiDroneCharacter::Tick(float DeltaTime)
 {
-	// Block parent movement and UDP when paused
 	if (bIsPaused)
 	{
 		bSendClickTarget = false;
 	}
+
+	// Disable parent UDP send — shadow drones use WebSocket exclusively
+	bEnableUDPSend = false;
 
 	Super::Tick(DeltaTime);
 
@@ -152,11 +163,40 @@ void AMultiDroneCharacter::Tick(float DeltaTime)
 		MirrorDelayDistance = FVector::Dist(GetActorLocation(), MirrorSnap.WorldLocation);
 	}
 
+	// Follow mirror drone Actor directly (not via Registry) to get the anchor-resolved position.
+	if (bFollowingMirror && !bIsPaused)
+	{
+		AActor* MirrorActor = Registry->GetReceiverActor(DroneId);
+		if (MirrorActor && IsValid(MirrorActor))
+		{
+			SetActorLocation(MirrorActor->GetActorLocation());
+		}
+		return;
+	}
+
 	if (bInAssemblyMode && !bIsPaused && MirrorSnap.Availability == EDroneAvailability::Online)
 	{
-		const FVector TargetPos = MirrorSnap.WorldLocation;
-		const FVector NewPos = FMath::VInterpTo(GetActorLocation(), TargetPos, DeltaTime, AssemblyFollowInterpSpeed);
-		SetActorLocation(NewPos);
+		AActor* MirrorActor = Registry->GetReceiverActor(DroneId);
+		if (MirrorActor && IsValid(MirrorActor))
+		{
+			const FVector NewPos = FMath::VInterpTo(GetActorLocation(), MirrorActor->GetActorLocation(), DeltaTime, AssemblyFollowInterpSpeed);
+			SetActorLocation(NewPos);
+		}
+	}
+
+	// Periodic WebSocket move command (10 Hz) while moving toward a target
+	if (bSendClickTarget && !bIsPaused)
+	{
+		WsSendTimer += DeltaTime;
+		if (WsSendTimer >= SendInterval)
+		{
+			WsSendTimer = 0.0f;
+			SendWebSocketMoveCommand();
+		}
+	}
+	else
+	{
+		WsSendTimer = 0.0f;
 	}
 }
 
@@ -293,10 +333,56 @@ void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 
 		return;
 	}
 
+	bFollowingMirror = false;
+
 	ClickTargetLocation = TargetLocation;
 	ClickTargetMode = Mode;
 	bSendClickTarget = true;
 	ClickSendTimer = ClickSendInterval;
+
+	SendWebSocketMoveCommand();
+}
+
+void AMultiDroneCharacter::SendWebSocketMoveCommand()
+{
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+
+	UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>();
+	if (!NetMgr || !NetMgr->GetWebSocketClient() || !NetMgr->GetWebSocketClient()->IsConnected())
+	{
+		return;
+	}
+
+	FVector SendLocation = ClickTargetLocation;
+	if (Registry)
+	{
+		if (AActor* ReceiverActor = Registry->GetReceiverActor(DroneId))
+		{
+			if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(ReceiverActor))
+			{
+				if (Receiver->bHasGpsAnchor)
+				{
+					SendLocation = ClickTargetLocation - Receiver->AnchorWorldLocation;
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("MultiDroneCharacter [%s]: No GPS anchor yet, move command may be incorrect"), *DroneName);
+				}
+			}
+		}
+	}
+
+	const EDroneCommandMode CommandMode = Registry
+		? Registry->GetDroneCommandMode(DroneId)
+		: EDroneCommandMode::Move;
+
+	NetMgr->SendMoveCommand(DroneId, SendLocation, CommandMode);
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: WS move cmd offset=(%.0f, %.0f, %.0f)"),
+		*DroneName, SendLocation.X, SendLocation.Y, SendLocation.Z);
 }
 
 void AMultiDroneCharacter::StopClickTargetSending()
@@ -336,9 +422,9 @@ void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event,
 		return;
 	}
 
-	FVector ReceiverLocation = Receiver->GetActorLocation();
-	SetActorLocation(ReceiverLocation);
+	// Reset to mirror-following mode; Tick will continuously sync position from now on.
+	bFollowingMirror = true;
+	bSendClickTarget = false;
 
-	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: '%s' event — synced to mirror drone at %s"),
-		*DroneName, *Event, *ReceiverLocation.ToString());
+	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: '%s' event — now following mirror drone"), *DroneName, *Event);
 }

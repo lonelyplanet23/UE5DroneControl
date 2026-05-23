@@ -156,20 +156,6 @@ ADroneOpsPlayerController::ADroneOpsPlayerController()
 	bEnableMouseOverEvents = true;
 
 	PrimaryActorTick.bCanEverTick = true;
-
-	// Set default paths to the widgets
-	// These are the expected default paths in your content browser
-	static ConstructorHelpers::FClassFinder<UUserWidget> InfoPanelFinder(TEXT("/Game/DroneOps/UI/WBP_DroneInfoPanel"));
-	if (InfoPanelFinder.Succeeded())
-	{
-		DroneInfoPanelWidgetClass = InfoPanelFinder.Class;
-	}
-
-	static ConstructorHelpers::FClassFinder<UUserWidget> HUDFinder(TEXT("/Game/DroneOps/UI/WBP_DroneOpsHUD"));
-	if (HUDFinder.Succeeded())
-	{
-		DroneOpsHUDWidgetClass = HUDFinder.Class;
-	}
 }
 
 void ADroneOpsPlayerController::BeginPlay()
@@ -387,7 +373,7 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: OnPrimaryClick"));
 	FVector WorldLocation = FVector::ZeroVector;
 
-	// 只接受“射线精确命中无人机网格体”的点击
+	// 只接受"射线精确命中无人机网格体"的点击
 	AActor* DroneActor = GetSelectableDroneUnderCursor(&WorldLocation);
 
 	if (GEngine)
@@ -481,6 +467,7 @@ void ADroneOpsPlayerController::OpenDroneInfoPanel(int32 DroneId)
 	// Get telemetry snapshot
 	FDroneTelemetrySnapshot Snapshot;
 	bool bGotTelemetry = DroneRegistry->GetTelemetry(DroneId, Snapshot);
+	Snapshot.DroneId = DroneId;
 	UE_LOG(LogTemp, Log, TEXT("[FR-03] GetTelemetry for DroneId=%d, result=%d"), DroneId, bGotTelemetry);
 
 	// Get drone descriptor
@@ -664,7 +651,7 @@ void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
 		}
 	}
 
-	// 本地可视移动优先使用”当前实际选中的Actor”，避免Registry映射错位导致点A动B
+	// SetClickTargetLocation 内部（AMultiDroneCharacter 重写版本）已驱动 WebSocket 发送
 	if (AUE5DroneControlCharacter* SelectedChar = Cast<AUE5DroneControlCharacter>(TargetActor))
 	{
 		SelectedChar->SetClickTargetLocation(WorldLocation, 1);
@@ -673,13 +660,12 @@ void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
 	const FString ActorName = TargetActor ? TargetActor->GetName() : FString::Printf(TEXT("Drone-%d"), EffectiveDroneId);
 	UE_LOG(LogTemp, Log, TEXT("FR2 Dispatch: Actor=%s SelectedDroneId=%d EffectiveDroneId=%d"),
 		*ActorName, SelectedDroneId, EffectiveDroneId);
-	SendTargetCommand(EffectiveDroneId, WorldLocation);
 
 	// Dispatch to all other multi-selected drones
 	if (DroneRegistry)
 	{
 		TArray<int32> MultiIds = DroneRegistry->GetMultiSelectedDrones();
-		constexpr float SpacingCm = 100.0f;  // 1 米 = 100 UE 单位
+		constexpr float SpacingCm = 100.0f;
 		int32 NextIndex = 1;
 		for (int32 Id : MultiIds)
 		{
@@ -698,7 +684,6 @@ void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
 					OtherChar->SetClickTargetLocation(SlotLocation, 1);
 				}
 			}
-			SendTargetCommand(Id, SlotLocation);
 		}
 		if (MultiIds.Num() > 1)
 		{
@@ -833,10 +818,29 @@ void ADroneOpsPlayerController::SendTargetCommand(int32 DroneId, const FVector& 
 			if (NetworkManager->GetWebSocketClient() && NetworkManager->GetWebSocketClient()->IsConnected())
 			{
 				const EDroneCommandMode CommandMode = DroneRegistry->GetDroneCommandMode(DroneId);
-				NetworkManager->SendMoveCommand(DroneId, TargetWorldLocation, CommandMode);
-				UE_LOG(LogTemp, Log, TEXT("Move command sent via WebSocket for Drone %d: mode=%s (%.1f, %.1f, %.1f)"),
+
+				// 协议要求发送相对 GPS 锚点的 UE 偏移量（厘米）
+				// 锚点由 power_on 事件建立，存储在对应的镜像机 ARealTimeDroneReceiver 上
+				FVector SendLocation = TargetWorldLocation;
+				if (AActor* ReceiverActor = DroneRegistry->GetReceiverActor(DroneId))
+				{
+					if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(ReceiverActor))
+					{
+						if (Receiver->bHasGpsAnchor)
+						{
+							SendLocation = TargetWorldLocation - Receiver->AnchorWorldLocation;
+						}
+						else
+						{
+							UE_LOG(LogTemp, Warning, TEXT("SendTargetCommand: Drone %d has no GPS anchor yet (power_on not received), command may be incorrect"), DroneId);
+						}
+					}
+				}
+
+				NetworkManager->SendMoveCommand(DroneId, SendLocation, CommandMode);
+				UE_LOG(LogTemp, Log, TEXT("Move command sent via WebSocket for Drone %d: mode=%s offset=(%.1f, %.1f, %.1f)"),
 					DroneId, *DroneCommandModeToProtocolString(CommandMode),
-					TargetWorldLocation.X, TargetWorldLocation.Y, TargetWorldLocation.Z);
+					SendLocation.X, SendLocation.Y, SendLocation.Z);
 				return;
 			}
 		}
@@ -916,7 +920,7 @@ AActor* ADroneOpsPlayerController::GetSelectableDroneUnderCursor(FVector* OutFal
 		return nullptr;
 	}
 
-	// 仅当射线命中“无人机网格体组件”时才算选中，避免点到空白区域也选中
+	// 仅当射线命中"无人机网格体组件"时才算选中，避免点到空白区域也选中
 	if (!HitComponent->IsA<UMeshComponent>())
 	{
 		return nullptr;

@@ -25,6 +25,7 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 	StartPolling();
 	ConnectWebSocket();
 
+	UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] Config check: BackendBaseUrl=%s  WebSocketUrl=%s  PollIntervalSec=%.1f"), *BackendBaseUrl, *WebSocketUrl, PollIntervalSec);
 	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Initialized. Backend=%s  WS=%s"), *BackendBaseUrl, *WsClient->ServerUrl);
 }
 
@@ -110,6 +111,64 @@ void UDroneNetworkManager::OnDroneListResponse(bool bSuccess, const FString& Bod
 	SyncDroneListToRegistry(DroneObjects);
 }
 
+void UDroneNetworkManager::OnRegisterDroneResponse(bool bSuccess, const FString& Body)
+{
+	if (bSuccess)
+	{
+		TSharedPtr<FJsonObject> Root;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Body);
+		if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+		{
+			int32 DroneId = 0;
+			Root->TryGetNumberField(TEXT("id"), DroneId);
+
+			if (DroneId > 0)
+			{
+				FDroneDescriptor Desc;
+				Desc.DroneId = DroneId;
+				Desc.Slot = PendingRegisterSlot;
+				Desc.IpAddress = PendingRegisterIpAddress;
+				Desc.ControlPort = 8889 + (PendingRegisterSlot - 1) * 2;
+				Desc.UEReceivePort = 8888 + (PendingRegisterSlot - 1) * 2;
+				Desc.MavlinkSystemId = PendingRegisterSlot;
+				Desc.BitIndex = PendingRegisterSlot > 0 ? PendingRegisterSlot - 1 : 0;
+				Desc.TopicPrefix = FString::Printf(TEXT("/px4_%d"), PendingRegisterSlot);
+
+				FString IdStr;
+				if (Root->TryGetStringField(TEXT("id_str"), IdStr))
+				{
+					Desc.BackendIdString = IdStr;
+				}
+
+				FString Name;
+				if (Root->TryGetStringField(TEXT("name"), Name))
+				{
+					Desc.Name = Name;
+				}
+				else
+				{
+					Desc.Name = FString::Printf(TEXT("UAV-%d"), PendingRegisterSlot);
+				}
+
+				if (UDroneRegistrySubsystem* Registry = GetGameInstance()
+					? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+					: nullptr)
+				{
+					Registry->RegisterDrone(Desc);
+					Registry->MarkDroneAvailability(DroneId, EDroneAvailability::Offline);
+				}
+			}
+		}
+
+		PollDroneList();
+	}
+
+	PendingRegisterCallback.ExecuteIfBound(bSuccess, Body);
+	PendingRegisterCallback.Unbind();
+	PendingRegisterSlot = 0;
+	PendingRegisterIpAddress.Reset();
+}
+
 void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJsonObject>>& DroneObjects)
 {
 	UDroneRegistrySubsystem* Registry = GetGameInstance()
@@ -121,6 +180,7 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 		return;
 	}
 
+	TSet<int32> SeenBackendIds;
 	for (const TSharedPtr<FJsonObject>& Obj : DroneObjects)
 	{
 		FDroneDescriptor Desc;
@@ -132,6 +192,13 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 			continue;
 		}
 		Desc.DroneId = Id;
+		SeenBackendIds.Add(Id);
+
+		FString IdStr;
+		if (Obj->TryGetStringField(TEXT("id_str"), IdStr))
+		{
+			Desc.BackendIdString = IdStr;
+		}
 
 		// Optional fields — use defaults if absent
 		FString Name;
@@ -142,6 +209,24 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 		else
 		{
 			Desc.Name = FString::Printf(TEXT("UAV-%d"), Id);
+		}
+
+		int32 Slot = 0;
+		if (Obj->TryGetNumberField(TEXT("slot"), Slot))
+		{
+			Desc.Slot = Slot;
+		}
+
+		FString Ip;
+		if (Obj->TryGetStringField(TEXT("ip"), Ip))
+		{
+			Desc.IpAddress = Ip;
+		}
+
+		int32 ControlPort = 0;
+		if (Obj->TryGetNumberField(TEXT("port"), ControlPort))
+		{
+			Desc.ControlPort = ControlPort;
 		}
 
 		int32 MavId = 0;
@@ -168,11 +253,32 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 			Desc.TopicPrefix = Prefix;
 		}
 
-		// Register (or update) in the local registry
-		if (!Registry->IsDroneRegistered(Id))
+		Registry->RegisterDrone(Desc);
+
+		FString Status;
+		if (Obj->TryGetStringField(TEXT("status"), Status))
 		{
-			Registry->RegisterDrone(Desc);
-			UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Registered drone %d (%s)"), Id, *Desc.Name);
+			const FString Normalized = Status.ToLower();
+			if (Normalized == TEXT("online"))
+			{
+				Registry->MarkDroneAvailability(Id, EDroneAvailability::Online);
+			}
+			else if (Normalized == TEXT("lost"))
+			{
+				Registry->MarkDroneAvailability(Id, EDroneAvailability::Lost);
+			}
+			else
+			{
+				Registry->MarkDroneAvailability(Id, EDroneAvailability::Offline);
+			}
+		}
+	}
+
+	for (const FDroneDescriptor& LocalDesc : Registry->GetAllDroneDescriptors())
+	{
+		if (LocalDesc.DroneId > 0 && !SeenBackendIds.Contains(LocalDesc.DroneId))
+		{
+			Registry->MarkDroneAvailability(LocalDesc.DroneId, EDroneAvailability::Lost);
 		}
 	}
 }
@@ -272,6 +378,15 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Event drone=%d type=%s lat=%.6f lon=%.6f alt=%.1f"),
 			DroneId, *Event, GpsLat, GpsLon, GpsAlt);
 
+		// Cache the GPS anchor so late-spawning actors can catch up.
+		if (Event == TEXT("power_on") || Event == TEXT("reconnect"))
+		{
+			FGpsAnchorCache& Cache = CachedGpsAnchors.FindOrAdd(DroneId);
+			Cache.Lat = GpsLat;
+			Cache.Lon = GpsLon;
+			Cache.Alt = GpsAlt;
+		}
+
 		OnDroneWsEvent.Broadcast(DroneId, Event, GpsLat, GpsLon, GpsAlt);
 		return;
 	}
@@ -353,8 +468,7 @@ void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetW
 	}
 
 	// { "mode": "move|scout|patrol|attack", "drone_id": "N", "x": ..., "y": ..., "z": ... }
-	// Coordinates should be relative to the drone's anchor (AnchorWorldLocation).
-	// TODO: subtract AnchorWorldLocation once the Cesium anchor flow (柯垣丞) is ready.
+	// Coordinates are relative to the drone's GPS anchor (AnchorWorldLocation), subtracted by SendTargetCommand.
 	const FString ProtocolMode = DroneCommandModeToProtocolString(Mode);
 	const FString Json = FString::Printf(
 		TEXT("{\"mode\":\"%s\",\"drone_id\":\"%d\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}"),
@@ -386,6 +500,46 @@ void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool 
 		TEXT("{\"type\":\"%s\",\"drone_ids\":[%s]}"), *Type, *IdsArray);
 
 	WsClient->SendMessage(Json);
+}
+
+void UDroneNetworkManager::RegisterDroneToBackend(int32 Slot, const FString& IpAddress, FOnHttpResponse OnComplete)
+{
+	if (!HttpClient)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] RegisterDroneToBackend: HttpClient not ready"));
+		OnComplete.ExecuteIfBound(false, TEXT(""));
+		return;
+	}
+
+	if (Slot <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] RegisterDroneToBackend: invalid slot %d"), Slot);
+		OnComplete.ExecuteIfBound(false, TEXT("{\"detail\":\"invalid slot\"}"));
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("name"), FString::Printf(TEXT("UAV-%d"), Slot));
+	Root->SetStringField(TEXT("model"), TEXT("PX4"));
+	Root->SetNumberField(TEXT("slot"), Slot);
+	Root->SetStringField(TEXT("ip"), IpAddress);
+	Root->SetNumberField(TEXT("port"), 8889 + (Slot - 1) * 2);
+	Root->SetStringField(TEXT("video_url"), TEXT(""));
+
+	FString Body;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] RegisterDroneToBackend: POST /api/drones slot=%d ip=%s"),
+		Slot, *IpAddress);
+
+	PendingRegisterCallback = OnComplete;
+	PendingRegisterSlot = Slot;
+	PendingRegisterIpAddress = IpAddress;
+
+	FOnHttpResponse InternalCallback;
+	InternalCallback.BindDynamic(this, &UDroneNetworkManager::OnRegisterDroneResponse);
+	HttpClient->Post(TEXT("/api/drones"), Body, InternalCallback);
 }
 
 void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete)
@@ -501,4 +655,17 @@ void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSav
 	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTaskFromData: POST /api/arrays, %d paths, mode=%s"),
 		PathDataMap.Num(), *DroneCommandModeToProtocolString(Mode));
 	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
+}
+
+bool UDroneNetworkManager::GetCachedGpsAnchor(int32 DroneId, double& OutLat, double& OutLon, double& OutAlt) const
+{
+	const FGpsAnchorCache* Found = CachedGpsAnchors.Find(DroneId);
+	if (!Found)
+	{
+		return false;
+	}
+	OutLat = Found->Lat;
+	OutLon = Found->Lon;
+	OutAlt = Found->Alt;
+	return true;
 }

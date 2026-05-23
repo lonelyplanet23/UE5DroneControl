@@ -97,6 +97,15 @@ void ARealTimeDroneReceiver::BeginPlay()
 			{
 				NetMgr->OnDroneWsEvent.AddUObject(this, &ARealTimeDroneReceiver::OnDroneWsEvent);
 				UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: Subscribed to WS events for GPS anchoring"), *DroneName);
+
+				// Catch up: if power_on arrived before this actor spawned, apply cached anchor now.
+				double CachedLat, CachedLon, CachedAlt;
+				if (NetMgr->GetCachedGpsAnchor(DroneId, CachedLat, CachedLon, CachedAlt))
+				{
+					UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: Applying cached GPS anchor (%.6f, %.6f, %.1fm)"),
+						*DroneName, CachedLat, CachedLon, CachedAlt);
+					OnDroneWsEvent(DroneId, TEXT("power_on"), CachedLat, CachedLon, CachedAlt);
+				}
 			}
 		}
 	}
@@ -134,11 +143,18 @@ void ARealTimeDroneReceiver::BeginPlay()
 	}
 
 	// Sync TelemetryComponent DroneId
-	if (TelemetryComponent)
+	if (TelemetryComponent && !bUseWebSocket)
 	{
 		FDroneTelemetrySnapshot InitSnap;
 		InitSnap.DroneId = DroneId;
-		InitSnap.Availability = EDroneAvailability::Offline;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+			{
+				Registry->GetTelemetry(DroneId, InitSnap);
+				InitSnap.DroneId = DroneId;
+			}
+		}
 		TelemetryComponent->PushSnapshot(InitSnap);
 	}
 }
@@ -508,6 +524,54 @@ FVector ARealTimeDroneReceiver::NEDToUE5(const FVector& NEDPos)
 	return UE5Pos;
 }
 
+void ARealTimeDroneReceiver::ApplyDescriptor(const FDroneDescriptor& Descriptor, EDroneAvailability InitialAvailability)
+{
+	DroneId = Descriptor.DroneId;
+	DroneName = Descriptor.Name.IsEmpty()
+		? FString::Printf(TEXT("UAV-%d"), Descriptor.DroneId)
+		: Descriptor.Name;
+	MavlinkSystemId = Descriptor.MavlinkSystemId;
+	BitIndex = Descriptor.BitIndex;
+	ThemeColor = Descriptor.ThemeColor;
+	ListenPort = Descriptor.UEReceivePort;
+
+	if (SelectionComponent)
+	{
+		SelectionComponent->DroneId = DroneId;
+		SelectionComponent->ThemeColor = ThemeColor;
+	}
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+		{
+			Registry->RegisterDrone(Descriptor);
+			Registry->RegisterReceiverActor(DroneId, this);
+			Registry->MarkDroneAvailability(DroneId, InitialAvailability);
+		}
+	}
+
+	if (TelemetryComponent && !bUseWebSocket)
+	{
+		FDroneTelemetrySnapshot Snapshot;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+			{
+				Registry->GetTelemetry(DroneId, Snapshot);
+			}
+		}
+		Snapshot.DroneId = DroneId;
+		Snapshot.Availability = InitialAvailability;
+		Snapshot.WorldLocation = GetActorLocation();
+		Snapshot.Attitude = GetActorRotation();
+		TelemetryComponent->PushSnapshot(Snapshot);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver: Applied descriptor %s (ID=%d, Slot=%d, Status=%d)"),
+		*DroneName, DroneId, Descriptor.Slot, static_cast<int32>(InitialAvailability));
+}
+
 void ARealTimeDroneReceiver::UpdateRotationOnly(const TArray<uint8>& Data)
 {
 	// 【优化】仅更新姿态，不更新位置（用于频率限制时避免旋转回弹）
@@ -772,12 +836,26 @@ void ARealTimeDroneReceiver::PushTelemetry(const FDroneYAMLData& DroneData, cons
 
 FDroneTelemetrySnapshot ARealTimeDroneReceiver::GetDroneInfoSnapshot_Implementation() const
 {
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+		{
+			FDroneTelemetrySnapshot RegistrySnapshot;
+			if (Registry->GetTelemetry(DroneId, RegistrySnapshot))
+			{
+				return RegistrySnapshot;
+			}
+		}
+	}
+
 	if (TelemetryComponent && TelemetryComponent->HasValidTelemetry())
 	{
 		return TelemetryComponent->GetCurrentSnapshot();
 	}
 
-	return FDroneTelemetrySnapshot();
+	FDroneTelemetrySnapshot EmptySnapshot;
+	EmptySnapshot.DroneId = DroneId;
+	return EmptySnapshot;
 }
 
 // ---- IDroneSelectableInterface implementations ----
@@ -828,9 +906,15 @@ void ARealTimeDroneReceiver::OnWebSocketTelemetry(int32 InDroneId, const FDroneT
 		return;
 	}
 
-	// Use GPS anchor if available, otherwise fall back to actor's spawn location
-	FVector Anchor = bHasGpsAnchor ? AnchorWorldLocation : InitialLocation;
-	TargetLocation = Anchor + Snapshot.WorldLocation;
+	// Only drive position once the GPS anchor is established (power_on event received).
+	// Before that, stay at the spawn location to avoid placing the drone at spawn-height
+	// offset above the real telemetry position.
+	if (!bHasGpsAnchor)
+	{
+		return;
+	}
+
+	TargetLocation = AnchorWorldLocation + Snapshot.WorldLocation;
 	TargetRotation = Snapshot.Attitude;
 }
 

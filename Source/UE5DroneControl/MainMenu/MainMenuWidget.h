@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "DroneOps/Network/DroneHttpClient.h"
 #include "MainMenuWidget.generated.h"
 
 class AMainMenuPlayerController;
@@ -82,14 +83,14 @@ public:
 	 * @param bUseCesium      是否使用 Cesium 坐标服务
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MainMenu|Settings")
-	void SaveSettings(const FString& InBackendAddress, float InMapCenterLat, float InMapCenterLon, bool InbUseCesium);
+	void SaveSettings(const FString& InBackendAddress, float InMapCenterLat, float InMapCenterLon, float InMapCenterAlt, bool InbUseCesium);
 
 	/**
 	 * 从 GameInstance 读取已保存的设置，填充到输出参数
 	 * UI 程序员在 NativeConstruct / WBP 的 Construct 事件中调用此函数来初始化输入框
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MainMenu|Settings")
-	void LoadSettings(FString& OutBackendAddress, float& OutMapCenterLat, float& OutMapCenterLon, bool& OutbUseCesium) const;
+	void LoadSettings(FString& OutBackendAddress, float& OutMapCenterLat, float& OutMapCenterLon, float& OutMapCenterAlt, bool& OutbUseCesium) const;
 
 	// -----------------------------------------------------------------------
 	// 导航（供蓝图按钮 OnClicked 绑定）
@@ -102,6 +103,10 @@ public:
 	/** "预演"按钮点击 → 跳转到预演关卡 */
 	UFUNCTION(BlueprintCallable, Category = "MainMenu|Navigation")
 	void OnGoToPreviewClicked();
+
+	/** 查询后端 WebSocket 是否已连接（供蓝图控制按钮可用状态） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MainMenu|Navigation")
+	bool IsBackendConnected() const;
 
 protected:
 	// -----------------------------------------------------------------------
@@ -120,7 +125,20 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "MainMenu|Settings")
 	void OnSettingsSaved();
 
+	/** 尝试进入预演关卡但后端未连接时触发，UI 可在此显示警告弹窗 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "MainMenu|Navigation")
+	void OnGoToPreviewBlockedByNoConnection();
+
 private:
+	UPROPERTY()
+	int32 PendingBackendRegisterDroneId = 0;
+
+	UPROPERTY()
+	FString PendingBackendRegisterIpAddress;
+
+	UFUNCTION()
+	void HandleBackendRegisterResponse(bool bSuccess, const FString& ResponseBody);
+
 	/** 获取 PlayerController（类型安全） */
 	AMainMenuPlayerController* GetMainMenuPC() const;
 };

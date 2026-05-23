@@ -3,6 +3,10 @@
 #include "MainMenuPlayerController.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
+#include "DroneOps/Network/DroneNetworkManager.h"
+#include "Engine/GameInstance.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 AMainMenuPlayerController::AMainMenuPlayerController()
 {
@@ -46,5 +50,53 @@ void AMainMenuPlayerController::GoToQueueEditor()
 
 void AMainMenuPlayerController::GoToPreview()
 {
+	UGameplayStatics::OpenLevel(this, PreviewLevelName);
+}
+
+void AMainMenuPlayerController::GoToPreviewWithOrigin(double Latitude, double Longitude, double Altitude)
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			NetMgr->PendingOriginLatitude  = Latitude;
+			NetMgr->PendingOriginLongitude = Longitude;
+			NetMgr->PendingOriginAltitude  = Altitude;
+		}
+	}
+	UGameplayStatics::OpenLevel(this, PreviewLevelName);
+}
+
+void AMainMenuPlayerController::GoToPreviewFromSavedSettings()
+{
+	const FString SavePath = FPaths::ProjectSavedDir() + TEXT("Settings.txt");
+	FString LoadedString;
+
+	if (FFileHelper::LoadFileToString(LoadedString, *SavePath))
+	{
+		TArray<FString> Parsed;
+		LoadedString.ParseIntoArray(Parsed, TEXT("|"));
+
+		// 格式：BackendAddress|Lat|Lon|Alt|bUseCesium  (5段)
+		// 兼容旧格式：BackendAddress|Lat|Lon|bUseCesium (4段，无Alt)
+		if (Parsed.Num() >= 5)
+		{
+			const double Lat = FCString::Atod(*Parsed[1]);
+			const double Lon = FCString::Atod(*Parsed[2]);
+			const double Alt = FCString::Atod(*Parsed[3]);
+			GoToPreviewWithOrigin(Lat, Lon, Alt);
+			return;
+		}
+		if (Parsed.Num() == 4)
+		{
+			const double Lat = FCString::Atod(*Parsed[1]);
+			const double Lon = FCString::Atod(*Parsed[2]);
+			GoToPreviewWithOrigin(Lat, Lon, 43.0); // 旧格式默认海拔43m
+			return;
+		}
+	}
+
+	// 文件不存在或格式无法解析，直接跳转不修改 Georeference
+	UE_LOG(LogTemp, Warning, TEXT("GoToPreviewFromSavedSettings: no valid settings found, skipping Georeference update"));
 	UGameplayStatics::OpenLevel(this, PreviewLevelName);
 }
