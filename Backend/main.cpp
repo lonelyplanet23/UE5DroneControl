@@ -9,6 +9,7 @@
 #include "execution/assembly_controller.h"
 #include "execution/execution_engine.h"
 #include "http/http_server.h"
+#include "debug_cli.h"
 #include <spdlog/spdlog.h>
 #include <csignal>
 #include <atomic>
@@ -124,7 +125,17 @@ int main(int argc, char* argv[])
         http_server.Run();
     });
 
-    // 13. 主循环（超时检查）
+    // 13. 启动调试 CLI（仅 debug 模式）
+    std::thread cli_thread;
+    if (config.debug) {
+        cli_thread = std::thread(RunDebugCli,
+            std::ref(drone_mgr),
+            std::ref(assembly_ctrl),
+            std::ref(ws_manager),
+            std::ref(g_running));
+    }
+
+    // 14. 主循环（超时检查）
     spdlog::info("Backend started. Press Ctrl+C to stop.");
 
     while (g_running) {
@@ -145,7 +156,8 @@ int main(int argc, char* argv[])
     udp_receiver.Stop();
     hb_manager.StopAll();
 
-    if (asio_worker.joinable())  asio_worker.join();
+    if (cli_thread.joinable())    cli_thread.join();
+    if (asio_worker.joinable())   asio_worker.join();
     if (server_thread.joinable()) server_thread.join();
 
     spdlog::info("Backend shutdown complete.");

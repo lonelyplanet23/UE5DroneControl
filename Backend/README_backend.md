@@ -53,6 +53,7 @@ Backend/
 ├── build.bat                   # Windows 一键编译脚本
 ├── config.yaml                 # 运行时配置
 ├── main.cpp                    # 入口点
+├── debug_cli.h                 # 内置调试 CLI（debug 模式）
 ├── vcpkg.json                  # vcpkg 依赖声明
 ├── jetson_bridge.py            # Jetson 端 ROS2 ↔ UDP 桥接
 │
@@ -355,7 +356,7 @@ cd Backend/tests
 python integration_week3.py
 ```
 
-### 手动调试
+### 手动调试（curl）
 
 ```bash
 # 启动后端
@@ -373,6 +374,58 @@ curl -X POST http://localhost:8080/api/debug/cmd/d1/move \
   -H 'Content-Type: application/json' \
   -d '{"x":1000,"y":0,"z":500}'
 curl http://localhost:8080/api/debug/drone/d1/queue
+```
+
+### 内置 Debug CLI（离线/局域网环境推荐）
+
+`config.yaml` 中 `debug: true` 时，后端启动后会在**同一个终端窗口**激活交互式调试命令行，无需 Apifox 或 curl，适合局域网离线联调。
+
+```
+[DebugCLI] Started. Type 'help' for commands.
+```
+
+直接在终端输入命令并按 Enter：
+
+| 命令 | 说明 |
+|------|------|
+| `help` | 显示命令帮助 |
+| `list` | 列出所有已注册无人机及状态 |
+| `inject <id> <N> <E> <D> [battery] [gps_lat] [gps_lon] [gps_alt]` | 注入模拟遥测 |
+| `move <id> <ue_x> <ue_y> <ue_z>` | 发送 move 指令（UE 偏移，厘米） |
+| `pause <id>` | 暂停指令队列 |
+| `resume <id>` | 恢复指令队列 |
+| `state <id>` | 打印无人机详细状态（含心跳、GPS 锚点） |
+| `ws_count` | 显示当前 WebSocket 连接数（0 = UE 未连接） |
+| `quit` / `exit` / `q` | 关闭后端 |
+
+**`inject` 参数说明：**
+- `id`：无人机编号，如 `1` 或 `d1`
+- `N E D`：NED 坐标（米），D 为负数表示高于起点（如 `-5` = 高5米）
+- `battery`：电量百分比，省略或 `-1` = 不可用
+- `gps_lat/lon/alt`：首次注入时提供，触发 `power_on` 事件和 GPS 锚点设置；后续遥测可省略
+
+**典型测试流程：**
+
+```
+# 1. 确认 UE 已连接（应显示 ≥1）
+ws_count
+
+# 2. 确认无人机已注册
+list
+
+# 3. 首次注入遥测（触发 power_on + GPS 锚定，UE 端镜像机就位）
+inject 1 0 0 -5 90 39.9042 116.4074 50.0
+
+# 4. 持续注入遥测，模拟无人机向北飞10米、高10米
+inject 1 10 0 -10 85
+
+# 5. 查看当前状态
+state 1
+
+# 6. 停止注入，等待 10s，UE 端应收到 lost_connection 告警弹窗
+
+# 7. 重新注入（触发 reconnect 事件）
+inject 1 0 0 -5 80 39.9042 116.4074 50.0
 ```
 
 ---

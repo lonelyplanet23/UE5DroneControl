@@ -997,14 +997,15 @@ void ADroneOpsPlayerController::ApplyFollowViewTarget(int32 DroneId)
 	CameraModeState.LastFollowLocation = FollowTarget->GetActorLocation();
 	CameraModeState.LastFollowRotation = FollowTarget->GetActorRotation();
 
-	// 切换跟随目标时重置俯仰角到斜视(-60°)
+	// 切换跟随目标时重置俯仰角到斜视(-60°)，ArmLength 归位到默认值
 	bFollowTopDownPitch = false;
 	FollowTargetPitch = -60.f;
 	if (AUE5DroneControlCharacter* DroneChar = Cast<AUE5DroneControlCharacter>(FollowTarget))
 	{
-		if (DroneChar->GetCameraBoom())
+		if (USpringArmComponent* Boom = DroneChar->GetCameraBoom())
 		{
-			DroneChar->GetCameraBoom()->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
+			Boom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
+			Boom->TargetArmLength = 2000.f;
 		}
 	}
 

@@ -65,6 +65,7 @@ void UdpSender::SendMove(int drone_id, double ned_x, double ned_y, double ned_z)
     pkt.y = static_cast<float>(ned_y);
     pkt.z = static_cast<float>(ned_z);
     pkt.mode = 1;
+    spdlog::debug("[UdpSender] SendMove drone={}: NED({:.2f},{:.2f},{:.2f})", drone_id, ned_x, ned_y, ned_z);
     Send(drone_id, pkt);
 }
 
@@ -76,5 +77,6 @@ void UdpSender::SendHover(int drone_id)
             std::chrono::system_clock::now().time_since_epoch()
         ).count()) / 1000000.0;
     pkt.mode = 0;
+    spdlog::debug("[UdpSender] SendHover drone={}", drone_id);
     Send(drone_id, pkt);
 }

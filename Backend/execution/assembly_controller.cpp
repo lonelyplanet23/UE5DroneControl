@@ -122,6 +122,9 @@ void AssemblyController::UpdateDronePosition(int drone_id, double ned_x, double 
         const double dz = ned_z - arrival.target_ned_z;
         const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
 
+        spdlog::debug("[Assembly] Drone {} position check: dist={:.2f}m (threshold={:.2f}m)",
+                      drone_id, dist, arrival_threshold_m_);
+
         if (dist < arrival_threshold_m_) {
             arrival.arrived = true;
             any_changed = true;

@@ -289,8 +289,15 @@ void UDroneNetworkManager::ConnectWebSocket()
 {
 	if (WsClient)
 	{
+		WsClient->OnConnected.AddDynamic(this, &UDroneNetworkManager::OnWsConnected);
 		WsClient->Connect();
 	}
+}
+
+void UDroneNetworkManager::OnWsConnected()
+{
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] WS connected, syncing drone list from backend"));
+	PollDroneList();
 }
 
 void UDroneNetworkManager::OnWsMessage(const FString& Message)

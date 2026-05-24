@@ -149,6 +149,8 @@ HttpServer::HttpServer(const AppConfig& config,
             msg["gps_lon"] = anchor.longitude;
             msg["gps_alt"] = anchor.altitude;
         }
+        spdlog::debug("[WS Push] event={} drone={} anchor_valid={}",
+                      type, drone_id_string(drone_id), anchor.valid);
         ws_manager_.broadcast(json_stringify(msg));
     });
 
@@ -161,6 +163,8 @@ HttpServer::HttpServer(const AppConfig& config,
             {"alert_type", alert_type},
             {"value",      value},
         };
+        spdlog::debug("[WS Push] alert={} drone={} value={}",
+                      alert_type, drone_id_string(drone_id), value);
         ws_manager_.broadcast(json_stringify(msg));
     });
 
@@ -171,6 +175,8 @@ HttpServer::HttpServer(const AppConfig& config,
             {"ready_count", progress.ready_count},
             {"total_count", progress.total_count},
         };
+        spdlog::debug("[WS Push] assembling array={} {}/{}",
+                      progress.array_id, progress.ready_count, progress.total_count);
         ws_manager_.broadcast(json_stringify(msg));
 
         if (progress.ready_count >= progress.total_count && progress.total_count > 0) {
@@ -178,6 +184,7 @@ HttpServer::HttpServer(const AppConfig& config,
                 {"type",     "assembly_complete"},
                 {"array_id", progress.array_id},
             };
+            spdlog::debug("[WS Push] assembly_complete array={}", progress.array_id);
             ws_manager_.broadcast(json_stringify(done_msg));
             // 集结完成 → 启动执行引擎
             exec_engine_.StartTasks(assembly_ctrl_.GetConfig());
@@ -191,6 +198,8 @@ HttpServer::HttpServer(const AppConfig& config,
             {"ready_count", progress.ready_count},
             {"total_count", progress.total_count},
         };
+        spdlog::debug("[WS Push] assembly_timeout array={} {}/{}",
+                      progress.array_id, progress.ready_count, progress.total_count);
         ws_manager_.broadcast(json_stringify(msg));
     });
 
@@ -892,6 +901,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
     }
 
     auto session = ws_manager_.add(&ws);
+    spdlog::debug("[WS] Client connected, total sessions={}", ws_manager_.count());
     beast::flat_buffer buf;
 
     while (true) {
@@ -916,6 +926,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
             }
 
             try {
+                spdlog::debug("[WS Recv] {}", payload);
                 HandleWsCommand(jv.as_object(), session);
             } catch (const ApiError& e) {
                 ws_manager_.send(session, json_stringify(boost::json::object{
@@ -929,6 +940,7 @@ void HttpServer::RunWsSession(tcp::socket socket,
 
     session->alive = false;
     ws_manager_.remove(&ws);
+    spdlog::debug("[WS] Client disconnected, total sessions={}", ws_manager_.count());
 }
 
 // ============================================================

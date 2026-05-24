@@ -155,6 +155,11 @@ void UdpReceiver::HandleReceive(PortListener& listener,
             if (auto arm = root["arming_state"]) tel.arming_state = arm.as<uint8_t>(0);
             if (auto nav = root["nav_state"])    tel.nav_state    = nav.as<uint8_t>(0);
 
+            spdlog::debug("[UdpReceiver] Slot {} recv {}B: NED({:.2f},{:.2f},{:.2f}) bat={} gps_fix={}",
+                         listener.slot, bytes_transferred,
+                         tel.position_ned[0], tel.position_ned[1], tel.position_ned[2],
+                         tel.battery, tel.gps_fix);
+
             // 回调通知（线程安全）
             {
                 std::lock_guard<std::mutex> lock(callback_mutex_);

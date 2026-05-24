@@ -366,6 +366,8 @@ void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
 
     if (data.gps_fix) {
         anchor_manager_.SetAnchor(drone_id, data.gps_lat, data.gps_lon, data.gps_alt);
+        spdlog::debug("[DroneManager] Drone {} GPS fix: ({:.6f},{:.6f},{:.1f}m)",
+                      drone_id, data.gps_lat, data.gps_lon, data.gps_alt);
     }
 
     ctx.state_machine->OnTelemetryReceived();
@@ -378,6 +380,8 @@ void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
     if (data.battery >= 0 && data.battery <= low_battery_threshold_ &&
         !ctx.low_battery_alert_active && alert_cb_) {
         ctx.low_battery_alert_active = true;
+        spdlog::debug("[DroneManager] Drone {} low battery alert triggered: {}%",
+                      drone_id, data.battery);
         alert_cb_(drone_id, "low_battery", data.battery);
     }
 

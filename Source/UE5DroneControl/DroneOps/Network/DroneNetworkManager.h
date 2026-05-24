@@ -176,6 +176,9 @@ private:
 	void ConnectWebSocket();
 
 	UFUNCTION()
+	void OnWsConnected();
+
+	UFUNCTION()
 	void OnWsMessage(const FString& Message);
 
 	void SyncDroneListToRegistry(const TArray<TSharedPtr<FJsonObject>>& DroneObjects);

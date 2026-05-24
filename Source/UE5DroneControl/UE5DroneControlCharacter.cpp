@@ -46,7 +46,7 @@ AUE5DroneControlCharacter::AUE5DroneControlCharacter()
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->SetUsingAbsoluteRotation(true);
-    CameraBoom->TargetArmLength = 3500.f; // CesiumWorld 初始视角拉高，避免贴地/地下
+    CameraBoom->TargetArmLength = 2000.f;
     CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
     CameraBoom->bDoCollisionTest = false;
 
@@ -92,7 +92,7 @@ void AUE5DroneControlCharacter::BeginPlay()
     {
         FVector BoomLoc = CameraBoom->GetRelativeLocation();
         CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, TargetHeight));
-        CameraBoom->TargetArmLength = FMath::Max(CameraBoom->TargetArmLength, 3500.0f);
+        CameraBoom->TargetArmLength = FMath::Max(CameraBoom->TargetArmLength, 2000.0f);
     }
 
     // --- 【修改】使用 Builder 创建 UDP Socket (更稳健) ---
@@ -150,9 +150,6 @@ void AUE5DroneControlCharacter::SetupPlayerInputComponent(UInputComponent* Playe
 
     // 绑定 "Lift" 轴
     PlayerInputComponent->BindAxis("Lift", this, &AUE5DroneControlCharacter::Input_Lift);
-
-    // 绑定空格键切换相机视角
-    PlayerInputComponent->BindAction("ToggleCamera", IE_Pressed, this, &AUE5DroneControlCharacter::ToggleCameraView);
 
     // 绑定数字键0和1切换视角
     PlayerInputComponent->BindAction("SwitchToTopDown", IE_Pressed, this, &AUE5DroneControlCharacter::SwitchToTopDownView);
