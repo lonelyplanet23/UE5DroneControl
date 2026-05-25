@@ -101,7 +101,7 @@ bool AssemblyController::Start(const AssemblyConfig& config, double safety_cylin
                  config_.array_id, arrivals_.size(), config_.mode);
 
     if (progress_cb_) {
-        progress_cb_(GetProgress());
+        progress_cb_(GetProgressUnsafe());
     }
 
     return true;
@@ -135,7 +135,7 @@ void AssemblyController::UpdateDronePosition(int drone_id, double ned_x, double 
 
     if (!any_changed) return;
 
-    auto progress = GetProgress();
+    auto progress = GetProgressUnsafe();
     if (progress_cb_) {
         progress_cb_(progress);
     }
@@ -156,10 +156,11 @@ bool AssemblyController::CheckTimeout()
 
     if (elapsed >= timeout_sec_) {
         state_ = AssemblyState::Timeout;
+        auto progress = GetProgressUnsafe();
         spdlog::warn("[Assembly] Timeout after {}s! {}/{} arrived",
-                     elapsed, GetProgress().ready_count, GetProgress().total_count);
+                     elapsed, progress.ready_count, progress.total_count);
         if (timeout_cb_) {
-            timeout_cb_(GetProgress());
+            timeout_cb_(progress);
         }
         return true;
     }
@@ -178,6 +179,11 @@ void AssemblyController::Stop()
 AssemblyProgress AssemblyController::GetProgress() const
 {
     std::lock_guard<std::mutex> lock(state_mutex_);
+    return GetProgressUnsafe();
+}
+
+AssemblyProgress AssemblyController::GetProgressUnsafe() const
+{
     AssemblyProgress progress;
     progress.array_id = config_.array_id;
     progress.total_count = static_cast<int>(arrivals_.size());

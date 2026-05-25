@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
                                    config.avoidance_lookahead_sec);
     HttpServer         http_server(config, drone_mgr, assembly_ctrl, exec_engine, ws_manager);
 
-    // 6b. AssemblyController 集结指令回调 → DroneManager NED 发送
+    // 6b. AssemblyController 集结指令回调 -> DroneManager NED 发送
     assembly_ctrl.SetMoveCommandCallback([&](int drone_id, double ned_n, double ned_e, double ned_d) {
         drone_mgr.ProcessMoveCommandNed(drone_id, ned_n, ned_e, ned_d);
     });
@@ -84,12 +84,12 @@ int main(int argc, char* argv[])
         udp_receiver.AddPort(slot, mapping.recv_port, slot);
     }
 
-    // 8. 配置 UdpSender 目标（每个 slot → Jetson IP + send_port）
+    // 8. 配置 UdpSender 目标（每个 slot -> Jetson IP + send_port）
     for (const auto& [slot, mapping] : config.port_map) {
         udp_sender.SetTarget(slot, config.jetson_host, mapping.send_port);
     }
 
-    // 9. 遥测回调 → DroneManager + ExecutionEngine
+    // 9. 遥测回调 -> DroneManager + ExecutionEngine
     udp_receiver.SetCallback([&](int slot, const TelemetryData& tel) {
         drone_mgr.OnTelemetryReceivedBySlot(slot, tel);
 

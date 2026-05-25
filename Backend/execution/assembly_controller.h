@@ -109,4 +109,7 @@ private:
     TimeoutCallback timeout_cb_;
     MoveCommandCallback move_cmd_cb_;
     DronePositionGetter position_getter_;
+
+    // 不加锁的内部版本，调用者必须已持有 state_mutex_
+    AssemblyProgress GetProgressUnsafe() const;
 };

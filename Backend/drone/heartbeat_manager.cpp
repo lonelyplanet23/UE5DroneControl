@@ -17,7 +17,7 @@ HeartbeatManager::~HeartbeatManager()
 }
 
 // ========================================================
-// Start 对外接口：不需要锁 → 内部 StopInternal 无锁
+// Start 对外接口：不需要锁 -> 内部 StopInternal 无锁
 // ========================================================
 void HeartbeatManager::Start(int drone_id, const std::string& jetson_ip,
                               int send_port, CommandProvider cmd_provider)
@@ -184,7 +184,7 @@ void HeartbeatManager::HeartbeatLoop(int drone_id)
             // 从队列取到的指令已包含目标位置和 mode=1
             pkt.timestamp = ts;  // 使用当前时间戳
         } else {
-            // 队列为空 → 以 Mode=0 悬停维持最后位置
+            // 队列为空 -> 以 Mode=0 悬停维持最后位置
             pkt.x    = static_cast<float>(state->last_ned_x.load());
             pkt.y    = static_cast<float>(state->last_ned_y.load());
             pkt.z    = static_cast<float>(state->last_ned_z.load());

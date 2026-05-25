@@ -96,7 +96,7 @@ HttpServer::HttpServer(const AppConfig& config,
     , exec_engine_(exec_engine)
     , ws_manager_(ws_manager)
 {
-    // 注册 DroneManager 回调 → WS 推送
+    // 注册 DroneManager 回调 -> WS 推送
     drone_mgr_.SetTelemetryCallback([this](int drone_id, const TelemetryData& tel) {
         // 构建遥测 JSON
         double ux, uy, uz;
@@ -186,7 +186,7 @@ HttpServer::HttpServer(const AppConfig& config,
             };
             spdlog::debug("[WS Push] assembly_complete array={}", progress.array_id);
             ws_manager_.broadcast(json_stringify(done_msg));
-            // 集结完成 → 启动执行引擎
+            // 集结完成 -> 启动执行引擎
             exec_engine_.StartTasks(assembly_ctrl_.GetConfig());
         }
     });
@@ -364,7 +364,7 @@ http::response<http::string_body> HttpServer::HandleHttp(
 // REST 路由实现
 // ============================================================
 static int drone_id_from_string(const std::string& id) {
-    // "d1" → 1, "1" → 1
+    // "d1" -> 1, "1" -> 1
     if (!id.empty() && id[0] == 'd') {
         try { return std::stoi(id.substr(1)); } catch (...) {}
     }

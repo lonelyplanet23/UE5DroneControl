@@ -52,7 +52,7 @@ std::vector<int> AssemblyPlanner::AssignOptimal(
     for (int i = 0; i < m; ++i) {
         if (result[i] >= 0) {
             total += cost[i][result[i]];
-            spdlog::info("[Planner] Drone {} → target {} (dist={:.2f}m)",
+            spdlog::info("[Planner] Drone {} -> target {} (dist={:.2f}m)",
                          drone_ids[i], result[i], cost[i][result[i]]);
         }
     }
@@ -117,7 +117,7 @@ void AssemblyPlanner::ApplyHeightSeparation(
 {
     if (targets.empty() || conflicts.empty()) return;
 
-    // 建立 drone_id → targets 索引的映射
+    // 建立 drone_id -> targets 索引的映射
     std::map<int, int> drone_to_idx;
     for (int i = 0; i < static_cast<int>(targets.size()); ++i) {
         drone_to_idx[targets[i].drone_id] = i;

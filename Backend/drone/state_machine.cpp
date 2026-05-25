@@ -25,13 +25,13 @@ void StateMachine::OnTelemetryReceived()
 
     if (state_ == DroneConnectionState::Offline) {
         state_ = DroneConnectionState::Online;
-        spdlog::info("[StateMachine] Offline → Online (PowerOn)");
+        spdlog::info("[StateMachine] Offline -> Online (PowerOn)");
         if (on_state_change_) {
             on_state_change_(StateEvent::PowerOn);
         }
     } else if (state_ == DroneConnectionState::Lost) {
         state_ = DroneConnectionState::Online;
-        spdlog::info("[StateMachine] Lost → Online (Reconnect)");
+        spdlog::info("[StateMachine] Lost -> Online (Reconnect)");
         if (on_state_change_) {
             on_state_change_(StateEvent::Reconnect);
         }
@@ -49,7 +49,7 @@ bool StateMachine::CheckTimeout(int timeout_sec)
 
     if (elapsed_sec >= timeout_sec) {
         state_ = DroneConnectionState::Lost;
-        spdlog::warn("[StateMachine] Online → Lost ({}s timeout)", elapsed_sec);
+        spdlog::warn("[StateMachine] Online -> Lost ({}s timeout)", elapsed_sec);
         if (on_state_change_) {
             on_state_change_(StateEvent::LostConnection);
         }
@@ -63,5 +63,5 @@ void StateMachine::Reset()
 {
     state_ = DroneConnectionState::Offline;
     last_telemetry_us_ = now_us();
-    spdlog::info("[StateMachine] Reset → Offline");
+    spdlog::info("[StateMachine] Reset -> Offline");
 }

@@ -53,5 +53,5 @@ storage:
   path: "./data/drones.json"
 
 log:
-  level: "info"             # debug / info / warn / error
+  level: "debug"             # debug / info / warn / error
   file: "./logs/backend.log"

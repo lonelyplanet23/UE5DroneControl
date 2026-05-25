@@ -70,7 +70,9 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
 
     ctx->state_machine = std::make_unique<StateMachine>(
         [this, drone_id](StateEvent event) {
-            auto* ctx = GetContext(drone_id);
+            // NOTE: 此回调在持有 drones_mutex_ 的线程上被触发，
+            //       必须用 GetContextUnsafe（不加锁）而非 GetContext。
+            auto* ctx = GetContextUnsafe(drone_id);
             if (!ctx) return;
 
             switch (event) {
