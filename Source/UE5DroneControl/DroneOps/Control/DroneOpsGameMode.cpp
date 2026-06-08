@@ -8,8 +8,30 @@
 #include "DroneOpsPlayerController.h"
 #include "MultiDroneCharacter.h"
 #include "RealTimeDroneReceiver.h"
+#include "Cesium3DTileset.h"
 #include "CesiumGeoreference.h"
+#include "CesiumRasterOverlay.h"
+#include "CesiumTileMapServiceRasterOverlay.h"
+#include "CesiumUrlTemplateRasterOverlay.h"
+#include "CesiumWebMapTileServiceRasterOverlay.h"
 #include "EngineUtils.h"
+#include "Misc/ConfigCacheIni.h"
+
+namespace
+{
+FString BuildCesiumLocalRasterTemplateUrl(const FString& LocalTileServerUrl)
+{
+	FString Url = LocalTileServerUrl.TrimStartAndEnd();
+	if (Url.Contains(TEXT("{x}")) || Url.Contains(TEXT("{y}")) || Url.Contains(TEXT("{z}")) ||
+		Url.Contains(TEXT("{TileCol}")) || Url.Contains(TEXT("{TileRow}")) || Url.Contains(TEXT("{TileMatrix}")))
+	{
+		return Url;
+	}
+
+	Url.RemoveFromEnd(TEXT("/"));
+	return Url + TEXT("/{z}/{x}/{y}.png");
+}
+}
 
 ADroneOpsGameMode::ADroneOpsGameMode()
 {
@@ -43,6 +65,8 @@ void ADroneOpsGameMode::BeginPlay()
 	Super::BeginPlay();
 
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: BeginPlay"));
+
+	ApplyCesiumTileServerConfig();
 
 	// Always (re)load the blueprint receiver class at BeginPlay.
 	// Do not rely on the CDO value — it may be stale from a previous cook.
@@ -493,6 +517,100 @@ void ADroneOpsGameMode::ApplyPendingGeoreferenceOrigin()
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("DroneOpsGameMode: ApplyPendingGeoreferenceOrigin — no ACesiumGeoreference found in level"));
+}
+
+void ADroneOpsGameMode::ApplyCesiumTileServerConfig()
+{
+	bool bUseLocalTileServer = false;
+	FString LocalTileServerUrl = TEXT("http://localhost:8070");
+
+	if (GConfig)
+	{
+		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("UseLocalTileServer"), bUseLocalTileServer, GEngineIni);
+		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("LocalTileServerUrl"), LocalTileServerUrl, GEngineIni);
+	}
+
+	if (!bUseLocalTileServer)
+	{
+		UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Cesium local tile server disabled; keeping online Cesium/Google sources."));
+		return;
+	}
+
+	LocalTileServerUrl = LocalTileServerUrl.TrimStartAndEnd();
+	if (LocalTileServerUrl.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("DroneOpsGameMode: UseLocalTileServer=true but LocalTileServerUrl is empty; keeping existing Cesium sources."));
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const FString RasterTemplateUrl = BuildCesiumLocalRasterTemplateUrl(LocalTileServerUrl);
+	int32 TilesetCount = 0;
+	int32 RasterOverlayCount = 0;
+	int32 UnsupportedOverlayCount = 0;
+
+	for (TActorIterator<ACesium3DTileset> It(World); It; ++It)
+	{
+		ACesium3DTileset* Tileset = *It;
+		if (!IsValid(Tileset))
+		{
+			continue;
+		}
+
+		Tileset->SetTilesetSource(ETilesetSource::FromUrl);
+		Tileset->SetUrl(LocalTileServerUrl);
+		Tileset->RefreshTileset();
+		++TilesetCount;
+
+		TArray<UCesiumRasterOverlay*> RasterOverlays;
+		Tileset->GetComponents<UCesiumRasterOverlay>(RasterOverlays);
+		for (UCesiumRasterOverlay* Overlay : RasterOverlays)
+		{
+			if (!IsValid(Overlay))
+			{
+				continue;
+			}
+
+			if (UCesiumUrlTemplateRasterOverlay* UrlTemplateOverlay = Cast<UCesiumUrlTemplateRasterOverlay>(Overlay))
+			{
+				UrlTemplateOverlay->TemplateUrl = RasterTemplateUrl;
+				UrlTemplateOverlay->Refresh();
+				++RasterOverlayCount;
+			}
+			else if (UCesiumTileMapServiceRasterOverlay* TmsOverlay = Cast<UCesiumTileMapServiceRasterOverlay>(Overlay))
+			{
+				TmsOverlay->Url = LocalTileServerUrl;
+				TmsOverlay->Refresh();
+				++RasterOverlayCount;
+			}
+			else if (UCesiumWebMapTileServiceRasterOverlay* WmtsOverlay = Cast<UCesiumWebMapTileServiceRasterOverlay>(Overlay))
+			{
+				WmtsOverlay->BaseUrl = RasterTemplateUrl;
+				WmtsOverlay->Refresh();
+				++RasterOverlayCount;
+			}
+			else
+			{
+				++UnsupportedOverlayCount;
+				UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Cesium overlay '%s' on '%s' is not URL-configurable at runtime; class=%s"),
+					*Overlay->GetName(),
+					*Tileset->GetName(),
+					*Overlay->GetClass()->GetName());
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Cesium local tile server enabled. Tilesets=%d Url='%s', URL raster overlays=%d TemplateUrl='%s', unsupported overlays=%d"),
+		TilesetCount,
+		*LocalTileServerUrl,
+		RasterOverlayCount,
+		*RasterTemplateUrl,
+		UnsupportedOverlayCount);
 }
 
 void ADroneOpsGameMode::OnGeoreferenceUpdated()

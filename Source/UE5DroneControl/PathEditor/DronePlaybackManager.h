@@ -6,6 +6,7 @@
 #include "DronePlaybackManager.generated.h"
 
 class ADronePathActor;
+class AMultiDroneCharacter;
 
 USTRUCT()
 struct FDronePlaybackPauseState
@@ -37,6 +38,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Playback")
 	TSubclassOf<AActor> DroneActorClass;
 
+	/** When true, PlayFromData drives existing AMultiDroneCharacter shadow drones instead of spawning preview actors. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Playback")
+	bool bUseExistingShadowDrones = false;
+
 	UPROPERTY(Transient)
 	TArray<ADronePathActor*> ActivePaths;
 
@@ -67,6 +72,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Drone|Playback")
 	void StopPlayback();
 
+	/**
+	 * Spawn AMultiDroneCharacter instances so that PlayFromData (bUseExistingShadowDrones=true)
+	 * can find them. Existing ones are reused; extras are destroyed. All spawned ones are
+	 * tracked in SpawnedMultiDrones and destroyed on StopPlayback.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Drone|Playback")
+	void EnsurePlaybackDrones(int32 Count);
+
 	virtual void Tick(float DeltaTime) override;
 
 protected:
@@ -77,6 +90,12 @@ private:
 	TArray<TObjectPtr<AActor>> ActiveDrones;
 
 	UPROPERTY(Transient)
+	TArray<TObjectPtr<AActor>> SpawnedPlaybackDrones;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AActor>> SpawnedMultiDrones;
+
+	UPROPERTY(Transient)
 	TArray<FDronePlaybackPauseState> PausedPathStates;
 
 	UPROPERTY(Transient)
@@ -84,4 +103,6 @@ private:
 
 	void ClearActivePlaybackActors();
 	AActor* SpawnPlaybackDrone(const FVector& SpawnLocation);
+	TArray<AMultiDroneCharacter*> FindShadowDrones() const;
+	FDronePathsSaveData RemapDataToAnchor(const FDronePathsSaveData& Data, const FVector& NewAnchorLocation) const;
 };

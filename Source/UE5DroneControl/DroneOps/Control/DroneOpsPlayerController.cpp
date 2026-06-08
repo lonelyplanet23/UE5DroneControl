@@ -12,6 +12,7 @@
 #include "MultiDroneCharacter.h"
 #include "RealTimeDroneReceiver.h"
 #include "MultiDroneManager.h"
+#include "PathEditor/DronePathActor.h"
 #include "UE5DroneControlCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Engine/EngineTypes.h"
@@ -229,6 +230,7 @@ void ADroneOpsPlayerController::SetupInputComponent()
 		InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ADroneOpsPlayerController::OnPauseToggle);
 		InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &ADroneOpsPlayerController::OnSwitchToTopDown);
 		InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ADroneOpsPlayerController::OnSwitchToRealTimeDrone);
+		InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ADroneOpsPlayerController::ResetShadowDronesToMirrors);
 		InputComponent->BindKey(EKeys::LeftShift, IE_Pressed, this, &ADroneOpsPlayerController::OnShiftPressed);
 		InputComponent->BindKey(EKeys::LeftShift, IE_Released, this, &ADroneOpsPlayerController::OnShiftReleased);
 		InputComponent->BindKey(EKeys::RightShift, IE_Pressed, this, &ADroneOpsPlayerController::OnShiftPressed);
@@ -1157,6 +1159,139 @@ void ADroneOpsPlayerController::OnPauseToggle()
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
 			FString::Printf(TEXT("无人机 %d %s"), SelectedDroneId, *StatusText));
+	}
+}
+
+void ADroneOpsPlayerController::ResetShadowDronesToMirrors()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	if (!DroneRegistry)
+	{
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			DroneRegistry = GameInstance->GetSubsystem<UDroneRegistrySubsystem>();
+		}
+	}
+
+	int32 ResetCount = 0;
+	int32 MissingShadowCount = 0;
+	int32 StoppedPathCount = 0;
+
+	for (TActorIterator<ARealTimeDroneReceiver> It(World); It; ++It)
+	{
+		ARealTimeDroneReceiver* Mirror = *It;
+		if (!IsValid(Mirror) || Mirror->DroneId <= 0)
+		{
+			continue;
+		}
+
+		const int32 DroneId = Mirror->DroneId;
+		if (DroneRegistry)
+		{
+			AActor* RegisteredReceiver = DroneRegistry->GetReceiverActor(DroneId);
+			if (RegisteredReceiver != Mirror)
+			{
+				continue;
+			}
+		}
+
+		AActor* ShadowActor = nullptr;
+		if (DroneRegistry)
+		{
+			ShadowActor = DroneRegistry->GetSenderPawn(DroneId);
+		}
+
+		if (!IsValid(ShadowActor))
+		{
+			for (TActorIterator<AMultiDroneCharacter> ShadowIt(World); ShadowIt; ++ShadowIt)
+			{
+				AMultiDroneCharacter* Candidate = *ShadowIt;
+				if (IsValid(Candidate) && Candidate->DroneId == DroneId)
+				{
+					ShadowActor = Candidate;
+					break;
+				}
+			}
+		}
+
+		ADronePathActor* PathActorFallback = nullptr;
+		for (TActorIterator<ADronePathActor> PathIt(World); PathIt; ++PathIt)
+		{
+			ADronePathActor* PathActor = *PathIt;
+			if (!IsValid(PathActor))
+			{
+				continue;
+			}
+
+			AActor* ControlledDrone = PathActor->ControlledDrone.Get();
+			const bool bControlsShadowActor = IsValid(ShadowActor) && ControlledDrone == ShadowActor;
+			const bool bControlsDroneId = IsValid(ControlledDrone) && ResolveDroneIdFromActor(ControlledDrone) == DroneId;
+			const bool bPathActorMatchesDroneId = !IsValid(ShadowActor) && PathActor->GetPathNumericId() == DroneId;
+
+			if (!bControlsShadowActor && !bControlsDroneId && !bPathActorMatchesDroneId)
+			{
+				continue;
+			}
+
+			if (PathActor->IsMovementActive() || PathActor->IsExecutionActive())
+			{
+				PathActor->UpdatePathStatus(EPathStatus::Standby);
+				++StoppedPathCount;
+			}
+
+			if (!IsValid(ShadowActor) && bPathActorMatchesDroneId)
+			{
+				PathActorFallback = PathActor;
+			}
+		}
+
+		if (!IsValid(ShadowActor))
+		{
+			ShadowActor = PathActorFallback;
+		}
+
+		if (!IsValid(ShadowActor))
+		{
+			++MissingShadowCount;
+			UE_LOG(LogTemp, Warning, TEXT("ResetShadowDronesToMirrors: no shadow actor found for DroneId=%d"), DroneId);
+			continue;
+		}
+
+		if (AUE5DroneControlCharacter* ShadowDrone = Cast<AUE5DroneControlCharacter>(ShadowActor))
+		{
+			ShadowDrone->StopClickTargetSending();
+		}
+
+		const FVector MirrorLocation = Mirror->GetActorLocation();
+		ShadowActor->SetActorLocation(MirrorLocation, false, nullptr, ETeleportType::TeleportPhysics);
+		++ResetCount;
+
+		UE_LOG(LogTemp, Log, TEXT("ResetShadowDronesToMirrors: DroneId=%d shadow=%s mirror=%s location=(%.1f, %.1f, %.1f)"),
+			DroneId,
+			*ShadowActor->GetName(),
+			*Mirror->GetName(),
+			MirrorLocation.X,
+			MirrorLocation.Y,
+			MirrorLocation.Z);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("ResetShadowDronesToMirrors complete: reset=%d stoppedPaths=%d missingShadow=%d"),
+		ResetCount,
+		StoppedPathCount,
+		MissingShadowCount);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, MissingShadowCount > 0 ? FColor::Orange : FColor::Green,
+			FString::Printf(TEXT("Reset shadow drones: %d, stopped preview paths: %d, missing shadows: %d"),
+				ResetCount,
+				StoppedPathCount,
+				MissingShadowCount));
 	}
 }
 

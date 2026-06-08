@@ -71,6 +71,9 @@ private:
 	/** Read PendingOrigin from DroneNetworkManager and apply to CesiumGeoreference if set. */
 	void ApplyPendingGeoreferenceOrigin();
 
+	/** Read [CesiumTileServer] config and switch Cesium URL-based sources to the local tile server when enabled. */
+	void ApplyCesiumTileServerConfig();
+
 	/** Called by CesiumGeoreference::OnGeoreferenceUpdated after origin change. */
 	UFUNCTION()
 	void OnGeoreferenceUpdated();

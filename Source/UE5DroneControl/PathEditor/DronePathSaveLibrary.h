@@ -57,6 +57,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Drone Path|Save")
 	static bool SavePathsToJson(const TMap<int32, ADronePathActor*>& PathMap, const FString& FileName);
 
+	UFUNCTION(BlueprintCallable, Category = "Drone Path|Save", meta = (WorldContext = "WorldContextObject"))
+	static bool SaveAllPathsInWorldToJson(UObject* WorldContextObject, const FString& FileName);
+
 	UFUNCTION(BlueprintCallable, Category = "Drone|IO")
 	static bool LoadPathsFromJson(const FString& FilePath, FDronePathsSaveData& OutData);
 };
