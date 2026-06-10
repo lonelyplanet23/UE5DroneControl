@@ -50,6 +50,9 @@ public:
 	class UButton* DispatchButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
+	class UButton* LocalPreviewButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
 	class UButton* BackButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
@@ -105,6 +108,9 @@ private:
 
 	UFUNCTION()
 	void OnDispatchClicked();
+
+	UFUNCTION()
+	void OnLocalPreviewClicked();
 
 	UFUNCTION()
 	void OnBackClicked();

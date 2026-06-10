@@ -569,8 +569,13 @@ void ADroneOpsPlayerController::OnFreeCamToggle()
 		bShowMouseCursor = true;
 		SetInputMode(FInputModeGameAndUI());
 
-		// 优先跟随已选无人机，找不到时 fallback 到 RealTimeDrone
-		AActor* FollowTarget = ResolveFollowViewTargetByDroneId(CameraModeState.FollowDroneId);
+		// 优先恢复用户上次手动选择的无人机；若从未手动选择则 fallback
+		const int32 RestoreId = (LastFollowedDroneId > 0) ? LastFollowedDroneId : CameraModeState.FollowDroneId;
+		AActor* FollowTarget = ResolveFollowViewTargetByDroneId(RestoreId);
+		if (!IsValid(FollowTarget) && IsValid(LastFollowViewTarget))
+		{
+			FollowTarget = LastFollowViewTarget.Get();
+		}
 		if (!IsValid(FollowTarget) && IsValid(CachedRealTimeDrone))
 		{
 			FollowTarget = CachedRealTimeDrone;
@@ -580,7 +585,7 @@ void ADroneOpsPlayerController::OnFreeCamToggle()
 			SetViewTargetWithBlend(FollowTarget, 0.35f);
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("FR-04: Switched back to Follow Camera (DroneId=%d)"), CameraModeState.FollowDroneId);
+		UE_LOG(LogTemp, Log, TEXT("FR-04: Switched back to Follow Camera (LastFollowedDroneId=%d, RestoreId=%d)"), LastFollowedDroneId, RestoreId);
 	}
 }
 
@@ -797,6 +802,7 @@ void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
 	{
 		LastFollowViewTarget = ClickedActor;
 		CameraModeState.FollowDroneId = ClickedDroneId;
+		LastFollowedDroneId = ClickedDroneId;
 		CameraModeState.LastFollowLocation = ClickedActor->GetActorLocation();
 		CameraModeState.LastFollowRotation = ClickedActor->GetActorRotation();
 		SetViewTargetWithBlend(ClickedActor, 0.35f);
@@ -1318,12 +1324,20 @@ void ADroneOpsPlayerController::SwitchToNextMultiDroneFollowView(float BlendTime
 	AMultiDroneCharacter* Target = Actors[MultiDroneCharacterIndex];
 	MultiDroneCharacterIndex = (MultiDroneCharacterIndex + 1) % Actors.Num();
 
+	const int32 ResolvedId = ResolveDroneIdFromActor(Target);
+	if (ResolvedId > 0)
+	{
+		LastFollowedDroneId = ResolvedId;
+		CameraModeState.FollowDroneId = ResolvedId;
+	}
+	LastFollowViewTarget = Target;
+
 	CameraModeState.CameraMode = EDroneCameraMode::Follow;
 	bShowMouseCursor = true;
 	SetInputMode(FInputModeGameAndUI());
 	SetViewTargetWithBlend(Target, BlendTime);
-	UE_LOG(LogTemp, Log, TEXT("Camera switched to MultiDroneCharacter[%d]: %s (key 0)"),
-		MultiDroneCharacterIndex - 1, *Target->GetName());
+	UE_LOG(LogTemp, Log, TEXT("Camera switched to MultiDroneCharacter[%d]: %s (key 0, LastFollowedDroneId=%d)"),
+		MultiDroneCharacterIndex - 1, *Target->GetName(), LastFollowedDroneId);
 }
 
 void ADroneOpsPlayerController::OnSwitchToRealTimeDrone()
@@ -1344,12 +1358,20 @@ void ADroneOpsPlayerController::OnSwitchToRealTimeDrone()
 	ARealTimeDroneReceiver* Target = Actors[RealTimeDroneIndex];
 	RealTimeDroneIndex = (RealTimeDroneIndex + 1) % Actors.Num();
 
+	const int32 ResolvedId = ResolveDroneIdFromActor(Target);
+	if (ResolvedId > 0)
+	{
+		LastFollowedDroneId = ResolvedId;
+		CameraModeState.FollowDroneId = ResolvedId;
+	}
+	LastFollowViewTarget = Target;
+
 	CameraModeState.CameraMode = EDroneCameraMode::Follow;
 	bShowMouseCursor = true;
 	SetInputMode(FInputModeGameAndUI());
 	SetViewTargetWithBlend(Target, 0.35f);
-	UE_LOG(LogTemp, Log, TEXT("Camera switched to RealTimeDroneReceiver[%d]: %s (key 1)"),
-		RealTimeDroneIndex - 1, *Target->GetName());
+	UE_LOG(LogTemp, Log, TEXT("Camera switched to RealTimeDroneReceiver[%d]: %s (key 1, LastFollowedDroneId=%d)"),
+		RealTimeDroneIndex - 1, *Target->GetName(), LastFollowedDroneId);
 }
 
 void ADroneOpsPlayerController::TestSendArrayTask()

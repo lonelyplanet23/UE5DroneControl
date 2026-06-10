@@ -171,6 +171,9 @@ private:
 	/** Whether Shift is held — used for multi-select on click */
 	bool bShiftHeld = false;
 
+	/** Last drone ID the user explicitly switched to (key 0/1 or click). F restores this. -1 = never set. */
+	int32 LastFollowedDroneId = -1;
+
 	/** Current index for cycling through AMultiDroneCharacter actors (key 0) */
 	int32 MultiDroneCharacterIndex = 0;
 
