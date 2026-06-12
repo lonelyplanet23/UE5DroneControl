@@ -1,10 +1,12 @@
 #include "DronePlaybackManager.h"
 
-#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "DronePathActor.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/StaticMeshActor.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "MultiDroneCharacter.h"
+#include "UE5DroneControlCharacter.h"
 
 ADronePlaybackManager::ADronePlaybackManager()
 {
@@ -19,7 +21,6 @@ void ADronePlaybackManager::BeginPlay()
 void ADronePlaybackManager::PlayFromData(const FDronePathsSaveData& Data)
 {
 	StopPlayback();
-	CachedPlaybackData = Data;
 
 	if (Data.Paths.IsEmpty())
 	{
@@ -32,8 +33,46 @@ void ADronePlaybackManager::PlayFromData(const FDronePathsSaveData& Data)
 		return;
 	}
 
-	for (const FDronePathSaveData& PathData : Data.Paths)
+	FDronePathsSaveData PlaybackData = Data;
+	PlaybackData.Paths.Sort([](const FDronePathSaveData& A, const FDronePathSaveData& B)
 	{
+		const int32 AId = A.PathId == INDEX_NONE ? MAX_int32 : A.PathId;
+		const int32 BId = B.PathId == INDEX_NONE ? MAX_int32 : B.PathId;
+		return AId < BId;
+	});
+
+	TArray<AActor*> ShadowDrones;
+	if (bUseExistingShadowDrones)
+	{
+		EnsurePlaybackDrones(PlaybackData.Paths.Num());
+
+		if (SpawnedMultiDrones.Num() > 0)
+		{
+			for (AActor* Multi : SpawnedMultiDrones)
+			{
+				ShadowDrones.Add(Multi);
+			}
+		}
+		else
+		{
+			for (AMultiDroneCharacter* Multi : FindShadowDrones())
+			{
+				ShadowDrones.Add(Multi);
+			}
+		}
+
+		if (ShadowDrones.IsEmpty())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("DronePlaybackManager: no shadow drones found for local playback."));
+			return;
+		}
+	}
+
+	CachedPlaybackData = PlaybackData;
+
+	for (int32 PathIndex = 0; PathIndex < PlaybackData.Paths.Num(); ++PathIndex)
+	{
+		const FDronePathSaveData& PathData = PlaybackData.Paths[PathIndex];
 		if (PathData.Waypoints.IsEmpty())
 		{
 			continue;
@@ -52,20 +91,52 @@ void ADronePlaybackManager::PlayFromData(const FDronePathsSaveData& Data)
 		PathActor->SetPathNumericId(PathData.PathId);
 		PathActor->bClosedLoop = PathData.bClosedLoop;
 
-		for (const FDroneWaypointSaveData& WaypointData : PathData.Waypoints)
+		constexpr float DefaultSpeedMps = 5.0f;
+
+		for (int32 WaypointIndex = 0; WaypointIndex < PathData.Waypoints.Num(); ++WaypointIndex)
 		{
-			const int32 NewWaypointIndex = PathActor->AddWaypoint(WaypointData.Location, WaypointData.SegmentSpeed);
+			const FDroneWaypointSaveData& WaypointData = PathData.Waypoints[WaypointIndex];
+			const float EffectiveSpeed = (WaypointIndex == 0)
+				? 0.0f
+				: (WaypointData.SegmentSpeed > KINDA_SMALL_NUMBER ? WaypointData.SegmentSpeed : DefaultSpeedMps);
+
+			const int32 NewWaypointIndex = PathActor->AddWaypoint(WaypointData.Location, EffectiveSpeed);
 			if (PathActor->Waypoints.IsValidIndex(NewWaypointIndex))
 			{
 				PathActor->Waypoints[NewWaypointIndex].WaitTime = WaypointData.WaitTime;
-				PathActor->Waypoints[NewWaypointIndex].SegmentSpeed = (NewWaypointIndex == 0) ? 0.0f : FMath::Max(0.0f, WaypointData.SegmentSpeed);
+				PathActor->Waypoints[NewWaypointIndex].SegmentSpeed = EffectiveSpeed;
 			}
 		}
 
 		PathActor->RefreshPath();
 
-		const FVector SpawnLocation = PathActor->GetWaypointWorldLocation(0);
-		AActor* DroneActor = SpawnPlaybackDrone(SpawnLocation);
+		const FVector StartLocation = PathActor->GetWaypointWorldLocation(0);
+		AActor* DroneActor = nullptr;
+		if (bUseExistingShadowDrones)
+		{
+			if (!ShadowDrones.IsValidIndex(PathIndex) || !IsValid(ShadowDrones[PathIndex]))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("DronePlaybackManager: no shadow drone for path index %d."), PathIndex);
+				PathActor->Destroy();
+				continue;
+			}
+
+			DroneActor = ShadowDrones[PathIndex];
+			if (AMultiDroneCharacter* Multi = Cast<AMultiDroneCharacter>(DroneActor))
+			{
+				Multi->bFollowingMirror = false;
+			}
+			if (AUE5DroneControlCharacter* DroneCharacter = Cast<AUE5DroneControlCharacter>(DroneActor))
+			{
+				DroneCharacter->StopClickTargetSending();
+			}
+			DroneActor->SetActorLocation(StartLocation, false, nullptr, ETeleportType::TeleportPhysics);
+		}
+		else
+		{
+			DroneActor = SpawnPlaybackDrone(StartLocation);
+		}
+
 		if (!IsValid(DroneActor))
 		{
 			PathActor->Destroy();
@@ -154,6 +225,7 @@ void ADronePlaybackManager::StopPlayback()
 {
 	ClearActivePlaybackActors();
 	PausedPathStates.Reset();
+	SpawnedMultiDrones.Reset();
 	bIsPlaying = false;
 	bIsPaused = false;
 	PlaybackTime = 0.0f;
@@ -174,6 +246,15 @@ void ADronePlaybackManager::Tick(float DeltaTime)
 		if (UWorld* World = GetWorld())
 		{
 			PlaybackTime = World->GetTimeSeconds() - StartTime;
+		}
+	}
+
+	// Keep spawned preview drones from being overridden by mirror-follow logic
+	for (AActor* Multi : SpawnedMultiDrones)
+	{
+		if (AMultiDroneCharacter* MultiChar = Cast<AMultiDroneCharacter>(Multi))
+		{
+			MultiChar->bFollowingMirror = false;
 		}
 	}
 
@@ -209,6 +290,36 @@ void ADronePlaybackManager::Tick(float DeltaTime)
 	StopPlayback();
 }
 
+void ADronePlaybackManager::EnsurePlaybackDrones(int32 Count)
+{
+	UWorld* World = GetWorld();
+	if (!IsValid(World) || Count <= 0)
+	{
+		return;
+	}
+
+	// Remove extras
+	while (SpawnedMultiDrones.Num() > Count)
+	{
+		AActor* Extra = SpawnedMultiDrones.Last();
+		SpawnedMultiDrones.RemoveAt(SpawnedMultiDrones.Num() - 1);
+		if (IsValid(Extra))
+		{
+			Extra->Destroy();
+		}
+	}
+
+	// Spawn missing using the same DroneActorClass path as SpawnPlaybackDrone
+	for (int32 i = SpawnedMultiDrones.Num(); i < Count; ++i)
+	{
+		AActor* NewDrone = SpawnPlaybackDrone(FVector::ZeroVector);
+		if (IsValid(NewDrone))
+		{
+			SpawnedMultiDrones.Add(NewDrone);
+		}
+	}
+}
+
 void ADronePlaybackManager::ClearActivePlaybackActors()
 {
 	for (ADronePathActor* PathActor : ActivePaths)
@@ -222,7 +333,17 @@ void ADronePlaybackManager::ClearActivePlaybackActors()
 
 	for (AActor* DroneActor : ActiveDrones)
 	{
-		if (IsValid(DroneActor))
+		bool bWasSpawnedForPlayback = false;
+		for (const TObjectPtr<AActor>& SpawnedDrone : SpawnedPlaybackDrones)
+		{
+			if (SpawnedDrone.Get() == DroneActor)
+			{
+				bWasSpawnedForPlayback = true;
+				break;
+			}
+		}
+
+		if (bWasSpawnedForPlayback && IsValid(DroneActor))
 		{
 			DroneActor->Destroy();
 		}
@@ -230,6 +351,7 @@ void ADronePlaybackManager::ClearActivePlaybackActors()
 
 	ActivePaths.Reset();
 	ActiveDrones.Reset();
+	SpawnedPlaybackDrones.Reset();
 }
 
 AActor* ADronePlaybackManager::SpawnPlaybackDrone(const FVector& SpawnLocation)
@@ -246,26 +368,85 @@ AActor* ADronePlaybackManager::SpawnPlaybackDrone(const FVector& SpawnLocation)
 
 	if (DroneActorClass != nullptr)
 	{
-		return World->SpawnActor<AActor>(DroneActorClass, SpawnLocation, FRotator::ZeroRotator, SpawnParameters);
+		AActor* SpawnedActor = World->SpawnActor<AActor>(DroneActorClass, SpawnLocation, FRotator::ZeroRotator, SpawnParameters);
+		if (SpawnedActor)
+		{
+			if (AMultiDroneCharacter* Multi = Cast<AMultiDroneCharacter>(SpawnedActor))
+			{
+				Multi->bFollowingMirror = false;
+			}
+			SpawnedPlaybackDrones.Add(SpawnedActor);
+		}
+		return SpawnedActor;
 	}
 
-	AStaticMeshActor* FallbackActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParameters);
+	// Fallback: spawn a plain Actor with the drone skeletal mesh
+	AActor* FallbackActor = World->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParameters);
 	if (!IsValid(FallbackActor))
 	{
 		return nullptr;
 	}
 
-	UStaticMeshComponent* StaticMeshComponent = FallbackActor->GetStaticMeshComponent();
-	if (IsValid(StaticMeshComponent))
+	USkeletalMeshComponent* SkelMeshComp = NewObject<USkeletalMeshComponent>(FallbackActor);
+	if (IsValid(SkelMeshComp))
 	{
-		if (UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
+		SkelMeshComp->SetMobility(EComponentMobility::Movable);
+		USkeletalMesh* DroneMesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Drone_Scavenger/SK/SK_Drone_Scavenger.SK_Drone_Scavenger"));
+		if (DroneMesh)
 		{
-			StaticMeshComponent->SetStaticMesh(CubeMesh);
+			SkelMeshComp->SetSkeletalMesh(DroneMesh);
 		}
-
-		StaticMeshComponent->SetMobility(EComponentMobility::Movable);
-		StaticMeshComponent->SetWorldScale3D(FVector(0.25f));
+		SkelMeshComp->SetWorldScale3D(FVector(0.3f));
+		SkelMeshComp->RegisterComponent();
+		FallbackActor->SetRootComponent(SkelMeshComp);
 	}
 
+	SpawnedPlaybackDrones.Add(FallbackActor);
 	return FallbackActor;
+}
+
+TArray<AMultiDroneCharacter*> ADronePlaybackManager::FindShadowDrones() const
+{
+	TArray<AMultiDroneCharacter*> Result;
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return Result;
+	}
+
+	for (TActorIterator<AMultiDroneCharacter> It(World); It; ++It)
+	{
+		AMultiDroneCharacter* ShadowDrone = *It;
+		if (IsValid(ShadowDrone))
+		{
+			Result.Add(ShadowDrone);
+		}
+	}
+
+	Result.Sort([](const AMultiDroneCharacter& A, const AMultiDroneCharacter& B)
+	{
+		return A.DroneId < B.DroneId;
+	});
+
+	return Result;
+}
+
+FDronePathsSaveData ADronePlaybackManager::RemapDataToAnchor(const FDronePathsSaveData& Data, const FVector& NewAnchorLocation) const
+{
+	FDronePathsSaveData Remapped = Data;
+	if (Remapped.Paths.IsEmpty() || Remapped.Paths[0].Waypoints.IsEmpty())
+	{
+		return Remapped;
+	}
+
+	const FVector EditAnchorLocation = Remapped.Paths[0].Waypoints[0].Location;
+	for (FDronePathSaveData& PathData : Remapped.Paths)
+	{
+		for (FDroneWaypointSaveData& Waypoint : PathData.Waypoints)
+		{
+			Waypoint.Location = (Waypoint.Location - EditAnchorLocation) + NewAnchorLocation;
+		}
+	}
+
+	return Remapped;
 }

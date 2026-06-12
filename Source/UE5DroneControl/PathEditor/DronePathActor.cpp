@@ -439,7 +439,10 @@ bool ADronePathActor::ResumeMovement(AActor* DroneActor, int32 SegmentIndex, flo
 	const FVector TravelDirection = EndLocation - StartLocation;
 	if (bOrientControlledDroneToPath && !TravelDirection.IsNearlyZero())
 	{
-		DroneActor->SetActorRotation(TravelDirection.Rotation());
+		FRotator NewRot = TravelDirection.Rotation();
+		NewRot.Pitch = 0.0f;
+		NewRot.Roll = 0.0f;
+		DroneActor->SetActorRotation(NewRot);
 	}
 
 	SetActorTickEnabled(true);
@@ -1004,10 +1007,12 @@ void ADronePathActor::TickMovement()
 	const FVector TravelDirection = EndLocation - StartLocation;
 	if (bOrientControlledDroneToPath && !TravelDirection.IsNearlyZero())
 	{
-		DroneActor->SetActorRotation(TravelDirection.Rotation());
+		FRotator NewRot = TravelDirection.Rotation();
+		NewRot.Pitch = 0.0f;
+		NewRot.Roll = 0.0f;
+		DroneActor->SetActorRotation(NewRot);
 	}
 
-	if (bDrawMovementDebug)
 	{
 		DrawDebugString(
 			World,

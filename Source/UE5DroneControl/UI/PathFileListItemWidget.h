@@ -15,7 +15,11 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UTextBlock* FileNameText;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UBorder* HighlightBorder;
+
 	void SetFileInfo(const FString& InFileName, const FString& InFilePath);
+	void SetSelected(bool bSelected);
 
 	FOnPathFileItemClicked OnClicked;
 

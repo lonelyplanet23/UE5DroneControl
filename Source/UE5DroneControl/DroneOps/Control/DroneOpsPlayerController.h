@@ -29,6 +29,10 @@ class UE5DRONECONTROL_API ADroneOpsPlayerController : public APlayerController
 public:
 	ADroneOpsPlayerController();
 
+	/** Manually snap every shadow drone to the current position of its registered mirror drone. */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Calibration")
+	void ResetShadowDronesToMirrors();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -166,6 +170,9 @@ private:
 
 	/** Whether Shift is held — used for multi-select on click */
 	bool bShiftHeld = false;
+
+	/** Last drone ID the user explicitly switched to (key 0/1 or click). F restores this. -1 = never set. */
+	int32 LastFollowedDroneId = -1;
 
 	/** Current index for cycling through AMultiDroneCharacter actors (key 0) */
 	int32 MultiDroneCharacterIndex = 0;

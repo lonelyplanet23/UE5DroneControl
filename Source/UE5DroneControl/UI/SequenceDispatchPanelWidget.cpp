@@ -56,6 +56,10 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 	{
 		DispatchButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnDispatchClicked);
 	}
+	if (LocalPreviewButton)
+	{
+		LocalPreviewButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnLocalPreviewClicked);
+	}
 	if (BackButton)
 	{
 		BackButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnBackClicked);
@@ -105,6 +109,11 @@ void USequenceDispatchPanelWidget::SetPanelState(ESequencePanelState NewState)
 	if (DispatchButton)
 	{
 		DispatchButton->SetVisibility(NewState == ESequencePanelState::Matching
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (LocalPreviewButton)
+	{
+		LocalPreviewButton->SetVisibility(NewState == ESequencePanelState::Matching
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (BackButton)
@@ -481,6 +490,32 @@ void USequenceDispatchPanelWidget::SetStatusMessage(const FString& Message)
 	{
 		StatusText->SetText(FText::FromString(Message));
 	}
+}
+
+void USequenceDispatchPanelWidget::OnLocalPreviewClicked()
+{
+	if (MatchedPairs.Num() != LoadedPathsData.Paths.Num())
+	{
+		SetStatusMessage(TEXT("请先完成所有路径匹配"));
+		return;
+	}
+
+	// 不发送后端请求，直接用匹配结果驱动影子机本地播放
+	TMap<int32, FDronePathSaveData> PreviewMap;
+	for (const auto& Pair : MatchedPairs)
+	{
+		if (LoadedPathsData.Paths.IsValidIndex(Pair.Key))
+		{
+			PreviewMap.Add(Pair.Value, LoadedPathsData.Paths[Pair.Key]);
+		}
+	}
+
+	PendingRemappedMap = PreviewMap;
+	StartShadowDronePlayback();
+
+	SetStatusMessage(TEXT("本地预演已开始（未向后端发送指令）"));
+	MatchedPairs.Empty();
+	SetPanelState(ESequencePanelState::Collapsed);
 }
 
 void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
