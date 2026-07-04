@@ -1,0 +1,665 @@
+@startuml ClassDiagram
+' ============================================================
+' UE5DroneControl — Class Diagram (PlantUML)
+' Version : v0.3 | Date : 2026-06-05
+' ============================================================
+
+skinparam {
+    ClassBackgroundColor     #EAF4FB
+    ClassBorderColor         #2C5F8A
+    ClassHeaderBackgroundColor #2C5F8A
+    ClassFontColor           #FFFFFF
+    ClassAttributeFontColor  #212121
+    ClassStereotypeFontColor #78909C
+    InterfaceBackgroundColor #FFF9C4
+    InterfaceBorderColor     #F9A825
+    InterfaceHeaderBackgroundColor #F9A825
+    AbstractBackgroundColor  #E8F5E9
+    AbstractBorderColor      #388E3C
+    EnumBackgroundColor      #F3E5F5
+    EnumBorderColor          #7B1FA2
+    NoteBackgroundColor      #FFFDE7
+    NoteBorderColor          #F9A825
+    ArrowColor               #37474F
+    ArrowFontColor           #37474F
+    PackageBackgroundColor   #F5F5F5
+    PackageBorderColor       #BDBDBD
+    RoundCorner              8
+    Shadowing                false
+    ClassFontStyle           Bold
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: Core Types & Enums
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "DroneOps::Core" #F9FBE7 {
+
+    enum EDroneAvailability <<UENUM>> {
+        Online
+        Offline
+        Lost
+    }
+
+    enum EDroneCommandMode <<UENUM>> {
+        Move
+        Scout
+        Patrol
+        Attack
+        --
+        +{static} DroneCommandModeToProtocolString(mode) : FString
+        +{static} DroneCommandModeFromProtocolString(str) : EDroneCommandMode
+    }
+
+    enum EDroneControlLockReason <<UENUM>> {
+        None
+        FormationPlayback
+        Offline
+        InvalidTarget
+    }
+
+    enum EDroneCameraMode <<UENUM>> {
+        Follow
+        Free
+        TopDown
+    }
+
+    class FDroneDescriptor <<USTRUCT>> {
+        +Name : FString
+        +DroneId : int32
+        +Slot : int32
+        +BackendIdString : FString
+        +IpAddress : FString
+        +ControlPort : int32
+        +MavlinkSystemId : int32
+        +BitIndex : int32
+        +ThemeColor : FLinearColor
+        +UEReceivePort : int32
+        +TopicPrefix : FString
+    }
+
+    class FDroneTelemetrySnapshot <<USTRUCT>> {
+        +DroneId : int32
+        +Availability : EDroneAvailability
+        +WorldLocation : FVector
+        +NedLocation : FVector
+        +GeographicLocation : FVector
+        +Velocity : FVector
+        +Attitude : FRotator
+        +Altitude : float
+        +LastUpdateTime : double
+    }
+
+    class FDroneTargetCommand <<USTRUCT>> {
+        +DroneId : int32
+        +TargetWorldLocation : FVector
+        +TargetNedLocation : FVector
+        +TargetGeographicLocation : FVector
+        +Mode : int32
+        +IssuedAt : double
+    }
+
+    class FCameraModeState <<USTRUCT>> {
+        +CameraMode : EDroneCameraMode
+        +FollowDroneId : int32
+        +LastFollowLocation : FVector
+        +LastFollowRotation : FRotator
+    }
+
+    class FFormationStep <<USTRUCT>> {
+        +StepId : int32
+        +DurationSec : float
+        +MemberTargets : TMap<int32,FVector>
+    }
+
+    class FFormationMemberSlot <<USTRUCT>> {
+        +DroneId : int32
+        +RoleName : FString
+        +RelativeOffset : FVector
+    }
+
+    class FFormationExecutionState <<USTRUCT>> {
+        +PresetId : int32
+        +StepIndex : int32
+        +ElapsedSec : float
+        +bPaused : bool
+        +ParticipantIds : TArray<int32>
+    }
+
+    FDroneTelemetrySnapshot --> EDroneAvailability
+    FCameraModeState --> EDroneCameraMode
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: Interfaces
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "DroneOps::Interfaces" #FFFDE7 {
+
+    interface IDroneSelectableInterface <<UInterface>> {
+        +GetDroneId() : int32
+        +OnPrimarySelected()
+        +OnSecondarySelected(bSelected : bool)
+        +OnHoveredChanged(bHovered : bool)
+        +OnDeselected()
+    }
+
+    interface IDroneInfoProvider <<UInterface>> {
+        +GetDroneInfoSnapshot() : FDroneTelemetrySnapshot
+        +GetDroneDisplayName() : FString
+        +GetThemeColor() : FLinearColor
+    }
+
+    interface ICoordinateService <<UInterface>> {
+        +GpsToWorld(lat,lon,alt) : FVector
+        +WorldToGps(loc) : FVector
+    }
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: Network Layer
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "DroneOps::Network" #E3F2FD {
+
+    class UDroneHttpClient <<UObject, BlueprintType>> {
+        +BaseUrl : FString
+        +TimeoutSec : float
+        --
+        +Get(path, OnComplete : FOnHttpResponse)
+        +Post(path, jsonBody, OnComplete : FOnHttpResponse)
+        +Put(path, jsonBody, OnComplete : FOnHttpResponse)
+        +Delete(path, OnComplete : FOnHttpResponse)
+        --
+        -MakeRequest(verb, path, body) : TSharedRef<IHttpRequest>
+        -HandleResponse(req, resp, bConnected, OnComplete)
+    }
+
+    class UDroneWebSocketClient <<UObject, BlueprintType>> {
+        +ServerUrl : FString
+        +ReconnectIntervalSec : float
+        +bAutoReconnect : bool
+        .. Events ..
+        +OnConnected : FOnWsConnected
+        +OnDisconnected : FOnWsDisconnected
+        +OnMessage : FOnWsMessage
+        --
+        +Connect()
+        +Disconnect()
+        +SendMessage(jsonMessage : FString)
+        +IsConnected() : bool
+        --
+        -BindSocketEvents()
+        -ScheduleReconnect()
+        -Socket : TSharedPtr<IWebSocket>
+        -ReconnectTimer : FTimerHandle
+    }
+
+    class UDroneNetworkManager <<UGameInstanceSubsystem, config=Game>> {
+        +BackendBaseUrl : FString
+        +WebSocketUrl : FString
+        +PollIntervalSec : float
+        +PendingOriginLatitude : double
+        +PendingOriginLongitude : double
+        +PendingOriginAltitude : double
+        .. Events ..
+        +OnDroneWsEvent : FOnDroneWsEvent
+        +OnDroneWsAlert : FOnDroneWsAlert
+        +OnAssemblingProgress : FOnAssemblingProgress
+        +OnAssemblyComplete : FOnAssemblyComplete
+        +OnAssemblyTimeout : FOnAssemblyTimeout
+        --
+        +Initialize(Collection)
+        +Deinitialize()
+        +HasPendingGeoreferenceOrigin() : bool
+        +ClearPendingGeoreferenceOrigin()
+        +SendMoveCommand(droneId, targetLoc, mode)
+        +SendPauseCommand(droneIds, bPause)
+        +RegisterDroneToBackend(slot, ip, OnComplete)
+        +SendArrayTask(pathMap, mode, OnComplete)
+        +SendArrayTaskFromData(pathDataMap, mode, OnComplete)
+        +GetCachedGpsAnchor(droneId, lat, lon, alt) : bool
+        +GetHttpClient() : UDroneHttpClient*
+        +GetWebSocketClient() : UDroneWebSocketClient*
+        --
+        -StartPolling()
+        -StopPolling()
+        -PollDroneList()
+        -OnDroneListResponse(bSuccess, body)
+        -OnRegisterDroneResponse(bSuccess, body)
+        -ConnectWebSocket()
+        -OnWsConnected()
+        -OnWsMessage(message)
+        -SyncDroneListToRegistry(droneObjects)
+        -HttpClient : UDroneHttpClient*
+        -WsClient : UDroneWebSocketClient*
+        -PollTimer : FTimerHandle
+        -CachedGpsAnchors : TMap<int32,FGpsAnchorCache>
+    }
+
+    UDroneNetworkManager *-- UDroneHttpClient : owns >
+    UDroneNetworkManager *-- UDroneWebSocketClient : owns >
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: Registry Subsystem
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "DroneOps::Registry" #E8F5E9 {
+
+    class UDroneRegistrySubsystem <<UGameInstanceSubsystem>> {
+        .. Events (Multicast Delegates) ..
+        +OnDroneRegistered : FOnDroneRegistered
+        +OnPrimarySelectionChanged : FOnPrimarySelectionChanged
+        +OnTelemetryUpdated : FOnTelemetryUpdated
+        +OnControlLockChanged : FOnControlLockChanged
+        +OnDroneCommandModeChanged : FOnDroneCommandModeChanged
+        --
+        +Initialize(Collection)
+        +Deinitialize()
+        +SetCoordinateService(service)
+        +GetCoordinateService() : ICoordinateService
+        .. Drone Registration ..
+        +RegisterDrone(descriptor : FDroneDescriptor)
+        +UnregisterDrone(droneId)
+        +MarkDroneAvailability(droneId, availability)
+        +RegisterSenderPawn(droneId, pawn)
+        +RegisterReceiverActor(droneId, actor)
+        +SaveRegisteredDrones() : bool
+        +LoadRegisteredDrones() : bool
+        .. Telemetry ..
+        +UpdateTelemetry(droneId, snapshot)
+        +GetTelemetry(droneId, outSnapshot) : bool
+        .. Selection ..
+        +SetPrimarySelectedDrone(droneId)
+        +GetPrimarySelectedDrone() : int32
+        +SetMultiSelectedDrones(droneIds)
+        +GetMultiSelectedDrones() : TArray<int32>
+        +ClearSelection()
+        .. Control Lock ..
+        +ApplyControlLock(droneId, reason)
+        +ReleaseControlLock(droneId)
+        +IsControlLocked(droneId, outReason) : bool
+        .. Command Mode ..
+        +SetDroneCommandMode(droneId, mode)
+        +CycleDroneCommandMode(droneId)
+        +GetDroneCommandMode(droneId) : EDroneCommandMode
+        .. Query ..
+        +GetAllDroneDescriptors() : TArray<FDroneDescriptor>
+        +GetDroneDescriptor(droneId, out) : bool
+        +GetSenderPawn(droneId) : APawn*
+        +GetReceiverActor(droneId) : AActor*
+        +IsDroneRegistered(droneId) : bool
+        +GetSelectedDroneMask() : int32
+        +GetDroneBitIndex(droneId) : int32
+        --
+        -CoordinateService : ICoordinateService
+        -DroneDescriptors : TMap<int32,FDroneDescriptor>
+        -SenderPawns : TMap<int32,APawn*>
+        -ReceiverActors : TMap<int32,AActor*>
+        -TelemetryCache : TMap<int32,FDroneTelemetrySnapshot>
+        -PrimarySelectedDroneId : int32
+        -MultiSelectedDroneIds : TArray<int32>
+        -ControlLocks : TMap<int32,EDroneControlLockReason>
+        -CommandModes : TMap<int32,EDroneCommandMode>
+    }
+
+    UDroneRegistrySubsystem --> ICoordinateService : uses >
+    UDroneRegistrySubsystem ..> FDroneDescriptor : stores >
+    UDroneRegistrySubsystem ..> FDroneTelemetrySnapshot : caches >
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: Scene Actors (Drone Objects)
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "SceneActors" #FCE4EC {
+
+    abstract class AUE5DroneControlCharacter <<ACharacter, abstract>> {
+        -TopDownCameraComponent : UCameraComponent*
+        -CameraBoom : USpringArmComponent*
+        --
+        +AUE5DroneControlCharacter()
+        +BeginPlay()
+        +EndPlay(reason)
+        +Tick(deltaSeconds)
+        +SetupPlayerInputComponent(inputComp)
+        +GetTopDownCameraComponent() : UCameraComponent*
+        +GetCameraBoom() : USpringArmComponent*
+        +{abstract} SetClickTargetLocation(targetLoc, mode)
+    }
+
+    class FDroneYAMLData <<USTRUCT>> {
+        +Timestamp : int64
+        +Position : FVector
+        +Quaternion : FQuat
+        +Velocity : FVector
+        +AngularVelocity : FVector
+    }
+
+    class ARealTimeDroneReceiver <<AUE5DroneControlCharacter>> {
+        .. Identity ..
+        +DroneName : FString
+        +DroneId : int32
+        +MavlinkSystemId : int32
+        +BitIndex : int32
+        +ThemeColor : FLinearColor
+        .. Components ..
+        +SelectionComponent : UDroneSelectionComponent*
+        +TelemetryComponent : UDroneTelemetryComponent*
+        .. Config ..
+        +ListenPort : int32
+        +SmoothSpeed : float
+        +bUseWebSocket : bool
+        +bAutoFaceTarget : bool
+        .. GPS Anchor ..
+        +AnchorWorldLocation : FVector
+        +bHasGpsAnchor : bool
+        --
+        +BeginPlay()
+        +EndPlay(reason)
+        +Tick(deltaTime)
+        +ApplyDescriptor(descriptor, initialAvail)
+        +SetPaused(bPause)
+        +IsPaused() : bool
+        +SetClickTargetLocation(targetLoc, mode) override
+        .. IDroneSelectableInterface ..
+        +GetDroneId_Implementation() : int32
+        +OnPrimarySelected_Implementation()
+        +OnSecondarySelected_Implementation(bSelected)
+        +OnHoveredChanged_Implementation(bHovered)
+        +OnDeselected_Implementation()
+        .. IDroneInfoProvider ..
+        +GetDroneInfoSnapshot_Implementation() : FDroneTelemetrySnapshot
+        +GetDroneDisplayName_Implementation() : FString
+        +GetThemeColor_Implementation() : FLinearColor
+        --
+        -OnWebSocketTelemetry(inDroneId, snapshot)
+        -OnDroneWsEvent(inDroneId, event, lat, lon, alt)
+        -ParseYAMLData(yamlStr, outData) : bool
+        -NEDToUE5(nedPos) : FVector
+        -QuatToEuler(q) : FRotator
+        -ProcessPacket(data)
+        -PushTelemetry(droneData, worldPos, worldRot)
+        -TargetLocation : FVector
+        -TargetRotation : FRotator
+        -bIsPaused : bool
+    }
+
+    AUE5DroneControlCharacter <|-- ARealTimeDroneReceiver
+    ARealTimeDroneReceiver ..|> IDroneSelectableInterface
+    ARealTimeDroneReceiver ..|> IDroneInfoProvider
+    ARealTimeDroneReceiver ..> FDroneYAMLData : parses >
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: Path Editor & Playback
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "PathEditor" #EDE7F6 {
+
+    enum EDronePathExecutionState <<UENUM>> {
+        Idle
+        Scheduled
+        Running
+        Paused
+        Completed
+    }
+
+    enum EPathStatus <<UENUM>> {
+        Standby
+        InFlight
+        Completed
+    }
+
+    class ADronePathActor <<AActor, BlueprintType>> {
+        .. Components ..
+        +SceneRoot : USceneComponent*
+        +PathSpline : USplineComponent*
+        +PathMarkerMeshComponent : UStaticMeshComponent*
+        .. Path Data ..
+        +Waypoints : TArray<FDroneWaypoint>
+        +bClosedLoop : bool
+        +PathId : FName
+        +PathNumericId : int32
+        .. State ..
+        +ExecutionState : EDronePathExecutionState
+        +CurrentPathStatus : EPathStatus
+        +CurrentSegmentIndex : int32
+        +SegmentStartTime : float
+        +SegmentDuration : float
+        +bIsMoving : bool
+        +ControlledDrone : TWeakObjectPtr<AActor>
+        .. Events ..
+        +OnExecutionStateChanged : FOnDronePathExecutionStateChanged
+        --
+        .. Waypoint API ..
+        +AddWaypoint(location, segmentSpeed) : int32
+        +RemoveWaypoint(index) : bool
+        +UpdateWaypoint(index, newLoc) : bool
+        +ClearWaypoints()
+        +RefreshPath()
+        +GetWaypointCount() : int32
+        +GetWaypointWorldLocation(index) : FVector
+        +SetPathNumericId(id)
+        .. Execution API ..
+        +ScheduleExecution(startTime)
+        +PauseExecution()
+        +CompleteExecution()
+        +UpdatePathStatus(newStatus)
+        +IsExecutionActive() : bool
+        +GetCurrentPathStatus() : EPathStatus
+        .. Movement API ..
+        +StartMovement(droneActor)
+        +StopMovement()
+        +ResumeMovement(droneActor, segIdx, remainTime) : bool
+        +IsMovementActive() : bool
+        --
+        -PrecomputeSegmentDurations()
+        -TickMovement()
+        -RebuildSplineFromWaypoints()
+        -SyncWaypointHandles(bForceRebuild)
+        -SegmentDurations : TArray<float>
+    }
+
+    class FDronePlaybackPauseState <<USTRUCT>> {
+        +PathActor : ADronePathActor*
+        +DroneActor : AActor*
+        +SegmentIndex : int32
+        +RemainingSegmentTime : float
+    }
+
+    class ADronePlaybackManager <<AActor>> {
+        +DroneActorClass : TSubclassOf<AActor>
+        +bIsPlaying : bool
+        +bIsPaused : bool
+        +bLoop : bool
+        +PlaybackTime : float
+        +StartTime : float
+        --
+        +BeginPlay()
+        +Tick(deltaTime)
+        +PlayFromData(data : FDronePathsSaveData)
+        +PausePlayback()
+        +ResumePlayback()
+        +StopPlayback()
+        --
+        -ActivePaths : TArray<ADronePathActor*>
+        -ActiveDrones : TArray<AActor*>
+        -PausedPathStates : TArray<FDronePlaybackPauseState>
+        -CachedPlaybackData : FDronePathsSaveData
+        -ClearActivePlaybackActors()
+        -SpawnPlaybackDrone(spawnLocation) : AActor*
+    }
+
+    ADronePlaybackManager "1" *-- "0..*" ADronePathActor : manages >
+    ADronePlaybackManager ..> FDronePlaybackPauseState : uses >
+    FDronePlaybackPauseState --> ADronePathActor
+    ADronePathActor --> EDronePathExecutionState
+    ADronePathActor --> EPathStatus
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: Control Layer (GameMode & PlayerController)
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "DroneOps::Control" #E0F2F1 {
+
+    class ADroneOpsGameMode <<AGameModeBase>> {
+        +bUseCesiumCoordinates : bool
+        +bSpawnReceiversFromRegistry : bool
+        +bSpawnShadowDrones : bool
+        +ShadowDroneClass : TSubclassOf<AMultiDroneCharacter>
+        +ReceiverDroneClass : TSubclassOf<ARealTimeDroneReceiver>
+        +ReceiverSpawnOrigin : FVector
+        +ReceiverSpawnSpacingCm : float
+        --
+        +ADroneOpsGameMode()
+        +BeginPlay()
+        +PostLogin(newPlayer)
+        +SpawnDefaultPawnFor_Implementation(ctrl, startSpot)
+        +PreInitializeComponents()
+        +InitializeCoordinateService()
+        +InitializeDroneRegistry()
+        --
+        -SpawnReceiversFromRegistry()
+        -RetryPossessPlacedPawns()
+        -PossessPlacedPawn(pc, bSilent, bLog)
+        -FindUnpossessedPlacedPawn(bLog) : APawn*
+        -ApplyPendingGeoreferenceOrigin()
+        -OnGeoreferenceUpdated()
+        -FindReceiverForDroneId(id) : ARealTimeDroneReceiver*
+        -FindShadowForDroneId(id) : AMultiDroneCharacter*
+        -RetryPossessTimerHandle : FTimerHandle
+        -bPendingSpawnAfterGeoreferenceUpdate : bool
+    }
+
+    class ADroneOpsPlayerController <<APlayerController>> {
+        .. Events ..
+        +OnOpenDroneInfoPanelRequested : FOnOpenDroneInfoPanelRequested
+        .. Config ..
+        +DroneOpsHUDWidgetClass : TSubclassOf<UUserWidget>
+        +DroneInfoPanelWidgetClass : TSubclassOf<UUserWidget>
+        +MainMenuLevelName : FName
+        --
+        +ADroneOpsPlayerController()
+        +BeginPlay()
+        +SetupInputComponent()
+        +Tick(deltaTime)
+        .. Public Commands ..
+        +SendTargetCommand(droneId, targetWorldLoc)
+        +GetActorUnderCursor() : AActor*
+        +GetWorldLocationUnderCursor(outLoc) : bool
+        --
+        .. Input Handlers ..
+        -OnPrimaryClick()
+        -OnShowInfo()
+        -OnFreeCamToggle()
+        -OnPauseToggle()
+        -OnTopDownToggle()
+        -OnSwitchToTopDown()
+        -OnReturnToMainMenu()
+        -OnShiftPressed() / OnShiftReleased()
+        .. Click Dispatch ..
+        -HandleMapClick(worldLocation)
+        -HandleDroneClick(clickedActor)
+        .. Camera Helpers ..
+        -GetSelectableDroneUnderCursor(outFallbackLoc) : AActor*
+        -FindNearestSelectableDroneOnScreen(maxDist) : AActor*
+        -ApplyFollowViewTarget(droneId)
+        -SwitchToNextMultiDroneFollowView(blendTime)
+        -OpenDroneInfoPanel(droneId)
+        --
+        -DroneRegistry : UDroneRegistrySubsystem*
+        -CameraModeState : FCameraModeState
+        -SelectedDroneId : int32
+        -SelectedDroneActor : AActor*
+        -HoveredDroneId : int32
+        -PausedDroneIds : TSet<int32>
+        -bShiftHeld : bool
+        -FreeCamActor : ACameraActor*
+        -TopDownCamActor : ACameraActor*
+    }
+
+    ADroneOpsGameMode --> UDroneRegistrySubsystem : uses >
+    ADroneOpsGameMode --> UDroneNetworkManager : uses >
+    ADroneOpsGameMode ..> ARealTimeDroneReceiver : spawns >
+
+    ADroneOpsPlayerController --> UDroneRegistrySubsystem : uses >
+    ADroneOpsPlayerController --> UDroneNetworkManager : uses >
+    ADroneOpsPlayerController ..> IDroneSelectableInterface : queries via >
+    ADroneOpsPlayerController ..> ARealTimeDroneReceiver : controls >
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  PACKAGE: UI / Menu
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+package "MainMenu" #FBE9E7 {
+
+    class UMainMenuWidget <<UUserWidget, Abstract>> {
+        +BackendAddress : FString
+        +MapCenterLat : float
+        +MapCenterLon : float
+        +bUseCesium : bool
+        --
+        +NativeConstruct()
+        .. Drone Registration (BP Callable) ..
+        +RegisterDrone(droneId, ipAddress)
+        +UnregisterDrone(droneId)
+        +GetRegisteredDronesSummary() : TArray<FString>
+        .. Settings (BP Callable) ..
+        +SaveSettings(backendAddr, lat, lon, alt, bCesium)
+        +LoadSettings(outAddr, outLat, outLon, outAlt, outCesium)
+        .. Navigation (BP Callable) ..
+        +OnGoToQueueEditorClicked()
+        +OnGoToPreviewClicked()
+        +IsBackendConnected() : bool
+        .. BP Implementable Events ..
+        #OnDroneRegistered(droneId)
+        #OnDroneUnregistered(droneId)
+        #OnSettingsSaved()
+        #OnGoToPreviewBlockedByNoConnection()
+        --
+        -HandleBackendRegisterResponse(bSuccess, responseBody)
+        -GetMainMenuPC() : AMainMenuPlayerController*
+        -PendingBackendRegisterDroneId : int32
+        -PendingBackendRegisterIpAddress : FString
+    }
+
+    UMainMenuWidget --> UDroneNetworkManager : uses >
+    UMainMenuWidget --> UDroneRegistrySubsystem : uses >
+}
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  Cross-package relationships
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+' Network Manager → Registry
+UDroneNetworkManager --> UDroneRegistrySubsystem : syncs drone list >
+
+' Registry → Receiver Actor (by AActor* handle)
+UDroneRegistrySubsystem "1" --> "0..*" ARealTimeDroneReceiver : tracks via ReceiverActors >
+
+' Receiver ← Network events
+ARealTimeDroneReceiver ..> UDroneNetworkManager : subscribes OnDroneWsEvent >
+
+' Descriptor usage
+UDroneRegistrySubsystem ..> FDroneDescriptor
+ARealTimeDroneReceiver ..> FDroneDescriptor : applied via ApplyDescriptor >
+
+' Telemetry flow
+ARealTimeDroneReceiver ..> FDroneTelemetrySnapshot : produces >
+UDroneRegistrySubsystem ..> FDroneTelemetrySnapshot : broadcasts >
+
+' Command mode
+ADroneOpsPlayerController ..> EDroneCommandMode : queries/sets >
+UDroneRegistrySubsystem ..> EDroneCommandMode : stores per drone >
+
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'  Legend
+' ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+legend bottom right
+  |  Symbol  |  Meaning  |
+  | --|>  |  Inheritance (extends)  |
+  | ..|>  |  Interface implementation  |
+  |  *--  |  Composition (owns, lifetime bound)  |
+  |  o--  |  Aggregation (references)  |
+  |  -->  |  Directed association (uses, calls)  |
+  |  ..>  |  Dependency (creates / subscribes)  |
+  |  <<>>  |  UE4/UE5 macro stereotype  |
+endlegend
+
+@enduml

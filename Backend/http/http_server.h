@@ -107,6 +107,10 @@ private:
     boost::json::value ApiPreviewArray(const boost::json::object& body);
     boost::json::value ApiStopArray(const std::string& id);
 
+    /// auto_assign=true 时：用匈牙利算法将在线无人机分配到各路径首航点，
+    /// 写回 cfg.paths[].drone_id，并通过 WS 推送 assignment_result
+    void AutoAssignDrones(AssemblyConfig& cfg);
+
     // ---- Debug 路由 ----
     boost::json::value DebugDroneState(const std::string& id);
     boost::json::value DebugDroneQueue(const std::string& id);

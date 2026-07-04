@@ -1041,3 +1041,7 @@ LocalTileServerUrl=http://localhost:8070
 | 后端推送 `assignment_result` | 阵列播放面板槽位映射更新 |
 | UE5 发送 `move` 指令 | 后端收到并响应，Apifox 可观察到 WebSocket 消息 |
 | UE5 发送 `pause` / `resume` 指令 | 后端收到并返回 `command_ack` |
+
+
+
+预演模块 路径规划

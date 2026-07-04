@@ -10,6 +10,7 @@
 class UPathFileListItemWidget;
 class UPathDroneMatchItemWidget;
 class ADronePathActor;
+struct FDronePathAssignment;
 
 UENUM()
 enum class ESequencePanelState : uint8
@@ -61,6 +62,10 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UComboBoxString* ModeComboBox;
 
+	/** 自动分配勾选框：勾选后跳过手动匹配，由后端匈牙利算法分配无人机 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UCheckBox* AutoAssignCheckBox;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceDispatch")
 	TSubclassOf<UPathFileListItemWidget> FileListItemClass;
 
@@ -69,6 +74,7 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
@@ -78,8 +84,18 @@ private:
 	int32 SelectedPathIndex = INDEX_NONE; // 当前选中的 path（等待分配 drone）
 	EDroneCommandMode DispatchMode = EDroneCommandMode::Scout;
 
+	// 自动分配模式开关（由 AutoAssignCheckBox 驱动）
+	bool bAutoAssignEnabled = false;
+
 	// 派发时缓存的重映射路径（DroneId -> PathSaveData），供成功回调后本地驱动影子机使用
 	TMap<int32, FDronePathSaveData> PendingRemappedMap;
+
+	// 自动分配派发后缓存的重映射路径（PathId -> PathSaveData），
+	// 等收到 assignment_result 后再按分配结果转成 DroneId -> PathSaveData
+	TMap<int32, FDronePathSaveData> PendingAutoPathsByPathId;
+
+	// OnAssignmentResult 订阅句柄（NativeDestruct 中移除）
+	FDelegateHandle AssignmentResultHandle;
 
 	// 当前派发产生的 PathActor（影子机路径），下次派发前清除
 	UPROPERTY()
@@ -120,4 +136,13 @@ private:
 
 	UFUNCTION()
 	void OnDispatchResponse(bool bSuccess, const FString& ResponseBody);
+
+	UFUNCTION()
+	void OnAutoAssignCheckChanged(bool bIsChecked);
+
+	// 收到后端 assignment_result：同步槽位显示并启动影子机播放
+	void HandleAssignmentResult(const FString& ArrayId, const TArray<FDronePathAssignment>& Assignments);
+
+	// 自动分配模式下的派发：drone_id 留空，auto_assign=true
+	void DispatchWithAutoAssign(class UDroneNetworkManager* NetMgr, class UDroneRegistrySubsystem* Registry);
 };

@@ -3,6 +3,7 @@
 #include "PathDroneMatchItemWidget.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
+#include "Components/CheckBox.h"
 #include "RealTimeDroneReceiver.h"
 #include "MultiDroneCharacter.h"
 #include "Components/ComboBoxString.h"
@@ -64,9 +65,40 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 	{
 		BackButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnBackClicked);
 	}
+	if (AutoAssignCheckBox)
+	{
+		AutoAssignCheckBox->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnAutoAssignCheckChanged);
+		bAutoAssignEnabled = AutoAssignCheckBox->IsChecked();
+	}
 	PopulateModeComboBox();
 
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			AssignmentResultHandle = NetMgr->OnAssignmentResult.AddUObject(
+				this, &USequenceDispatchPanelWidget::HandleAssignmentResult);
+		}
+	}
+
 	SetPanelState(ESequencePanelState::Collapsed);
+}
+
+void USequenceDispatchPanelWidget::NativeDestruct()
+{
+	if (AssignmentResultHandle.IsValid())
+	{
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+			{
+				NetMgr->OnAssignmentResult.Remove(AssignmentResultHandle);
+			}
+		}
+		AssignmentResultHandle.Reset();
+	}
+
+	Super::NativeDestruct();
 }
 
 void USequenceDispatchPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -243,7 +275,7 @@ void USequenceDispatchPanelWidget::PopulateMatchingView()
 			SizeBox->SetMinDesiredHeight(44.f);
 			SizeBox->AddChild(DroneItem);
 			if (DroneListScrollBox) DroneListScrollBox->AddChild(SizeBox);
-			DroneItem->SetAsDroneItem(Desc.DroneId, Desc.Name);
+			DroneItem->SetAsDroneItem(Desc.DroneId, Desc.BackendIdString);
 			DroneItem->OnItemClicked.BindUObject(this, &USequenceDispatchPanelWidget::OnItemClicked);
 		}
 	}
@@ -269,6 +301,12 @@ void USequenceDispatchPanelWidget::PopulateModeComboBox()
 
 void USequenceDispatchPanelWidget::OnItemClicked(bool bIsPath, int32 IndexOrId)
 {
+	if (bAutoAssignEnabled)
+	{
+		SetStatusMessage(TEXT("自动分配已开启，无需手动匹配（取消勾选可手动指定）"));
+		return;
+	}
+
 	if (bIsPath)
 	{
 		if (!LoadedPathsData.Paths.IsValidIndex(IndexOrId))
@@ -326,7 +364,7 @@ void USequenceDispatchPanelWidget::UpdateMatchVisuals()
 			if (!Item) continue;
 			if (const int32* Matched = MatchedPairs.Find(Item->GetPathIndex()))
 			{
-				Item->SetMatchedLabel(FString::Printf(TEXT("-> Drone %d"), *Matched));
+				Item->SetMatchedLabel(FString::Printf(TEXT("-> d%d"), *Matched));
 			}
 			else
 			{
@@ -365,14 +403,40 @@ void USequenceDispatchPanelWidget::UpdateDispatchButtonState()
 {
 	if (!DispatchButton) return;
 	const bool bAllMatched = MatchedPairs.Num() == LoadedPathsData.Paths.Num() && !LoadedPathsData.Paths.IsEmpty();
-	DispatchButton->SetIsEnabled(bAllMatched);
+	const bool bAutoReady = bAutoAssignEnabled && !LoadedPathsData.Paths.IsEmpty();
+	DispatchButton->SetIsEnabled(bAllMatched || bAutoReady);
+}
+
+void USequenceDispatchPanelWidget::OnAutoAssignCheckChanged(bool bIsChecked)
+{
+	bAutoAssignEnabled = bIsChecked;
+	SelectedPathIndex = INDEX_NONE;
+
+	if (bIsChecked)
+	{
+		MatchedPairs.Empty();
+		SetStatusMessage(TEXT("自动分配已开启：派发后由后端匈牙利算法分配无人机"));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("自动分配已关闭：请手动匹配路径与无人机"));
+	}
+
+	UpdateMatchVisuals();
+	UpdateDispatchButtonState();
 }
 
 void USequenceDispatchPanelWidget::OnDispatchClicked()
 {
-	if (MatchedPairs.Num() != LoadedPathsData.Paths.Num())
+	if (!bAutoAssignEnabled && MatchedPairs.Num() != LoadedPathsData.Paths.Num())
 	{
 		SetStatusMessage(TEXT("请先完成所有路径匹配"));
+		return;
+	}
+
+	if (LoadedPathsData.Paths.IsEmpty())
+	{
+		SetStatusMessage(TEXT("请先加载路径文件"));
 		return;
 	}
 
@@ -387,6 +451,12 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 
 	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
 	if (!Registry) return;
+
+	if (bAutoAssignEnabled)
+	{
+		DispatchWithAutoAssign(NetMgr, Registry);
+		return;
+	}
 
 	// Build DroneId -> PathSaveData map
 	TMap<int32, FDronePathSaveData> DispatchMap;
@@ -462,6 +532,107 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 	if (DispatchButton) DispatchButton->SetIsEnabled(false);
 }
 
+void USequenceDispatchPanelWidget::DispatchWithAutoAssign(UDroneNetworkManager* NetMgr, UDroneRegistrySubsystem* Registry)
+{
+	// 参考锚点：编号最小且已有 GPS 锚点的无人机（与手动模式的参考机规则一致）
+	int32 RefDroneId = MAX_int32;
+	FVector RefAnchor = FVector::ZeroVector;
+	bool bHasAnchor = false;
+	for (const FDroneDescriptor& Desc : Registry->GetAllDroneDescriptors())
+	{
+		if (Desc.DroneId >= RefDroneId) continue;
+		if (AActor* ReceiverActor = Registry->GetReceiverActor(Desc.DroneId))
+		{
+			if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(ReceiverActor))
+			{
+				if (Receiver->bHasGpsAnchor)
+				{
+					RefDroneId = Desc.DroneId;
+					RefAnchor = Receiver->AnchorWorldLocation;
+					bHasAnchor = true;
+				}
+			}
+		}
+	}
+
+	if (!bHasAnchor)
+	{
+		SetStatusMessage(TEXT("没有无人机获得GPS锚点，无法自动分配派发"));
+		return;
+	}
+
+	// 以第一条路径的首航点为编辑系原点，整体平移到参考机锚点（与手动模式的重映射一致）
+	const FDronePathSaveData& RefPath = LoadedPathsData.Paths[0];
+	if (RefPath.Waypoints.IsEmpty())
+	{
+		SetStatusMessage(TEXT("第一条路径没有航点"));
+		return;
+	}
+	const FVector RefEditOrigin = RefPath.Waypoints[0].Location;
+
+	// PathId -> 重映射后的路径；drone_id 由后端分配
+	TMap<int32, FDronePathSaveData> RemappedByPathId;
+	for (const FDronePathSaveData& Path : LoadedPathsData.Paths)
+	{
+		FDronePathSaveData Remapped = Path;
+		for (FDroneWaypointSaveData& Wp : Remapped.Waypoints)
+		{
+			Wp.Location = (Wp.Location - RefEditOrigin) + RefAnchor;
+		}
+		RemappedByPathId.Add(Path.PathId, Remapped);
+	}
+
+	FOnHttpResponse Callback;
+	Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnDispatchResponse);
+	PendingRemappedMap.Empty();
+	PendingAutoPathsByPathId = RemappedByPathId;
+	NetMgr->SendArrayTaskFromData(RemappedByPathId, DispatchMode, Callback, /*bAutoAssign=*/true);
+
+	SetStatusMessage(FString::Printf(TEXT("正在派发（自动分配）... 参考锚点DroneId=%d  mode=%s"),
+		RefDroneId, *DroneCommandModeToProtocolString(DispatchMode)));
+	if (DispatchButton) DispatchButton->SetIsEnabled(false);
+}
+
+void USequenceDispatchPanelWidget::HandleAssignmentResult(const FString& ArrayId, const TArray<FDronePathAssignment>& Assignments)
+{
+	if (PendingAutoPathsByPathId.IsEmpty())
+	{
+		return; // 不是本面板发起的自动分配任务
+	}
+
+	// 按分配结果把 PathId -> PathData 转成 DroneId -> PathData，并同步槽位显示
+	TMap<int32, FDronePathSaveData> ByDrone;
+	MatchedPairs.Empty();
+	for (const FDronePathAssignment& Assignment : Assignments)
+	{
+		const FDronePathSaveData* Path = PendingAutoPathsByPathId.Find(Assignment.PathId);
+		if (!Path) continue;
+
+		ByDrone.Add(Assignment.DroneId, *Path);
+
+		for (int32 i = 0; i < LoadedPathsData.Paths.Num(); ++i)
+		{
+			if (LoadedPathsData.Paths[i].PathId == Assignment.PathId)
+			{
+				MatchedPairs.Add(i, Assignment.DroneId);
+				break;
+			}
+		}
+	}
+	PendingAutoPathsByPathId.Empty();
+
+	UpdateMatchVisuals();
+	SetStatusMessage(FString::Printf(TEXT("自动分配完成（%s）：%d 条路径已分配"), *ArrayId, ByDrone.Num()));
+
+	UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Assignment result applied: array=%s, %d paths"),
+		*ArrayId, ByDrone.Num());
+
+	// 按分配结果驱动影子机本地播放
+	PendingRemappedMap = ByDrone;
+	StartShadowDronePlayback();
+	UpdateDispatchButtonState();
+}
+
 void USequenceDispatchPanelWidget::OnModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
 {
 	DispatchMode = DroneCommandModeFromProtocolString(SelectedItem);
@@ -471,15 +642,24 @@ void USequenceDispatchPanelWidget::OnDispatchResponse(bool bSuccess, const FStri
 {
 	if (bSuccess)
 	{
-		SetStatusMessage(TEXT("派发成功"));
-		StartShadowDronePlayback();
-		MatchedPairs.Empty();
-		SetPanelState(ESequencePanelState::Collapsed);
+		if (bAutoAssignEnabled)
+		{
+			// 面板保持打开，等待 assignment_result 推送后同步槽位显示并启动影子机
+			SetStatusMessage(TEXT("派发成功，等待后端自动分配结果..."));
+		}
+		else
+		{
+			SetStatusMessage(TEXT("派发成功"));
+			StartShadowDronePlayback();
+			MatchedPairs.Empty();
+			SetPanelState(ESequencePanelState::Collapsed);
+		}
 	}
 	else
 	{
 		SetStatusMessage(FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
 		PendingRemappedMap.Empty();
+		PendingAutoPathsByPathId.Empty();
 		if (DispatchButton) DispatchButton->SetIsEnabled(true);
 	}
 }

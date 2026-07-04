@@ -10,6 +10,19 @@
 
 class ADronePathActor;
 
+/** One entry of the backend Hungarian auto-assignment result: path_id -> drone_id. */
+USTRUCT(BlueprintType)
+struct FDronePathAssignment
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Network")
+	int32 PathId = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Network")
+	int32 DroneId = 0;
+};
+
 /**
  * GameInstance-level subsystem that owns the HTTP and WebSocket clients.
  *
@@ -94,16 +107,19 @@ public:
 	 * Submit an array task to the backend via HTTP POST /api/arrays.
 	 * PathMap maps drone id -> ADronePathActor.
 	 * OnComplete is called with (bSuccess, ResponseBody).
+	 * bAutoAssign=true sends "auto_assign": true with empty drone_id fields; the backend
+	 * runs Hungarian assignment and pushes an assignment_result WS message (OnAssignmentResult).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
-	void SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete);
+	void SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign = false);
 
 	/**
 	 * Submit an array task from pre-loaded path save data (no actors needed).
 	 * PathDataMap maps drone id -> FDronePathSaveData (waypoints already in world space).
+	 * With bAutoAssign=true the map keys are ignored for the protocol (drone_id sent empty).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Network")
-	void SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete);
+	void SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign = false);
 
 	// ---- Events ----
 
@@ -141,6 +157,13 @@ public:
 	DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnAssemblyTimeout,
 		const FString& /*ArrayId*/, int32 /*ReadyCount*/, int32 /*TotalCount*/);
 	FOnAssemblyTimeout OnAssemblyTimeout;
+
+	// Fired when the backend pushes the Hungarian auto-assignment result:
+	// { "type": "assignment_result", "array_id": "a1",
+	//   "assignments": [ { "path_id": 1, "drone_id": "d1" }, ... ] }
+	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAssignmentResult,
+		const FString& /*ArrayId*/, const TArray<FDronePathAssignment>& /*Assignments*/);
+	FOnAssignmentResult OnAssignmentResult;
 
 	// ---- Accessors ----
 

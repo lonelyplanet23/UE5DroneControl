@@ -31,6 +31,19 @@ FString BuildCesiumLocalRasterTemplateUrl(const FString& LocalTileServerUrl)
 	Url.RemoveFromEnd(TEXT("/"));
 	return Url + TEXT("/{z}/{x}/{y}.png");
 }
+
+// Cesium FromUrl tileset 源需要指向 tileset.json；配置裸服务器地址时自动补全
+FString BuildCesiumLocalTilesetUrl(const FString& LocalTileServerUrl)
+{
+	FString Url = LocalTileServerUrl.TrimStartAndEnd();
+	if (Url.EndsWith(TEXT(".json")))
+	{
+		return Url;
+	}
+
+	Url.RemoveFromEnd(TEXT("/"));
+	return Url + TEXT("/tileset.json");
+}
 }
 
 ADroneOpsGameMode::ADroneOpsGameMode()
@@ -550,6 +563,7 @@ void ADroneOpsGameMode::ApplyCesiumTileServerConfig()
 	}
 
 	const FString RasterTemplateUrl = BuildCesiumLocalRasterTemplateUrl(LocalTileServerUrl);
+	const FString TilesetUrl = BuildCesiumLocalTilesetUrl(LocalTileServerUrl);
 	int32 TilesetCount = 0;
 	int32 RasterOverlayCount = 0;
 	int32 UnsupportedOverlayCount = 0;
@@ -563,7 +577,7 @@ void ADroneOpsGameMode::ApplyCesiumTileServerConfig()
 		}
 
 		Tileset->SetTilesetSource(ETilesetSource::FromUrl);
-		Tileset->SetUrl(LocalTileServerUrl);
+		Tileset->SetUrl(TilesetUrl);
 		Tileset->RefreshTileset();
 		++TilesetCount;
 
@@ -607,7 +621,7 @@ void ADroneOpsGameMode::ApplyCesiumTileServerConfig()
 
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Cesium local tile server enabled. Tilesets=%d Url='%s', URL raster overlays=%d TemplateUrl='%s', unsupported overlays=%d"),
 		TilesetCount,
-		*LocalTileServerUrl,
+		*TilesetUrl,
 		RasterOverlayCount,
 		*RasterTemplateUrl,
 		UnsupportedOverlayCount);

@@ -73,7 +73,7 @@ void UDroneListWidget::RefreshFromRegistry()
             {
                 Item->SetDroneDataWithModeAndAvailability(
                     Desc.DroneId,
-                    Desc.Name,
+                    Desc.BackendIdString,
                     Availability,
                     Registry->GetDroneCommandMode(Desc.DroneId));
                 DroneScrollBox->AddChild(Item);
@@ -83,7 +83,7 @@ void UDroneListWidget::RefreshFromRegistry()
         FDroneRegistrationViewData Data;
 		Data.Id = Desc.DroneId;
 		Data.IdStr = Desc.BackendIdString;
-		Data.Name = Desc.Name;
+		Data.Name = Desc.BackendIdString;
 		Data.Battery = -1; // battery comes from backend HTTP polling, not from local telemetry snapshot
 		Data.WorldLocation = Snapshot.WorldLocation;
         switch (Availability)

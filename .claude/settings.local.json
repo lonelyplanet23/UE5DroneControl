@@ -30,7 +30,8 @@
       "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Plugins/Marketplace/Cesiumfo9eaf76ca58f3V10/Source/CesiumRuntime/**)",
       "Bash(python -c \":*)",
       "Bash(find d:/RedAlert/UE5DroneControl/BackEnd -name jetson_bridge* -o -name simulate_telemetry*)",
-      "Bash(where python:*)"
+      "Bash(where python:*)",
+      "Bash(\"C:\\\\Program Files\\\\Epic Games\\\\UE_5.7\\\\Engine\\\\Build\\\\BatchFiles\\\\Build.bat\" UE5DroneControlEditor Win64 DebugGame -Project=\"D:\\\\RedAlert\\\\UE5DroneControl\\\\UE5DroneControl.uproject\" -WaitMutex)"
     ],
     "additionalDirectories": [
       "\\tmp",

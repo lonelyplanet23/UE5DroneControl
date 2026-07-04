@@ -462,6 +462,55 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		OnAssemblyTimeout.Broadcast(ArrayId, ReadyCount, TotalCount);
 		return;
 	}
+
+	// Auto-assignment result: { "type": "assignment_result", "array_id": "a1",
+	//                           "assignments": [ { "path_id": 1, "drone_id": "d1" }, ... ] }
+	if (MsgType == TEXT("assignment_result"))
+	{
+		FString ArrayId;
+		Root->TryGetStringField(TEXT("array_id"), ArrayId);
+
+		TArray<FDronePathAssignment> Assignments;
+		const TArray<TSharedPtr<FJsonValue>>* AssignmentArray = nullptr;
+		if (Root->TryGetArrayField(TEXT("assignments"), AssignmentArray))
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *AssignmentArray)
+			{
+				const TSharedPtr<FJsonObject>* Obj = nullptr;
+				if (!Value.IsValid() || !Value->TryGetObject(Obj) || !Obj->IsValid())
+				{
+					continue;
+				}
+
+				FDronePathAssignment Assignment;
+				(*Obj)->TryGetNumberField(TEXT("path_id"), Assignment.PathId);
+
+				// drone_id arrives as "d1" (string) or a plain number
+				FString DroneIdStr;
+				if ((*Obj)->TryGetStringField(TEXT("drone_id"), DroneIdStr))
+				{
+					DroneIdStr.RemoveFromStart(TEXT("d"), ESearchCase::IgnoreCase);
+					Assignment.DroneId = FCString::Atoi(*DroneIdStr);
+				}
+				else
+				{
+					(*Obj)->TryGetNumberField(TEXT("drone_id"), Assignment.DroneId);
+				}
+
+				Assignments.Add(Assignment);
+			}
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Assignment result array=%s, %d assignments"),
+			*ArrayId, Assignments.Num());
+		for (const FDronePathAssignment& A : Assignments)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager]   path %d -> drone %d"), A.PathId, A.DroneId);
+		}
+
+		OnAssignmentResult.Broadcast(ArrayId, Assignments);
+		return;
+	}
 }
 
 // ---- Control commands ----
@@ -526,7 +575,6 @@ void UDroneNetworkManager::RegisterDroneToBackend(int32 Slot, const FString& IpA
 	}
 
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetStringField(TEXT("name"), FString::Printf(TEXT("UAV-%d"), Slot));
 	Root->SetStringField(TEXT("model"), TEXT("PX4"));
 	Root->SetNumberField(TEXT("slot"), Slot);
 	Root->SetStringField(TEXT("ip"), IpAddress);
@@ -549,7 +597,7 @@ void UDroneNetworkManager::RegisterDroneToBackend(int32 Slot, const FString& IpA
 	HttpClient->Post(TEXT("/api/drones"), Body, InternalCallback);
 }
 
-void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete)
+void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign)
 {
 	if (!HttpClient)
 	{
@@ -558,11 +606,13 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 	}
 
 	// Build JSON body:
-	// { "mode": "scout|patrol|attack", "paths": [ { "pathId": N, "drone_id": "N", "bClosedLoop": bool,
+	// { "mode": "scout|patrol|attack", "auto_assign": bool,
+	//   "paths": [ { "pathId": N, "drone_id": "N", "bClosedLoop": bool,
 	//                "waypoints": [ { "location": {"x":..,"y":..,"z":..},
 	//                                 "segmentSpeed": .., "waitTime": .. } ] } ] }
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("mode"), DroneCommandModeToProtocolString(Mode));
+	Root->SetBoolField(TEXT("auto_assign"), bAutoAssign);
 	TArray<TSharedPtr<FJsonValue>> PathsArray;
 
 	for (const TPair<int32, ADronePathActor*>& Pair : PathMap)
@@ -576,7 +626,7 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 
 		TSharedPtr<FJsonObject> PathObj = MakeShared<FJsonObject>();
 		PathObj->SetNumberField(TEXT("pathId"), Path->GetPathNumericId());
-		PathObj->SetStringField(TEXT("drone_id"), FString::FromInt(DroneId));
+		PathObj->SetStringField(TEXT("drone_id"), bAutoAssign ? FString() : FString::FromInt(DroneId));
 		PathObj->SetBoolField(TEXT("bClosedLoop"), Path->bClosedLoop);
 
 		TArray<TSharedPtr<FJsonValue>> WaypointsArray;
@@ -608,12 +658,12 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 
-	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTask: POST /api/arrays, %d paths, mode=%s"),
-		PathMap.Num(), *DroneCommandModeToProtocolString(Mode));
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTask: POST /api/arrays, %d paths, mode=%s, auto_assign=%d"),
+		PathMap.Num(), *DroneCommandModeToProtocolString(Mode), bAutoAssign ? 1 : 0);
 	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
 }
 
-void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete)
+void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign)
 {
 	if (!HttpClient)
 	{
@@ -623,6 +673,7 @@ void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSav
 
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("mode"), DroneCommandModeToProtocolString(Mode));
+	Root->SetBoolField(TEXT("auto_assign"), bAutoAssign);
 	TArray<TSharedPtr<FJsonValue>> PathsArray;
 
 	for (const TPair<int32, FDronePathSaveData>& Pair : PathDataMap)
@@ -632,7 +683,7 @@ void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSav
 
 		TSharedPtr<FJsonObject> PathObj = MakeShared<FJsonObject>();
 		PathObj->SetNumberField(TEXT("pathId"), PathData.PathId);
-		PathObj->SetStringField(TEXT("drone_id"), FString::FromInt(DroneId));
+		PathObj->SetStringField(TEXT("drone_id"), bAutoAssign ? FString() : FString::FromInt(DroneId));
 		PathObj->SetBoolField(TEXT("bClosedLoop"), PathData.bClosedLoop);
 
 		TArray<TSharedPtr<FJsonValue>> WaypointsArray;
@@ -659,8 +710,8 @@ void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSav
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 
-	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTaskFromData: POST /api/arrays, %d paths, mode=%s"),
-		PathDataMap.Num(), *DroneCommandModeToProtocolString(Mode));
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] SendArrayTaskFromData: POST /api/arrays, %d paths, mode=%s, auto_assign=%d"),
+		PathDataMap.Num(), *DroneCommandModeToProtocolString(Mode), bAutoAssign ? 1 : 0);
 	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
 }
 

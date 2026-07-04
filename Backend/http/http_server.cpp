@@ -1,10 +1,13 @@
 #include "http/http_server.h"
+#include "conversion/assignment_solver.h"
 #include "conversion/coordinate_converter.h"
 #include "conversion/quaternion_utils.h"
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 
@@ -547,10 +550,89 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
         }
     }
 
+    if (get_bool(body, "auto_assign", false)) {
+        if (assembly_ctrl_.GetState() != AssemblyState::Idle)
+            throw ApiError(409, "assembly already in progress");
+        AutoAssignDrones(cfg);
+    }
+
     if (!assembly_ctrl_.Start(cfg, config_.assembly_safety_cylinder_m))
         throw ApiError(409, "assembly already in progress");
 
     return boost::json::object{{"array_id", cfg.array_id}, {"status", "assembling"}};
+}
+
+void HttpServer::AutoAssignDrones(AssemblyConfig& cfg) {
+    // 收集有航点的路径，提取首航点并转换为 NED
+    std::vector<size_t> path_indices;
+    std::vector<std::array<double, 3>> path_ned;
+    for (size_t i = 0; i < cfg.paths.size(); ++i) {
+        if (cfg.paths[i].waypoints.empty()) continue;
+        const auto& wp = cfg.paths[i].waypoints[0];
+        double ned_n, ned_e, ned_d;
+        CoordinateConverter::UeOffsetToNed(wp.x, wp.y, wp.z, ned_n, ned_e, ned_d);
+        path_indices.push_back(i);
+        path_ned.push_back({ned_n, ned_e, ned_d});
+    }
+    if (path_indices.empty())
+        throw ApiError(400, "auto_assign requires at least one path with waypoints");
+
+    // 收集在线无人机及其当前 NED 位置
+    std::vector<int> drone_ids;
+    std::vector<std::array<double, 3>> drone_pos;
+    {
+        std::lock_guard<std::mutex> lock(records_mutex_);
+        for (const auto& rec : drone_records_) {
+            int id = 0;
+            try { id = drone_id_from_string(rec.id); } catch (...) { continue; }
+            if (drone_mgr_.GetConnectionState(id) != DroneConnectionState::Online) continue;
+            const auto tel = drone_mgr_.GetLatestTelemetry(id);
+            drone_ids.push_back(id);
+            drone_pos.push_back({tel.position_ned[0], tel.position_ned[1], tel.position_ned[2]});
+        }
+    }
+    if (drone_ids.size() < path_indices.size()) {
+        throw ApiError(409, "auto_assign: online drones (" + std::to_string(drone_ids.size()) +
+                            ") fewer than paths (" + std::to_string(path_indices.size()) + ")");
+    }
+
+    // cost[i][j] = 无人机 i 当前位置到路径 j 首航点的欧氏距离
+    std::vector<std::vector<double>> cost(
+        drone_ids.size(), std::vector<double>(path_indices.size()));
+    for (size_t i = 0; i < drone_ids.size(); ++i) {
+        for (size_t j = 0; j < path_indices.size(); ++j) {
+            const double dx = drone_pos[i][0] - path_ned[j][0];
+            const double dy = drone_pos[i][1] - path_ned[j][1];
+            const double dz = drone_pos[i][2] - path_ned[j][2];
+            cost[i][j] = std::sqrt(dx * dx + dy * dy + dz * dz);
+        }
+    }
+
+    const auto assignment = AssignmentSolver::HungarianMinCost(cost);
+
+    boost::json::array assignments;
+    for (size_t i = 0; i < drone_ids.size() && i < assignment.size(); ++i) {
+        const int j = assignment[i];
+        if (j < 0 || j >= static_cast<int>(path_indices.size())) continue;
+        auto& path = cfg.paths[path_indices[j]];
+        path.drone_id = drone_id_string(drone_ids[i]);
+        assignments.push_back(boost::json::object{
+            {"path_id",  path.path_id},
+            {"drone_id", path.drone_id},
+        });
+        spdlog::info("[HTTP] auto_assign: path {} -> {} (dist={:.2f}m)",
+                     path.path_id, path.drone_id, cost[i][j]);
+    }
+    if (assignments.size() != path_indices.size())
+        throw ApiError(500, "auto_assign: assignment incomplete");
+
+    ws_manager_.broadcast(json_stringify(boost::json::object{
+        {"type",        "assignment_result"},
+        {"array_id",    cfg.array_id},
+        {"assignments", assignments},
+    }));
+    spdlog::info("[HTTP] auto_assign: {} paths assigned for array '{}'",
+                 assignments.size(), cfg.array_id);
 }
 
 boost::json::value HttpServer::ApiStopArray(const std::string& id) {

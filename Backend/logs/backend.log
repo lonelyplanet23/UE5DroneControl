@@ -1,0 +1,65 @@
+[2026-06-12 11:31:00.331] [info] [:] Logger initialized. Level=debug, File=./logs/backend.log
+[2026-06-12 11:31:00.331] [info] [:] ============================================
+[2026-06-12 11:31:00.331] [info] [:]   Drone Backend v1.0.0
+[2026-06-12 11:31:00.331] [info] [:]   HTTP :8080  WS :8081
+[2026-06-12 11:31:00.331] [info] [:] ============================================
+[2026-06-12 11:31:00.331] [info] [:] DroneManager created
+[2026-06-12 11:31:00.331] [info] [:] [UdpReceiver] Slot 1: listening port 8888 for drone 1
+[2026-06-12 11:31:00.331] [info] [:] [UdpReceiver] Slot 2: listening port 8890 for drone 2
+[2026-06-12 11:31:00.331] [info] [:] [UdpReceiver] Slot 3: listening port 8892 for drone 3
+[2026-06-12 11:31:00.331] [info] [:] [UdpReceiver] Slot 4: listening port 8894 for drone 4
+[2026-06-12 11:31:00.332] [info] [:] [UdpReceiver] Slot 5: listening port 8896 for drone 5
+[2026-06-12 11:31:00.332] [info] [:] [UdpReceiver] Slot 6: listening port 8898 for drone 6
+[2026-06-12 11:31:00.333] [info] [:] [UdpSender] Drone 1 target set: 192.168.30.104:8889
+[2026-06-12 11:31:00.333] [info] [:] [UdpSender] Drone 2 target set: 192.168.30.104:8891
+[2026-06-12 11:31:00.333] [info] [:] [UdpSender] Drone 3 target set: 192.168.30.104:8893
+[2026-06-12 11:31:00.333] [info] [:] [UdpSender] Drone 4 target set: 192.168.30.104:8895
+[2026-06-12 11:31:00.333] [info] [:] [UdpSender] Drone 5 target set: 192.168.30.104:8897
+[2026-06-12 11:31:00.333] [info] [:] [UdpSender] Drone 6 target set: 192.168.30.104:8899
+[2026-06-12 11:31:00.333] [info] [:] [UdpReceiver] Listening on port 8888
+[2026-06-12 11:31:00.333] [info] [:] [UdpReceiver] Listening on port 8890
+[2026-06-12 11:31:00.334] [info] [:] [UdpReceiver] Listening on port 8892
+[2026-06-12 11:31:00.334] [info] [:] [UdpReceiver] Listening on port 8894
+[2026-06-12 11:31:00.334] [info] [:] [UdpReceiver] Listening on port 8896
+[2026-06-12 11:31:00.334] [info] [:] [UdpReceiver] Listening on port 8898
+[2026-06-12 11:31:00.334] [info] [:] Backend started. Press Ctrl+C to stop.
+[2026-06-12 11:31:00.336] [info] [:] [HTTP] Listening on 0.0.0.0:8080
+[2026-06-12 11:31:00.336] [info] [:] [WS] Listening on 0.0.0.0:8081
+[2026-06-12 11:31:15.967] [debug] [:] [WS] Client connected, total sessions=1
+[2026-06-12 11:31:16.302] [info] [:] Drone 1 added: slot=1 name=UAV-1
+[2026-06-12 11:31:16.304] [info] [:] [HTTP] Registered drone d1 slot=1
+[2026-06-12 11:31:16.306] [info] [:] Drone 2 added: slot=2 name=UAV-2
+[2026-06-12 11:31:16.308] [info] [:] [HTTP] Registered drone d2 slot=2
+[2026-06-12 11:31:16.319] [info] [:] [GPS Anchor] Drone 1 first anchor: (39.900000, 116.300000, 50.00m)
+[2026-06-12 11:31:16.320] [debug] [:] [DroneManager] Drone 1 GPS fix: (39.900000,116.300000,50.0m)
+[2026-06-12 11:31:16.320] [info] [:] [StateMachine] Offline -> Online (PowerOn)
+[2026-06-12 11:31:16.320] [debug] [:] [WS Push] event=power_on drone=d1 anchor_valid=true
+[2026-06-12 11:31:16.320] [info] [:] [UdpSender] Drone 1 target set: 192.168.30.104:8889
+[2026-06-12 11:31:16.320] [info] [:] [Heartbeat] Started drone 1 -> 192.168.30.104:8889
+[2026-06-12 11:31:16.321] [info] [:] [GPS Anchor] Drone 2 first anchor: (39.900000, 116.310000, 50.00m)
+[2026-06-12 11:31:16.321] [debug] [:] [DroneManager] Drone 2 GPS fix: (39.900000,116.310000,50.0m)
+[2026-06-12 11:31:16.321] [info] [:] [StateMachine] Offline -> Online (PowerOn)
+[2026-06-12 11:31:16.321] [debug] [:] [WS Push] event=power_on drone=d2 anchor_valid=true
+[2026-06-12 11:31:16.322] [info] [:] [UdpSender] Drone 2 target set: 192.168.30.104:8891
+[2026-06-12 11:31:16.322] [info] [:] [Heartbeat] Started drone 2 -> 192.168.30.104:8891
+[2026-06-12 11:31:16.852] [info] [:] [HTTP] auto_assign: path 1 -> d1 (dist=0.00m)
+[2026-06-12 11:31:16.852] [info] [:] [HTTP] auto_assign: path 2 -> d2 (dist=0.00m)
+[2026-06-12 11:31:16.852] [info] [:] [HTTP] auto_assign: 2 paths assigned for array 'a1'
+[2026-06-12 11:31:16.852] [info] [:] [Planner] Drone 1 -> target 0 (dist=0.00m)
+[2026-06-12 11:31:16.853] [info] [:] [Planner] Drone 2 -> target 1 (dist=0.00m)
+[2026-06-12 11:31:16.853] [info] [:] [Planner] Assignment total distance: 0.00m
+[2026-06-12 11:31:16.853] [info] [:] [Planner] Detected 0 path conflicts among 2 drones
+[2026-06-12 11:31:16.853] [info] [:] [Assembly] Planner: 0 conflicts detected, 2 drones planned
+[2026-06-12 11:31:16.853] [info] [:] [Assembly] Drone 1 target: NED(0.00, 0.00, -0.00)
+[2026-06-12 11:31:16.853] [info] [:] MoveCommandNed drone=1: NED(0.00, 0.00, -0.00)
+[2026-06-12 11:31:16.853] [info] [:] [Assembly] Drone 2 target: NED(50.00, 0.00, -0.00)
+[2026-06-12 11:31:16.853] [info] [:] MoveCommandNed drone=2: NED(50.00, 0.00, -0.00)
+[2026-06-12 11:31:16.853] [info] [:] [Assembly] Started 'a1' with 2 drones, mode=scout
+[2026-06-12 11:31:16.853] [debug] [:] [WS Push] assembling array=a1 0/2
+[2026-06-12 11:31:17.866] [info] [:] [WS] session closed: The WebSocket stream was gracefully closed at both endpoints [boost.beast.websocket:1 at D:/RedAlert/UE5DroneControl/BackEnd/build/vcpkg_installed/x64-windows/include\boost/beast/websocket/impl/stream.hpp:377:9 in function 'void __cdecl boost::beast::websocket::stream<class boost::asio::basic_stream_socket<class boost::asio::ip::tcp,class boost::asio::any_io_executor>,1>::do_fail(unsigned short,class boost::system::error_code,class boost::system::error_code &)']
+[2026-06-12 11:31:17.866] [debug] [:] [WS] Client disconnected, total sessions=0
+[2026-06-12 11:31:26.602] [warning] [:] [StateMachine] Online -> Lost (10s timeout)
+[2026-06-12 11:31:27.037] [info] [:] [Heartbeat] Stopped drone 1
+[2026-06-12 11:31:27.037] [debug] [:] [WS Push] event=lost_connection drone=d1 anchor_valid=false
+[2026-06-12 11:31:27.037] [debug] [:] [WS Push] alert=lost_connection drone=d1 value=0
+[2026-06-12 11:31:27.037] [warning] [:] [StateMachine] Online -> Lost (10s timeout)

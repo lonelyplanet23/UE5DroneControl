@@ -1,0 +1,616 @@
+@startuml UE5DroneControl_SequenceDiagrams
+' ============================================================
+' UE5DroneControl — System Sequence Diagrams (PlantUML)
+' Version : v0.3
+' Date    : 2026-06-05
+' Scope   : Initialization · Registration · Telemetry ·
+'           Control · Assembly · Playback · Overview
+' ============================================================
+
+' ─────────────────────────────────────────────────────────
+' Global skinparam
+' ─────────────────────────────────────────────────────────
+skinparam sequence {
+    ArrowColor       #2C5F8A
+    ActorBorderColor #2C5F8A
+    LifeLineBorderColor #2C5F8A
+    ParticipantBorderColor #2C5F8A
+    ParticipantBackgroundColor #EAF4FB
+    ParticipantFontStyle Bold
+    NoteBackgroundColor #FFFDE7
+    NoteBorderColor #F9A825
+    BoxBackgroundColor #F5F5F5
+    BoxBorderColor #BDBDBD
+    GroupBorderColor #78909C
+    GroupBodyBackgroundColor #ECEFF1
+}
+skinparam shadowing false
+skinparam roundcorner 8
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 1 — System Initialization
+' ══════════════════════════════════════════════════════════
+newpage System Initialization
+
+title <size:16><b>SD-01  System Initialization</b></size>\n<i>UDroneNetworkManager bootstraps HTTP polling and WebSocket connection</i>
+
+participant "GameInstance" as GI       #C8E6C9
+participant "DroneNetworkManager\n<<GameInstanceSubsystem>>" as NM  #EAF4FB
+participant "DroneHttpClient\n<<UObject>>" as HTTP #FFF9C4
+participant "DroneWebSocketClient\n<<UObject>>" as WS  #FFF9C4
+participant "DroneRegistrySubsystem\n<<GameInstanceSubsystem>>" as REG #EAF4FB
+
+GI  -> NM  : Initialize(Collection)
+activate NM
+
+NM  -> HTTP : NewObject<UDroneHttpClient>()\nBaseUrl = "http://10.x.x.x:8080"
+activate HTTP
+
+NM  -> WS   : NewObject<UDroneWebSocketClient>()\nServerUrl = "ws://10.x.x.x:8081/ws"
+activate WS
+
+NM  -> WS   : OnMessage.AddDynamic(this, &OnWsMessage)
+
+NM  -> NM   : StartPolling()\n[TimerManager: interval=3s, first=0.5s]
+
+NM  -> WS   : Connect()
+WS  --> NM  : <<callback>> OnConnected()
+
+NM  -> HTTP : GET /api/drones
+HTTP --> NM : <<callback>> OnDroneListResponse(bSuccess, Body)
+
+note right of NM
+  Parses JSON array.
+  For each drone object:
+    • RegisterDrone(FDroneDescriptor)
+    • MarkDroneAvailability(Online|Offline|Lost)
+end note
+
+NM  -> REG  : RegisterDrone(FDroneDescriptor)
+activate REG
+NM  -> REG  : MarkDroneAvailability(DroneId, Availability)
+REG -> REG  : OnDroneRegistered.Broadcast(DroneId)
+deactivate REG
+
+deactivate NM
+deactivate HTTP
+deactivate WS
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 2 — Drone Registration from Main Menu
+' ══════════════════════════════════════════════════════════
+newpage Drone Registration from Main Menu
+
+title <size:16><b>SD-02  Drone Registration (Main Menu)</b></size>\n<i>User registers a physical drone via UMainMenuWidget</i>
+
+actor       "Operator"                    as User
+participant "WBP_MainMenu\n<<Blueprint>>" as UI   #C8E6C9
+participant "UMainMenuWidget\n<<C++ Base>>" as MW  #EAF4FB
+participant "DroneNetworkManager"          as NM   #EAF4FB
+participant "DroneHttpClient"              as HTTP #FFF9C4
+participant "DroneRegistrySubsystem"       as REG  #EAF4FB
+
+User -> UI   : Clicks "Register"\n(Slot, IpAddress)
+UI   -> MW   : RegisterDrone(Slot, IpAddress)
+activate MW
+
+MW   -> NM   : RegisterDroneToBackend(Slot, IpAddress, Callback)
+activate NM
+
+NM   -> HTTP : POST /api/drones\n{ name, model, slot, ip, port, video_url }
+activate HTTP
+HTTP --> NM  : <<callback>> OnRegisterDroneResponse(bSuccess, Body)
+deactivate HTTP
+
+alt Registration Successful  [bSuccess == true && DroneId > 0]
+    NM  -> REG  : RegisterDrone(FDroneDescriptor\n  {DroneId, Slot, IP, ControlPort, ...})
+    NM  -> REG  : MarkDroneAvailability(DroneId, Offline)
+    NM  -> HTTP : GET /api/drones  [immediate refresh]
+    HTTP --> NM : OnDroneListResponse(...)
+    NM  --> MW  : <<callback>> HandleBackendRegisterResponse(true, Body)
+    MW  --> UI  : OnDroneRegistered(DroneId)  <<BlueprintImplementableEvent>>
+else Registration Failed  [bSuccess == false]
+    NM  --> MW  : <<callback>> HandleBackendRegisterResponse(false, Body)
+    MW  --> UI  : (display error)
+end
+
+deactivate NM
+deactivate MW
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 3 — Downlink Telemetry (WebSocket → UE5 Actor)
+' ══════════════════════════════════════════════════════════
+newpage Downlink Telemetry
+
+title <size:16><b>SD-03  Downlink Telemetry Pipeline</b></size>\n<i>PX4 UDP YAML → Backend → WebSocket → Registry → ARealTimeDroneReceiver</i>
+
+participant "PX4 Autopilot\n<<Hardware>>"            as PX4 #FFCCBC
+participant "Backend\n<<ws://...:8081/ws>>"          as BE  #D7CCC8
+participant "DroneWebSocketClient"                   as WS  #FFF9C4
+participant "DroneNetworkManager"                    as NM  #EAF4FB
+participant "DroneRegistrySubsystem"                 as REG #EAF4FB
+participant "ARealTimeDroneReceiver\n<<Scene Actor>>" as RX  #C8E6C9
+
+PX4 -> BE  : UDP YAML telemetry  [10 Hz]\n{ timestamp, position(NED,m),\n  quaternion, velocity }
+
+BE  -> WS  : WebSocket push\n{ type:"telemetry", drone_id:N,\n  x, y, z,\n  yaw, pitch, roll,\n  speed, battery }
+WS  --> NM : OnMessage(rawJson)
+
+activate NM
+NM  -> NM  : Deserialize JSON → FDroneTelemetrySnapshot\n  .WorldLocation  = FVector(x,y,z)\n  .Attitude       = FRotator(pitch,yaw,roll)\n  .Velocity.X     = speed\n  .GeographicLocation.Z = battery\n  .Availability   = Online
+NM  -> REG : UpdateTelemetry(DroneId, Snapshot)
+deactivate NM
+
+activate REG
+REG -> REG : TelemetryCache[DroneId] = Snapshot
+REG -> RX  : OnTelemetryUpdated.Broadcast(DroneId, Snapshot)\n[DYNAMIC multicast]
+deactivate REG
+
+activate RX
+RX  -> RX  : OnWebSocketTelemetry(InDroneId, Snapshot)\n  guard: InDroneId == this->DroneId
+RX  -> RX  : TargetLocation = AnchorWorldLocation\n            + Snapshot.WorldLocation
+RX  -> RX  : TargetRotation = Snapshot.Attitude
+note right of RX
+  Tick() each frame:
+    ActorLocation = FMath::VInterpTo(
+      CurrentLocation, TargetLocation,
+      DeltaTime, SmoothSpeed)
+    ActorRotation = FMath::RInterpTo(...)
+end note
+deactivate RX
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 4 — power_on Event & GPS Anchor Establishment
+' ══════════════════════════════════════════════════════════
+newpage GPS Anchor Establishment
+
+title <size:16><b>SD-04  power_on Event &amp; GPS Anchor Establishment</b></size>\n<i>First-time anchor binding to map ARealTimeDroneReceiver to world coordinates</i>
+
+participant "Backend"           as BE  #D7CCC8
+participant "DroneNetworkManager" as NM #EAF4FB
+participant "ARealTimeDroneReceiver" as RX #C8E6C9
+
+BE  -> NM  : WebSocket push\n{ type:"event",\n  event:"power_on",\n  drone_id:N,\n  gps_lat, gps_lon, gps_alt }
+
+activate NM
+NM  -> NM  : CachedGpsAnchors[DroneId]\n  = { Lat, Lon, Alt }\n  [cache for late-spawning actors]
+NM  -> RX  : OnDroneWsEvent.Broadcast(\n    DroneId, "power_on",\n    GpsLat, GpsLon, GpsAlt)
+deactivate NM
+
+activate RX
+RX  -> RX  : OnDroneWsEvent(InDroneId, Event, ...)\n  guard: InDroneId == this->DroneId\n     &&  Event == "power_on" || "reconnect"
+
+note right of RX
+  CesiumCoordinateService converts
+  (GpsLat, GpsLon, GpsAlt) →
+  UE world-space FVector (cm).
+  AnchorWorldLocation is subtracted
+  from every subsequent move command
+  and added to every received telemetry offset.
+end note
+
+RX  -> RX  : AnchorWorldLocation\n  = CesiumGeoRef.TransformLongLatAltToUnreal(\n      GpsLon, GpsLat, GpsAlt)
+RX  -> RX  : bHasGpsAnchor = true
+deactivate RX
+
+note over BE, RX
+  All subsequent telemetry packets carry
+  NED offsets relative to this anchor point.
+  AnchorWorldLocation is also referenced by
+  ADroneOpsPlayerController::SendTargetCommand()
+  to convert map-click world coords to anchor-relative offsets.
+end note
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 5 — Uplink Control Command (Left-Click → Move)
+' ══════════════════════════════════════════════════════════
+newpage Uplink Control Command
+
+title <size:16><b>SD-05  Uplink Control Command (Left-Click → Move)</b></size>\n<i>Operator clicks map → WebSocket move frame → Backend → PX4</i>
+
+actor       "Operator"                  as User
+participant "DroneOpsPlayerController"  as PC   #C8E6C9
+participant "DroneRegistrySubsystem"    as REG  #EAF4FB
+participant "ARealTimeDroneReceiver"    as RX   #C8E6C9
+participant "DroneNetworkManager"       as NM   #EAF4FB
+participant "DroneWebSocketClient"      as WS   #FFF9C4
+participant "Backend"                   as BE   #D7CCC8
+participant "PX4 Autopilot"             as PX4  #FFCCBC
+
+User -> PC  : LeftMouseButton pressed
+
+activate PC
+PC  -> PC   : OnPrimaryClick()
+PC  -> PC   : GetSelectableDroneUnderCursor()\n→ nullptr  [terrain hit]
+PC  -> PC   : HandleMapClick(WorldLocation)
+
+PC  -> REG  : IsControlLocked(SelectedDroneId)\n→ {false, None}
+activate REG
+deactivate REG
+
+PC  -> PC   : Cast<AUE5DroneControlCharacter>(SelectedDroneActor)\n→ SetClickTargetLocation(WorldLocation, mode=1)
+PC  -> PC   : SendTargetCommand(SelectedDroneId, WorldLocation)
+
+PC  -> REG  : GetDroneCommandMode(DroneId)\n→ EDroneCommandMode::Move
+PC  -> REG  : GetReceiverActor(DroneId) → RX
+
+PC  -> RX   : read bHasGpsAnchor  → true
+PC  -> RX   : read AnchorWorldLocation
+
+PC  -> PC   : SendLocation\n  = WorldLocation − AnchorWorldLocation
+PC  -> NM   : SendMoveCommand(DroneId, SendLocation, Move)
+deactivate PC
+
+activate NM
+NM  -> WS   : SendMessage(\n  { "mode":"move",\n    "drone_id":"N",\n    "x":…, "y":…, "z":… })
+deactivate NM
+
+WS  -> BE   : WebSocket frame [TEXT]
+BE  -> PX4  : UDP 24-byte control packet\n  <d f f f I> [≥2 Hz]
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 6 — Multi-Drone Selection & Dispatch
+' ══════════════════════════════════════════════════════════
+newpage Multi-Drone Selection and Dispatch
+
+title <size:16><b>SD-06  Multi-Drone Selection &amp; Dispatch</b></size>\n<i>Shift+Click accumulates selection; map-click dispatches to all selected drones</i>
+
+actor       "Operator"                 as User
+participant "DroneOpsPlayerController" as PC   #C8E6C9
+participant "DroneRegistrySubsystem"   as REG  #EAF4FB
+participant "DroneNetworkManager"      as NM   #EAF4FB
+
+group Shift+Click — accumulate multi-selection
+    User -> PC  : Shift + LeftClick on DroneA
+    activate PC
+    PC  -> PC   : HandleDroneClick(DroneActorA)\n  bShiftHeld == true
+    PC  -> REG  : GetMultiSelectedDrones() → [A]
+    PC  -> REG  : SetMultiSelectedDrones([A, B])
+    PC  -> REG  : SetPrimarySelectedDrone(B)
+    deactivate PC
+end
+
+group Left-Click on terrain — dispatch to all selected
+    User -> PC  : LeftClick on map (WorldLocation)
+    activate PC
+    PC  -> PC   : HandleMapClick(WorldLocation)
+    PC  -> REG  : GetMultiSelectedDrones() → [A, B, …]
+
+    loop For each DroneId_i in MultiSelectedDrones
+        PC  -> REG  : IsControlLocked(DroneId_i) → false
+        PC  -> PC   : SlotOffset\n  = ComputeMultiDispatchOffset(i, spacing=100cm)\n  [square-spiral layout]
+        PC  -> NM   : SendMoveCommand(\n    DroneId_i,\n    WorldLocation + SlotOffset − Anchor_i,\n    CommandMode_i)
+    end
+    deactivate PC
+end
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 7 — Array Task Submission & Assembly Flow
+' ══════════════════════════════════════════════════════════
+newpage Array Task Submission and Assembly Flow
+
+title <size:16><b>SD-07  Array Task Submission &amp; Assembly Flow</b></size>\n<i>POST /api/arrays → assembling push stream → assembly_complete / timeout</i>
+
+participant "UAssemblyPopupWidget" as UI   #C8E6C9
+participant "DroneNetworkManager"  as NM   #EAF4FB
+participant "DroneHttpClient"      as HTTP #FFF9C4
+participant "Backend"              as BE   #D7CCC8
+participant "DroneWebSocketClient" as WS   #FFF9C4
+
+UI  -> NM   : SendArrayTaskFromData(\n  PathDataMap,\n  Mode=Scout,\n  OnComplete)
+activate NM
+
+NM  -> HTTP : POST /api/arrays\n{\n  "mode": "scout",\n  "paths": [\n    { "pathId":N, "drone_id":"N",\n      "bClosedLoop":false,\n      "waypoints": [\n        { "location":{x,y,z},\n          "segmentSpeed":…,\n          "waitTime":… }\n      ]}\n  ]\n}
+activate HTTP
+HTTP --> NM : <<callback>> OnComplete(true,\n  { "array_id":"a1" })
+deactivate HTTP
+
+NM  --> UI  : OnComplete(true, body)
+deactivate NM
+UI  -> UI   : Show assembly progress popup\nUpdateProgress(0, TotalCount)
+
+loop Assembling  [backend pushes per drone ready]
+    BE  -> WS  : { "type":"assembling",\n  "array_id":"a1",\n  "ready_count":N,\n  "total_count":M }
+    WS  --> NM : OnWsMessage(json)
+    NM  -> NM  : Parse → OnAssemblingProgress.Broadcast("a1", N, M)
+    NM  --> UI : OnAssemblingProgress("a1", N, M)
+    UI  -> UI  : UpdateProgress(N)
+end
+
+alt Assembly Complete  [all drones ready]
+    BE  -> WS  : { "type":"assembly_complete",\n  "array_id":"a1" }
+    WS  --> NM : OnWsMessage(json)
+    NM  -> NM  : OnAssemblyComplete.Broadcast("a1")
+    NM  --> UI : OnAssemblyComplete("a1")
+    UI  -> UI  : StartAutoDemo()
+else Assembly Timeout
+    BE  -> WS  : { "type":"assembly_timeout",\n  "array_id":"a1",\n  "ready_count":N,\n  "total_count":M }
+    WS  --> NM : OnWsMessage(json)
+    NM  -> NM  : OnAssemblyTimeout.Broadcast("a1", N, M)
+    NM  --> UI : OnAssemblyTimeout("a1", N, M)
+    UI  -> UI  : Display timeout warning
+end
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 8 — Pause / Resume
+' ══════════════════════════════════════════════════════════
+newpage Pause and Resume
+
+title <size:16><b>SD-08  Pause / Resume</b></size>\n<i>P-key toggles pause/resume for all selected drones</i>
+
+actor       "Operator"                 as User
+participant "DroneOpsPlayerController" as PC   #C8E6C9
+participant "DroneRegistrySubsystem"   as REG  #EAF4FB
+participant "DroneNetworkManager"      as NM   #EAF4FB
+participant "DroneWebSocketClient"     as WS   #FFF9C4
+participant "ARealTimeDroneReceiver"   as RX   #C8E6C9
+participant "AMultiDroneCharacter\n<<Shadow Drone>>" as MD #C8E6C9
+participant "Backend"                  as BE   #D7CCC8
+
+User -> PC  : Key P pressed
+activate PC
+
+PC  -> PC   : OnPauseToggle()\n  bNewPaused = !PausedDroneIds.Contains(SelectedDroneId)
+PC  -> REG  : GetMultiSelectedDrones() → [DroneId₁, DroneId₂, …]
+PC  -> NM   : SendPauseCommand([DroneIds], bNewPaused)
+activate NM
+NM  -> WS   : SendMessage(\n  { "type":"pause"|"resume",\n    "drone_ids":["1","2",…] })
+WS  -> BE   : WebSocket frame [TEXT]
+deactivate NM
+
+loop For each DroneId_i
+    PC  -> REG  : GetReceiverActor(DroneId_i) → RX
+    PC  -> RX   : SetPaused(bNewPaused)
+    note right of RX
+      bIsPaused suppresses
+      Tick() position updates
+      (telemetry still received)
+    end note
+
+    PC  -> REG  : GetSenderPawn(DroneId_i) → MD
+    PC  -> MD   : SetPaused(bNewPaused)
+end
+
+deactivate PC
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 9 — Level Load & Drone Spawn (GameMode)
+' ══════════════════════════════════════════════════════════
+newpage Level Load and Drone Spawn
+
+title <size:16><b>SD-09  Level Load &amp; Drone Spawn (ADroneOpsGameMode)</b></size>\n<i>BeginPlay bootstraps Cesium, loads registry, spawns mirror and shadow drones</i>
+
+participant "UE5 Engine"               as UE  #E1BEE7
+participant "ADroneOpsGameMode"        as GM  #EAF4FB
+participant "DroneNetworkManager"      as NM  #EAF4FB
+participant "ACesiumGeoreference"      as CEL #D7CCC8
+participant "DroneRegistrySubsystem"   as REG #EAF4FB
+participant "ARealTimeDroneReceiver"   as RX  #C8E6C9
+participant "AMultiDroneCharacter"     as MD  #C8E6C9
+
+UE  -> GM  : PreInitializeComponents()
+activate GM
+GM  -> GM  : SoftClassPtr<BP_DroneOpsPlayerController>\n  .LoadSynchronous() → PlayerControllerClass
+deactivate GM
+
+UE  -> GM  : BeginPlay()
+activate GM
+
+GM  -> GM  : LoadSynchronous(BP_RealTimeDrone)\n→ ReceiverDroneClass
+GM  -> GM  : LoadSynchronous(BP_MultiDroneCharacter)\n→ ShadowDroneClass
+
+GM  -> GM  : InitializeCoordinateService()
+GM  -> REG : SetCoordinateService(\n  new UCesiumCoordinateService())
+
+GM  -> NM  : HasPendingGeoreferenceOrigin()
+
+alt Pending GPS Origin exists  [set from Main Menu]
+    GM  -> GM  : bPendingSpawnAfterGeoreferenceUpdate = true
+    GM  -> GM  : SetTimerForNextTick(...)
+    GM  -> CEL : SetOriginLatitude(lat)
+    GM  -> CEL : SetOriginLongitude(lon)
+    GM  -> CEL : SetOriginHeight(alt)
+    GM  -> NM  : ClearPendingGeoreferenceOrigin()
+    CEL --> GM : OnGeoreferenceUpdated()
+    GM  -> GM  : SpawnReceiversFromRegistry()
+else No Pending Origin  [direct level launch]
+    GM  -> GM  : SpawnReceiversFromRegistry()
+end
+
+GM  -> REG : GetAllDroneDescriptors()
+activate REG
+REG --> GM : [FDroneDescriptor, …]
+deactivate REG
+
+loop For each FDroneDescriptor
+    GM  -> RX  : World->SpawnActorDeferred<ARealTimeDroneReceiver>(\n    ReceiverDroneClass, SpawnTransform,\n    CollisionMethod::AlwaysSpawn)
+    GM  -> RX  : ApplyDescriptor(Desc, InitialAvailability)
+    GM  -> RX  : FinishSpawning(SpawnTransform)
+
+    opt bSpawnShadowDrones
+        GM  -> MD  : World->SpawnActorDeferred<AMultiDroneCharacter>(\n    ShadowDroneClass, SpawnTransform)
+        GM  -> MD  : Assign DroneId / Name / BitIndex /\n         MavlinkSystemId / ThemeColor
+        GM  -> MD  : FinishSpawning(SpawnTransform)
+    end
+end
+
+GM  -> GM  : RetryPossessPlacedPawns()\n[TimerManager: interval=0.1s, max 10 retries]
+GM  -> GM  : PlayerController.Possess(AMultiDroneCharacter)
+
+deactivate GM
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 10 — Main Menu to Preview Level Transition
+' ══════════════════════════════════════════════════════════
+newpage Main Menu to Preview Level
+
+title <size:16><b>SD-10  Main Menu → Preview Level Transition</b></size>\n<i>GPS origin is persisted through GameInstance across level boundary</i>
+
+actor       "Operator"              as User
+participant "UMainMenuWidget"       as MW  #EAF4FB
+participant "DroneNetworkManager"   as NM  #EAF4FB
+participant "UE5 Engine"            as UE  #E1BEE7
+participant "ADroneOpsGameMode"     as GM  #EAF4FB
+
+User -> MW  : Inputs lat/lon/alt, clicks "Go to Preview"
+activate MW
+
+MW  -> MW   : OnGoToPreviewClicked()
+MW  -> NM   : IsBackendConnected() → true
+
+note right of MW
+  DroneNetworkManager lives in
+  GameInstance — survives level transitions.
+end note
+
+MW  -> NM   : PendingOriginLatitude  = lat
+MW  -> NM   : PendingOriginLongitude = lon
+MW  -> NM   : PendingOriginAltitude  = alt
+
+MW  -> UE   : UGameplayStatics::OpenLevel(this, "DroneOpsLevel")
+deactivate MW
+
+note over NM
+  <<GameInstanceSubsystem>>
+  Pending origin data persists across level load.
+end note
+
+UE  -> GM   : BeginPlay()  [new level]
+activate GM
+GM  -> NM   : HasPendingGeoreferenceOrigin() → true
+GM  -> NM   : PendingOriginLatitude / Longitude / Altitude
+GM  -> NM   : ClearPendingGeoreferenceOrigin()
+GM  -> GM   : ApplyPendingGeoreferenceOrigin()\n  → SetTimerForNextTick: set Cesium origin
+deactivate GM
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 11 — Local Playback (DronePlaybackManager)
+' ══════════════════════════════════════════════════════════
+newpage Local Playback
+
+title <size:16><b>SD-11  Local Playback (ADronePlaybackManager)</b></size>\n<i>Editor-recorded path data drives preview drone actors without network</i>
+
+participant "Preview UI"                         as UI #C8E6C9
+participant "ADronePlaybackManager\n<<Actor>>"   as PM #EAF4FB
+participant "ADronePathActor\n<<Spline Actor>>"  as PA #FFF9C4
+participant "Playback Drone Actor"               as DA #C8E6C9
+
+UI  -> PM   : PlayFromData(FDronePathsSaveData)
+activate PM
+PM  -> PM   : StopPlayback()  [destroy previous actors]
+
+loop For each FDronePathSaveData in Data.Paths
+    PM  -> PA  : World->SpawnActor<ADronePathActor>()
+    activate PA
+    PM  -> PA  : SetPathNumericId(PathData.PathId)
+    PM  -> PA  : bClosedLoop = PathData.bClosedLoop
+    loop For each FDroneWaypointSaveData
+        PM  -> PA  : AddWaypoint(Location, SegmentSpeed)
+    end
+    PM  -> PA  : RefreshPath()  [rebuild spline]
+
+    PM  -> PM  : SpawnPlaybackDrone(\n    PathActor.GetWaypointWorldLocation(0))\n  → DroneActorClass or StaticMeshActor fallback
+    create DA
+    PM  -> DA  : SpawnActor at Waypoint[0]
+    PM  -> PA  : StartMovement(DroneActor)
+    PM  -> PM  : ActivePaths.Add(PA)\n  ActiveDrones.Add(DA)
+    deactivate PA
+end
+
+PM  -> PM   : bIsPlaying = true\nbIsPaused  = false\nPlaybackTime = 0.0f
+deactivate PM
+
+loop Tick(DeltaTime)  [every frame while bIsPlaying]
+    PM  -> PA  : GetCurrentPathStatus() → Completed?
+    alt All paths Completed && bLoop
+        PM  -> PM  : PlayFromData(CachedPlaybackData)  [restart]
+    else All paths Completed
+        PM  -> PM  : StopPlayback()\n  → destroy PA, DA actors
+    end
+end
+
+opt Pause
+    UI  -> PM   : PausePlayback()
+    activate PM
+    loop For each active PathActor
+        PM  -> PA  : read CurrentSegmentIndex\n       SegmentDuration, SegmentStartTime
+        PM  -> PM  : PausedPathStates.Add(\n    {PA, DA, segIdx, remainTime})
+        PM  -> PA  : StopMovement()
+    end
+    PM  -> PM   : bIsPaused = true
+    deactivate PM
+end
+
+opt Resume
+    UI  -> PM   : ResumePlayback()
+    activate PM
+    loop For each FDronePlaybackPauseState
+        PM  -> PA  : ResumeMovement(\n    DroneActor, SegmentIndex, RemainingSegmentTime)
+    end
+    PM  -> PM   : bIsPaused = false
+    deactivate PM
+end
+
+
+' ══════════════════════════════════════════════════════════
+'  DIAGRAM 12 — End-to-End Data Flow Overview
+' ══════════════════════════════════════════════════════════
+newpage End-to-End Data Flow Overview
+
+title <size:16><b>SD-12  End-to-End Data Flow Overview</b></size>\n<i>Complete bidirectional data flow across all subsystem boundaries</i>
+
+participant "PX4 Autopilot\n<<Hardware>>"           as PX4 #FFCCBC
+participant "Backend\n:8080 (HTTP)\n:8081/ws (WS)"  as BE  #D7CCC8
+participant "DroneNetworkManager"                   as NM  #EAF4FB
+participant "DroneRegistrySubsystem"                as REG #EAF4FB
+participant "ARealTimeDroneReceiver\n<<Mirror Drone>>" as RX #C8E6C9
+participant "ADroneOpsPlayerController"             as PC  #C8E6C9
+participant "HUD / Widgets"                         as UI  #C8E6C9
+
+== Downlink Telemetry  [10 Hz] ==
+PX4 -> BE  : UDP YAML  { position(NED,m), quaternion, velocity }
+BE  -> NM  : WS push  { type:"telemetry", drone_id, x,y,z, yaw,pitch,roll, speed, battery }
+NM  -> REG : UpdateTelemetry(DroneId, FDroneTelemetrySnapshot)
+REG --> RX : OnTelemetryUpdated → drive actor transform
+REG --> UI : OnTelemetryUpdated → refresh HUD gauges
+
+== HTTP State Polling  [every 3 s] ==
+NM  -> BE  : GET /api/drones
+BE  --> NM : [ { id, slot, ip, status, … }, … ]
+NM  -> REG : RegisterDrone / MarkDroneAvailability
+
+== Uplink Control Commands ==
+PC  -> NM  : SendMoveCommand(DroneId, anchorRelativeOffset, Mode)
+NM  -> BE  : WS send  { "mode":"move"|"scout"|"patrol"|"attack",\n             "drone_id":"N", "x","y","z" }
+BE  -> PX4 : UDP 24-byte control packet  <d f f f I>  [≥ 2 Hz]
+
+PC  -> NM  : SendPauseCommand([DroneIds], bPause)
+NM  -> BE  : WS send  { "type":"pause"|"resume", "drone_ids":[…] }
+
+== Event & Alert Push ==
+BE  -> NM  : WS push  { type:"event",  event:"power_on"|"reconnect"|"lost_connection", gps_lat/lon/alt }
+NM  --> RX : OnDroneWsEvent → establish AnchorWorldLocation, bHasGpsAnchor=true
+
+BE  -> NM  : WS push  { type:"alert", alert:"low_battery"|"lost_connection", value }
+NM  --> UI : OnDroneWsAlert → show alert banner
+
+== Array Task & Assembly ==
+PC  -> NM  : SendArrayTaskFromData(PathDataMap, Mode)
+NM  -> BE  : POST /api/arrays  { mode, paths:[{drone_id, waypoints}] }
+BE  --> NM : { array_id }
+BE  -> NM  : WS push  { type:"assembling",        ready_count, total_count }
+BE  -> NM  : WS push  { type:"assembly_complete"  }
+BE  -> NM  : WS push  { type:"assembly_timeout",  ready_count, total_count }
+NM  --> UI : OnAssemblingProgress / OnAssemblyComplete / OnAssemblyTimeout
+
+@enduml
