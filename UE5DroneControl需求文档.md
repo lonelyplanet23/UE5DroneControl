@@ -1045,3 +1045,5 @@ LocalTileServerUrl=http://localhost:8070
 
 
 预演模块 路径规划
+
+点击切换无人机运行模式的按钮没有实装

@@ -155,6 +155,16 @@ protected:
     // ????????? (cm)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Network")
     float ClickArriveThreshold = 50.0f;
+
+    /**
+     * When true (default), BeginPlay and Tick offset Mesh relative Z and CameraBoom Z
+     * to TargetHeight, simulating flight altitude via mesh offset.
+     * Sub-classes that drive Actor Z directly (ARealTimeDroneReceiver, AMultiDroneCharacter)
+     * should set this to false in their constructor so the Actor/Capsule Z represents
+     * the real flight altitude and the mesh stays at pivot origin.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Flight")
+    bool bUseMeshHeightOffset = true;
 };
 
 

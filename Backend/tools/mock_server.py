@@ -140,6 +140,46 @@ def test_assembly_timeout():
     print(f"[HTTP] POST /test/assembly_timeout -> array_id={array_id} total={total}")
     return jsonify({"ok": True, "array_id": array_id})
 
+# ---- Telemetry override (for rotation/position test injection) ----
+# drone_id -> {"x","y","z","pitch","yaw","roll","speed","battery"}
+# When set, telemetry_push_zero uses these values instead of zeros.
+_telem_override: dict = {}
+
+@app.route("/test/telemetry", methods=["POST"])
+def test_telemetry():
+    """Override telemetry for one drone (persists until /test/telemetry_clear).
+    Body: {"drone_id":1,"x":0,"y":0,"z":500,"pitch":0,"yaw":45,"roll":0}"""
+    data = request.get_json(force=True, silent=True) or {}
+    did = int(data.get("drone_id", 1))
+    _telem_override[did] = {
+        "x":       float(data.get("x",       0.0)),
+        "y":       float(data.get("y",       0.0)),
+        "z":       float(data.get("z",       0.0)),
+        "pitch":   float(data.get("pitch",   0.0)),
+        "yaw":     float(data.get("yaw",     0.0)),
+        "roll":    float(data.get("roll",    0.0)),
+        "speed":   float(data.get("speed",   0.0)),
+        "battery": int(data.get("battery", 100)),
+    }
+    ov = _telem_override[did]
+    print(f"[HTTP] POST /test/telemetry -> drone_id={did}  "
+          f"z={ov['z']:.0f}  pitch={ov['pitch']:+.1f}°  yaw={ov['yaw']:.1f}°  roll={ov['roll']:+.1f}°")
+    return jsonify({"ok": True})
+
+@app.route("/test/telemetry_clear", methods=["POST"])
+def test_telemetry_clear():
+    """Remove telemetry override for a drone (reverts to zero push).
+    Body: {"drone_id":1}  — omit drone_id to clear all."""
+    data = request.get_json(force=True, silent=True) or {}
+    if "drone_id" in data:
+        did = int(data["drone_id"])
+        _telem_override.pop(did, None)
+        print(f"[HTTP] POST /test/telemetry_clear -> drone_id={did}")
+    else:
+        _telem_override.clear()
+        print("[HTTP] POST /test/telemetry_clear -> all cleared")
+    return jsonify({"ok": True})
+
 def run_http():
     app.run(host="127.0.0.1", port=8080, use_reloader=False)
 
@@ -231,7 +271,8 @@ async def telemetry_push():
             await _broadcast(msg)
 
 async def telemetry_push_zero():
-    """Push zero-offset telemetry for anchor verification. Drones stay at anchor point."""
+    """Push zero-offset telemetry for anchor verification. Drones stay at anchor point.
+    If _telem_override contains an entry for a drone, those values are used instead."""
     global ws_clients
     while True:
         await asyncio.sleep(0.1)
@@ -239,13 +280,14 @@ async def telemetry_push_zero():
             continue
         for drone in DRONES:
             did = drone["id"]
-            msg = json.dumps({
-                "type": "telemetry",
-                "drone_id": did,
-                "x": 0.0, "y": 0.0, "z": 0.0,
-                "pitch": 0.0, "yaw": 0.0, "roll": 0.0,
-                "speed": 0.0, "battery": 100,
-            })
+            ov = _telem_override.get(did)
+            if ov:
+                fields = ov
+            else:
+                fields = {"x": 0.0, "y": 0.0, "z": 0.0,
+                          "pitch": 0.0, "yaw": 0.0, "roll": 0.0,
+                          "speed": 0.0, "battery": 100}
+            msg = json.dumps({"type": "telemetry", "drone_id": did, **fields})
             await _broadcast(msg)
 
 async def run_ws():

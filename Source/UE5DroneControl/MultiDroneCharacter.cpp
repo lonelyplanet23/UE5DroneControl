@@ -21,27 +21,48 @@ AMultiDroneCharacter::AMultiDroneCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;  // remote: Tick 需要  // remote: Tick 需要
 
+	// Actor Z 直接代表真实飞行高度（跟随 Mirror 或点击目标），
+	// 禁用父类通过 Mesh 相对 Z 模拟高度的逻辑，保持旋转中心正确。
+	bUseMeshHeightOffset = false;
+
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
 
 	// 确保碰撞设置正确，支持鼠标悬停检测
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
-		// 保持 Pawn 配置，但确保 Visibility 通道阻塞（鼠标检测需要）
-		// 保持 Pawn 配置，但确保 Visibility 通道阻塞（鼠标检测需要）
 		Capsule->SetCollisionProfileName(TEXT("Pawn"));
 		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-		// 【关键】确保 Visibility 通道阻塞 - 鼠标悬停检测需要
-		// 【关键】确保 Visibility 通道阻塞 - 鼠标悬停检测需要
-		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		// Capsule 不阻挡 Visibility——让射线穿透打到 Mesh。
+		// 修正高度逻辑后 Mesh 与 Capsule 同高，Capsule 会被先命中；
+		// 由 Mesh 接收 Visibility 才能通过 IsA<UMeshComponent>() 选中检测。
+		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 		Capsule->SetSimulatePhysics(false);
+	}
+
+	// Mesh 负责 Visibility 命中（鼠标悬停 / 点击选中的实际射线接收体）
+	if (USkeletalMeshComponent* MyMesh = GetMesh())
+	{
+		MyMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		MyMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	}
 }
 
 void AMultiDroneCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 蓝图实例可能保存了旧碰撞配置；运行时再兜底一次，保证鼠标射线能命中影子机。
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+	}
+	if (USkeletalMeshComponent* MyMesh = GetMesh())
+	{
+		MyMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		MyMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	}
 
 	if (SelectionComponent)
 	{

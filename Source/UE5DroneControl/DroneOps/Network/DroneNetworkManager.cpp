@@ -15,6 +15,24 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
+	// UGameInstanceSubsystem 的 UPROPERTY(config) 不会被引擎自动从 ini 加载，
+	// 需要手动读取。优先级：DefaultGame.ini < Saved/Config/*/Game.ini
+	const TCHAR* Section = TEXT("/Script/UE5DroneControl.DroneNetworkManager");
+	FString IniValue;
+	if (GConfig && GConfig->GetString(Section, TEXT("BackendBaseUrl"), IniValue, GGameIni))
+	{
+		BackendBaseUrl = IniValue;
+	}
+	if (GConfig && GConfig->GetString(Section, TEXT("WebSocketUrl"), IniValue, GGameIni))
+	{
+		WebSocketUrl = IniValue;
+	}
+	float IniFloat = 0.f;
+	if (GConfig && GConfig->GetFloat(Section, TEXT("PollIntervalSec"), IniFloat, GGameIni))
+	{
+		PollIntervalSec = IniFloat;
+	}
+
 	HttpClient = NewObject<UDroneHttpClient>(this);
 	HttpClient->BaseUrl = BackendBaseUrl;
 

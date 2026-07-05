@@ -33,17 +33,26 @@ namespace
 {
 	bool IsFr2ControllableDroneActor(const AActor* Actor)
 	{
-		if (!Actor || Actor->IsA(ARealTimeDroneReceiver::StaticClass()))
+		return IsValid(Actor) && Actor->IsA(AMultiDroneCharacter::StaticClass());
+	}
+
+	AActor* FindShadowDroneById(const UWorld* World, int32 DroneId)
+	{
+		if (!World || DroneId <= 0)
 		{
-			return false;
+			return nullptr;
 		}
 
-		if (Actor->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()))
+		for (TActorIterator<AMultiDroneCharacter> It(World); It; ++It)
 		{
-			return true;
+			AMultiDroneCharacter* Candidate = *It;
+			if (IsValid(Candidate) && Candidate->DroneId == DroneId)
+			{
+				return Candidate;
+			}
 		}
 
-		return Actor->FindComponentByClass<UDroneSelectionComponent>() != nullptr;
+		return nullptr;
 	}
 
 	int32 ResolveDroneIdFromActor(const AActor* Actor)
@@ -375,7 +384,7 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: OnPrimaryClick"));
 	FVector WorldLocation = FVector::ZeroVector;
 
-	// 只接受"射线精确命中无人机网格体"的点击
+	// 左键可命中影子机或镜像机，但最终统一选中同 DroneId 的影子机。
 	AActor* DroneActor = GetSelectableDroneUnderCursor(&WorldLocation);
 
 	if (GEngine)
@@ -905,37 +914,59 @@ bool ADroneOpsPlayerController::GetWorldLocationUnderCursor(FVector& OutLocation
 
 AActor* ADroneOpsPlayerController::GetSelectableDroneUnderCursor(FVector* OutFallbackWorldLocation) const
 {
-	FHitResult VisibilityHit;
-	if (!GetHitResultUnderCursor(ECC_Visibility, false, VisibilityHit))
+	FHitResult MapHit;
+	if (GetHitResultUnderCursor(ECC_Visibility, false, MapHit))
+	{
+		if (OutFallbackWorldLocation)
+		{
+			*OutFallbackWorldLocation = MapHit.Location;
+		}
+	}
+
+	FHitResult DroneHit;
+	if (!GetHitResultUnderCursor(ECC_Visibility, true, DroneHit))
 	{
 		return nullptr;
 	}
 
-	if (OutFallbackWorldLocation)
+	if (OutFallbackWorldLocation && MapHit.GetActor() == nullptr)
 	{
-		*OutFallbackWorldLocation = VisibilityHit.Location;
+		*OutFallbackWorldLocation = DroneHit.Location;
 	}
 
-	AActor* HitActor = VisibilityHit.GetActor();
-	UPrimitiveComponent* HitComponent = VisibilityHit.GetComponent();
+	AActor* HitActor = DroneHit.GetActor();
+	UPrimitiveComponent* HitComponent = DroneHit.GetComponent();
 	if (!HitActor || !HitComponent)
 	{
 		return nullptr;
 	}
 
-	if (!IsFr2ControllableDroneActor(HitActor))
+	AActor* SelectableActor = HitActor;
+	if (!IsFr2ControllableDroneActor(SelectableActor))
+	{
+		const int32 HitDroneId = ResolveDroneIdFromActor(HitActor);
+		if (HitDroneId <= 0)
+		{
+			return nullptr;
+		}
+
+		SelectableActor = DroneRegistry ? DroneRegistry->GetSenderPawn(HitDroneId) : nullptr;
+		if (!IsFr2ControllableDroneActor(SelectableActor))
+		{
+			SelectableActor = FindShadowDroneById(GetWorld(), HitDroneId);
+		}
+	}
+
+	if (!IsFr2ControllableDroneActor(SelectableActor))
 	{
 		return nullptr;
 	}
-
-	// 仅当射线命中"无人机网格体组件"时才算选中，避免点到空白区域也选中
-	if (!HitComponent->IsA<UMeshComponent>())
-	{
-		return nullptr;
-	}
-
-	UE_LOG(LogTemp, Verbose, TEXT("Cursor MeshHit: %s.%s"), *HitActor->GetName(), *HitComponent->GetName());
-	return HitActor;
+	UE_LOG(LogTemp, Verbose, TEXT("Cursor DroneHit: %s.%s (%s) -> Select %s"),
+		*HitActor->GetName(),
+		*HitComponent->GetName(),
+		*HitComponent->GetClass()->GetName(),
+		*SelectableActor->GetName());
+	return SelectableActor;
 }
 
 AActor* ADroneOpsPlayerController::FindNearestSelectableDroneOnScreen(float MaxScreenDistance) const

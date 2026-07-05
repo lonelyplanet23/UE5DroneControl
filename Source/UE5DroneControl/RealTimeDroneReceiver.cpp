@@ -23,6 +23,10 @@ ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 	ListenSocket = nullptr;
 	bEnableUDPSend = false;
 
+	// Actor Z 直接代表真实飞行高度，禁用父类通过 Mesh 相对 Z 模拟高度的逻辑。
+	// 这样 Mesh 保持在 Capsule 旋转中心，姿态旋转不会绕下方点偏转。
+	bUseMeshHeightOffset = false;
+
 	TelemetryComponent = CreateDefaultSubobject<UDroneTelemetryComponent>(TEXT("TelemetryComponent"));
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 
@@ -42,19 +46,25 @@ ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 		// 1. 确保碰撞是开启的 (Profile = Pawn)，这样它才能检测到地板
 		Capsule->SetCollisionProfileName(TEXT("Pawn"));
 
-		// 2. 但是！我们要忽略其他"Pawn"（也就是玩家和其他飞机）
-		// 这样你们两个飞机重叠时才不会互相挤飞
+		// 2. 忽略其他 Pawn（避免与其他飞机互相挤飞）
 		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 
 		// 3. 忽略摄像机，防止遮挡视线
 		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 
-		// 4. 【关键修复】确保 Visibility 通道是阻塞的 - 这是鼠标悬停检测必需的
-		// DroneOpsPlayerController::Tick() 使用 ECC_Visibility 进行光线检测
-		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		// 4. Capsule 不阻挡 Visibility 射线——让射线穿透打到 Mesh。
+		//    修正高度逻辑后，Mesh 与 Capsule 处于同一高度，Capsule 会被先命中；
+		//    由 Mesh 负责 Visibility 命中才能通过 IsA<UMeshComponent>() 选中检测。
+		Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 
 		// 5. 禁用物理模拟 - 防止碰撞弹起
 		Capsule->SetSimulatePhysics(false);
+	}
+
+	// Mesh 负责 Visibility 命中（鼠标悬停 / 点击选中的实际射线接收体）
+	if (USkeletalMeshComponent* MyMesh = GetMesh())
+	{
+		MyMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	}
 }
 

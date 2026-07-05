@@ -82,17 +82,38 @@ void AUE5DroneControlCharacter::BeginPlay()
     TargetHeight = FMath::Max(TargetHeight, 3000.0f);
 
     // 游戏开始时，让 Mesh 直接对齐到目标高度
-    if (USkeletalMeshComponent* MyMesh = GetMesh())
+    // 仅当子类允许 Mesh Z 偏移时执行（ARealTimeDroneReceiver/AMultiDroneCharacter 关闭此选项，
+    // 由 Actor Z 直接代表真实飞行高度，Mesh 保持在旋转中心）
+    if (bUseMeshHeightOffset)
     {
-        FVector CurrentRelLoc = MyMesh->GetRelativeLocation();
-        MyMesh->SetRelativeLocation(FVector(CurrentRelLoc.X, CurrentRelLoc.Y, TargetHeight));
-    }
+        if (USkeletalMeshComponent* MyMesh = GetMesh())
+        {
+            FVector CurrentRelLoc = MyMesh->GetRelativeLocation();
+            MyMesh->SetRelativeLocation(FVector(CurrentRelLoc.X, CurrentRelLoc.Y, TargetHeight));
+        }
 
-    if (CameraBoom)
+        if (CameraBoom)
+        {
+            FVector BoomLoc = CameraBoom->GetRelativeLocation();
+            CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, TargetHeight));
+            CameraBoom->TargetArmLength = FMath::Max(CameraBoom->TargetArmLength, 2000.0f);
+        }
+    }
+    else
     {
-        FVector BoomLoc = CameraBoom->GetRelativeLocation();
-        CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, TargetHeight));
-        CameraBoom->TargetArmLength = FMath::Max(CameraBoom->TargetArmLength, 2000.0f);
+        // bUseMeshHeightOffset = false：Actor Z 直接代表飞行高度。
+        // 强制把 Mesh 相对 Z 归零，确保旋转中心与视觉中心一致，
+        // 并消除两个蓝图因在编辑器里存储了不同默认相对 Z 所带来的高度差。
+        if (USkeletalMeshComponent* MyMesh = GetMesh())
+        {
+            FVector RelLoc = MyMesh->GetRelativeLocation();
+            MyMesh->SetRelativeLocation(FVector(RelLoc.X, RelLoc.Y, 0.0f));
+        }
+
+        if (CameraBoom)
+        {
+            CameraBoom->TargetArmLength = FMath::Max(CameraBoom->TargetArmLength, 2000.0f);
+        }
     }
 
     // --- 【修改】使用 Builder 创建 UDP Socket (更稳健) ---
@@ -319,15 +340,21 @@ void AUE5DroneControlCharacter::Tick(float DeltaSeconds)
     // 平滑移动逻辑
     if (USkeletalMeshComponent* MyMesh = GetMesh())
     {
-        FVector CurrentRelLoc = MyMesh->GetRelativeLocation();
-        float NewZ = FMath::FInterpTo(CurrentRelLoc.Z, TargetHeight, DeltaSeconds, InterpSpeed);
-        MyMesh->SetRelativeLocation(FVector(CurrentRelLoc.X, CurrentRelLoc.Y, NewZ));
-
-        // 让摄像头支架 (CameraBoom) 也跟着升降
-        if (CameraBoom)
+        // Mesh/CameraBoom Z 偏移：仅当 bUseMeshHeightOffset=true 时执行。
+        // 对于用 Actor Z 直接代表真实高度的子类（ARealTimeDroneReceiver/AMultiDroneCharacter），
+        // 此分支关闭，Mesh 保持在旋转中心，避免绕下方点旋转的问题。
+        if (bUseMeshHeightOffset)
         {
-            FVector BoomLoc = CameraBoom->GetRelativeLocation();
-            CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, NewZ));
+            FVector CurrentRelLoc = MyMesh->GetRelativeLocation();
+            float NewZ = FMath::FInterpTo(CurrentRelLoc.Z, TargetHeight, DeltaSeconds, InterpSpeed);
+            MyMesh->SetRelativeLocation(FVector(CurrentRelLoc.X, CurrentRelLoc.Y, NewZ));
+
+            // 让摄像头支架 (CameraBoom) 也跟着升降
+            if (CameraBoom)
+            {
+                FVector BoomLoc = CameraBoom->GetRelativeLocation();
+                CameraBoom->SetRelativeLocation(FVector(BoomLoc.X, BoomLoc.Y, NewZ));
+            }
         }
 
         // ---- 本地模拟移动 ----
