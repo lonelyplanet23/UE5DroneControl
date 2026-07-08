@@ -6,6 +6,7 @@
 #include "DroneOps/Core/CesiumCoordinateService.h"
 #include "DroneOps/Network/DroneNetworkManager.h"
 #include "DroneOpsPlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 #include "MultiDroneCharacter.h"
 #include "RealTimeDroneReceiver.h"
 #include "Cesium3DTileset.h"
@@ -194,6 +195,33 @@ UTexture2D* CreateTextureFromCompressedImage(const TArray<uint8>& CompressedImag
 
 	return Texture;
 }
+
+UTexture2D* CreateSolidColorTexture(const FColor& Color, UObject* Outer)
+{
+	if (!Outer)
+	{
+		return nullptr;
+	}
+
+	UTexture2D* Texture = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8, NAME_None);
+	if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() == 0)
+	{
+		return nullptr;
+	}
+
+	Texture->Rename(nullptr, Outer);
+	Texture->SRGB = true;
+	Texture->CompressionSettings = TC_Default;
+	Texture->MipGenSettings = TMGS_NoMipmaps;
+
+	FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+	void* TextureData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+	FMemory::Memcpy(TextureData, &Color, sizeof(FColor));
+	Mip.BulkData.Unlock();
+	Texture->UpdateResource();
+
+	return Texture;
+}
 }
 
 ADroneOpsGameMode::ADroneOpsGameMode()
@@ -202,6 +230,7 @@ ADroneOpsGameMode::ADroneOpsGameMode()
 	DefaultPawnClass = nullptr;
 	ReceiverDroneClass = ARealTimeDroneReceiver::StaticClass();
 	ShadowDroneClass = AMultiDroneCharacter::StaticClass();
+	PrimaryActorTick.bCanEverTick = true;
 }
 
 void ADroneOpsGameMode::PreInitializeComponents()
@@ -291,6 +320,12 @@ void ADroneOpsGameMode::BeginPlay()
 			0.1f,
 			true);
 	}
+}
+
+void ADroneOpsGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	UpdateOfflineRasterPlaneCoverageFromCamera();
 }
 
 void ADroneOpsGameMode::PostLogin(APlayerController* NewPlayer)
@@ -785,7 +820,8 @@ void ADroneOpsGameMode::EnsureOfflineCesiumSunSky(double Latitude, double Longit
 	bool bUseLocalTileServer = false;
 	bool bUseOfflineCesiumSunSky = true;
 	double SolarTime = 13.0;
-	float SkyLightIntensity = 2.0f;
+	float SkyLightIntensity = 0.45f;
+	float DirectionalLightIntensity = 2.0f;
 
 	if (GConfig)
 	{
@@ -793,6 +829,7 @@ void ADroneOpsGameMode::EnsureOfflineCesiumSunSky(double Latitude, double Longit
 		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("UseOfflineCesiumSunSky"), bUseOfflineCesiumSunSky, GEngineIni);
 		GConfig->GetDouble(TEXT("CesiumTileServer"), TEXT("OfflineSunSkySolarTime"), SolarTime, GEngineIni);
 		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineSunSkySkyLightIntensity"), SkyLightIntensity, GEngineIni);
+		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineSunSkyDirectionalLightIntensity"), DirectionalLightIntensity, GEngineIni);
 	}
 
 	if (!bUseLocalTileServer || !bUseOfflineCesiumSunSky)
@@ -835,16 +872,294 @@ void ADroneOpsGameMode::EnsureOfflineCesiumSunSky(double Latitude, double Longit
 	SunSky->EstimateTimeZoneForLongitude(Longitude);
 	if (SunSky->SkyLight)
 	{
-		SunSky->SkyLight->SetIntensity(SkyLightIntensity);
+		SunSky->SkyLight->SetIntensity(FMath::Clamp(SkyLightIntensity, 0.0f, 10.0f));
 		SunSky->SkyLight->SetVisibility(true);
+	}
+	if (SunSky->DirectionalLight)
+	{
+		SunSky->DirectionalLight->SetIntensity(FMath::Clamp(DirectionalLightIntensity, 0.0f, 25.0f));
+		SunSky->DirectionalLight->SetVisibility(true);
 	}
 	SunSky->UpdateSun();
 
-	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Ensured CesiumSunSky for offline raster mode at lat=%.6f lon=%.6f solarTime=%.2f skylight=%.2f."),
+	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Ensured CesiumSunSky for offline raster mode at lat=%.6f lon=%.6f solarTime=%.2f skylight=%.2f directional=%.2f."),
 		Latitude,
 		Longitude,
 		SunSky->SolarTime,
-		SkyLightIntensity);
+		SkyLightIntensity,
+		DirectionalLightIntensity);
+}
+
+UTexture2D* ADroneOpsGameMode::GetOfflineRasterFallbackTexture()
+{
+	if (!OfflineRasterFallbackTexture)
+	{
+		OfflineRasterFallbackTexture = CreateSolidColorTexture(FColor(96, 104, 96, 255), this);
+	}
+	return OfflineRasterFallbackTexture;
+}
+
+void ADroneOpsGameMode::PruneOfflineRasterTileCache()
+{
+	OfflineRasterTileMaxCacheItems = FMath::Max(32, OfflineRasterTileMaxCacheItems);
+	while (OfflineRasterTileTextureCache.Num() > OfflineRasterTileMaxCacheItems)
+	{
+		FString OldestUrl;
+		int32 OldestFrame = TNumericLimits<int32>::Max();
+		for (const TPair<FString, int32>& Entry : OfflineRasterTileLastUsedFrame)
+		{
+			if (OfflineRasterTileTextureCache.Contains(Entry.Key) && Entry.Value < OldestFrame)
+			{
+				OldestUrl = Entry.Key;
+				OldestFrame = Entry.Value;
+			}
+		}
+
+		if (OldestUrl.IsEmpty())
+		{
+			break;
+		}
+
+		OfflineRasterTileTextureCache.Remove(OldestUrl);
+		OfflineRasterTileLastUsedFrame.Remove(OldestUrl);
+		OfflineRasterTileRetryCounts.Remove(OldestUrl);
+	}
+}
+
+void ADroneOpsGameMode::RequestOfflineRasterTile(const FString& TileUrl, UMaterialInstanceDynamic* DynamicMaterial)
+{
+	if (TileUrl.IsEmpty() || !DynamicMaterial)
+	{
+		return;
+	}
+
+	++OfflineRasterTileCacheFrame;
+
+	if (TObjectPtr<UTexture2D>* CachedTexture = OfflineRasterTileTextureCache.Find(TileUrl))
+	{
+		if (CachedTexture->Get())
+		{
+			DynamicMaterial->SetTextureParameterValue(TEXT("TileTexture"), CachedTexture->Get());
+			OfflineRasterTileLastUsedFrame.FindOrAdd(TileUrl) = OfflineRasterTileCacheFrame;
+			return;
+		}
+	}
+
+	if (UTexture2D* FallbackTexture = GetOfflineRasterFallbackTexture())
+	{
+		DynamicMaterial->SetTextureParameterValue(TEXT("TileTexture"), FallbackTexture);
+	}
+
+	OfflineRasterTileWaitingMaterials.FindOrAdd(TileUrl).Add(DynamicMaterial);
+	if (OfflineRasterTileRequestsInFlight.Contains(TileUrl))
+	{
+		return;
+	}
+
+	const int32 RetryCount = OfflineRasterTileRetryCounts.FindRef(TileUrl);
+	if (RetryCount >= OfflineRasterTileMaxRetries)
+	{
+		return;
+	}
+
+	OfflineRasterTileRequestsInFlight.Add(TileUrl);
+
+	TWeakObjectPtr<ADroneOpsGameMode> WeakThis(this);
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+	Request->SetURL(TileUrl);
+	Request->SetVerb(TEXT("GET"));
+	Request->SetTimeout(8.0f);
+	Request->OnProcessRequestComplete().BindLambda([WeakThis, TileUrl](FHttpRequestPtr CompletedRequest, FHttpResponsePtr Response, bool bSucceeded)
+	{
+		if (!WeakThis.IsValid())
+		{
+			return;
+		}
+
+		ADroneOpsGameMode* GameMode = WeakThis.Get();
+		GameMode->OfflineRasterTileRequestsInFlight.Remove(TileUrl);
+
+		const bool bHttpOk = bSucceeded &&
+			Response.IsValid() &&
+			Response->GetResponseCode() < 400 &&
+			Response->GetContent().Num() >= GameMode->OfflineRasterTileMinimumBytes;
+		UTexture2D* TileTexture = bHttpOk ? CreateTextureFromCompressedImage(Response->GetContent(), GameMode) : nullptr;
+		if (TileTexture)
+		{
+			GameMode->OfflineRasterTileTextureCache.Add(TileUrl, TileTexture);
+			GameMode->OfflineRasterTileLastUsedFrame.FindOrAdd(TileUrl) = ++GameMode->OfflineRasterTileCacheFrame;
+			GameMode->OfflineRasterTileRetryCounts.Remove(TileUrl);
+
+			if (TArray<TWeakObjectPtr<UMaterialInstanceDynamic>>* WaitingMaterials = GameMode->OfflineRasterTileWaitingMaterials.Find(TileUrl))
+			{
+				for (const TWeakObjectPtr<UMaterialInstanceDynamic>& WaitingMaterial : *WaitingMaterials)
+				{
+					if (WaitingMaterial.IsValid())
+					{
+						WaitingMaterial->SetTextureParameterValue(TEXT("TileTexture"), TileTexture);
+					}
+				}
+			}
+			GameMode->OfflineRasterTileWaitingMaterials.Remove(TileUrl);
+			GameMode->PruneOfflineRasterTileCache();
+			return;
+		}
+
+		const int32 NewRetryCount = GameMode->OfflineRasterTileRetryCounts.FindOrAdd(TileUrl) + 1;
+		GameMode->OfflineRasterTileRetryCounts.Add(TileUrl, NewRetryCount);
+		UE_LOG(LogTemp, Warning, TEXT("DroneOpsGameMode: Offline raster tile request failed '%s' status=%d retry=%d/%d"),
+			CompletedRequest.IsValid() ? *CompletedRequest->GetURL() : *TileUrl,
+			Response.IsValid() ? Response->GetResponseCode() : -1,
+			NewRetryCount,
+			GameMode->OfflineRasterTileMaxRetries);
+
+		if (NewRetryCount < GameMode->OfflineRasterTileMaxRetries && GameMode->GetWorld())
+		{
+			FTimerHandle RetryTimerHandle;
+			TWeakObjectPtr<ADroneOpsGameMode> RetryWeakThis(GameMode);
+			GameMode->GetWorld()->GetTimerManager().SetTimer(RetryTimerHandle, FTimerDelegate::CreateLambda([RetryWeakThis, TileUrl]()
+			{
+				if (!RetryWeakThis.IsValid())
+				{
+					return;
+				}
+
+				if (TArray<TWeakObjectPtr<UMaterialInstanceDynamic>>* WaitingMaterials = RetryWeakThis->OfflineRasterTileWaitingMaterials.Find(TileUrl))
+				{
+					for (const TWeakObjectPtr<UMaterialInstanceDynamic>& WaitingMaterial : *WaitingMaterials)
+					{
+						if (WaitingMaterial.IsValid())
+						{
+							RetryWeakThis->RequestOfflineRasterTile(TileUrl, WaitingMaterial.Get());
+							return;
+						}
+					}
+				}
+			}), GameMode->OfflineRasterTileRetryDelaySeconds, false);
+		}
+	});
+	Request->ProcessRequest();
+}
+
+int32 ADroneOpsGameMode::ComputeOfflineRasterPlaneRadiusForCamera(int32 Zoom, int32 BaseRadius, double Latitude, double HeightMeters) const
+{
+	bool bDynamicCoverage = true;
+	int32 PaddingTiles = 2;
+	int32 MaxDynamicRadius = 32;
+	float FootprintScale = 1.35f;
+
+	if (GConfig)
+	{
+		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneDynamicCoverage"), bDynamicCoverage, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneCoveragePaddingTiles"), PaddingTiles, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneMaxDynamicRadius"), MaxDynamicRadius, GEngineIni);
+		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneFootprintScale"), FootprintScale, GEngineIni);
+	}
+
+	if (!bDynamicCoverage)
+	{
+		return BaseRadius;
+	}
+
+	UWorld* World = GetWorld();
+	const APlayerController* PlayerController = World ? World->GetFirstPlayerController() : nullptr;
+	const APlayerCameraManager* CameraManager = PlayerController ? PlayerController->PlayerCameraManager : nullptr;
+	if (!CameraManager)
+	{
+		return BaseRadius;
+	}
+
+	double PlaneZ = 0.0;
+	if (World)
+	{
+		for (TActorIterator<ACesiumGeoreference> It(World); It; ++It)
+		{
+			if (IsValid(*It))
+			{
+				PlaneZ = It->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(OfflineRasterPlaneLongitude, OfflineRasterPlaneLatitude, HeightMeters)).Z;
+				break;
+			}
+		}
+	}
+
+	const FVector CameraLocation = CameraManager->GetCameraLocation();
+	const double CameraHeightMeters = FMath::Max(0.0, FMath::Abs(CameraLocation.Z - PlaneZ) / 100.0);
+	const double FovRadians = FMath::DegreesToRadians(FMath::Clamp(CameraManager->GetFOVAngle(), 30.0f, 120.0f));
+	const double FootprintRadiusMeters = FMath::Tan(FovRadians * 0.5) * CameraHeightMeters * static_cast<double>(FMath::Max(0.5f, FootprintScale));
+	const double TileWidthMeters = (40075016.68557849 * FMath::Max(0.1, FMath::Cos(FMath::DegreesToRadians(Latitude)))) / FMath::Pow(2.0, static_cast<double>(FMath::Clamp(Zoom, 0, 30)));
+	const int32 DynamicRadius = static_cast<int32>(FMath::CeilToDouble(FootprintRadiusMeters / FMath::Max(1.0, TileWidthMeters))) + FMath::Max(0, PaddingTiles);
+
+	return FMath::Clamp(FMath::Max(BaseRadius, DynamicRadius), BaseRadius, FMath::Max(BaseRadius, MaxDynamicRadius));
+}
+
+void ADroneOpsGameMode::UpdateOfflineRasterPlaneCoverageFromCamera()
+{
+	if (!bOfflineRasterPlaneActive)
+	{
+		return;
+	}
+
+	bool bUseLocalTileServer = false;
+	bool bDynamicCoverage = true;
+	bool bUsePlaneLod = true;
+	float UpdateIntervalSeconds = 1.0f;
+	int32 FarZoom = 16;
+	int32 FarRadius = 8;
+	int32 MidZoom = 17;
+	int32 MidRadius = 6;
+	int32 NearZoom = 18;
+	int32 NearRadius = 4;
+	int32 PlaneZoom = 18;
+	int32 PlaneRadius = 4;
+
+	if (GConfig)
+	{
+		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("UseLocalTileServer"), bUseLocalTileServer, GEngineIni);
+		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneDynamicCoverage"), bDynamicCoverage, GEngineIni);
+		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("UseOfflineRasterPlaneLod"), bUsePlaneLod, GEngineIni);
+		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneDynamicUpdateInterval"), UpdateIntervalSeconds, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneFarZoom"), FarZoom, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneFarRadius"), FarRadius, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneMidZoom"), MidZoom, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneMidRadius"), MidRadius, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneNearZoom"), NearZoom, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneNearRadius"), NearRadius, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneZoom"), PlaneZoom, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneRadius"), PlaneRadius, GEngineIni);
+	}
+
+	if (!bUseLocalTileServer || !bDynamicCoverage)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const double NowSeconds = World->GetTimeSeconds();
+	if (NowSeconds - LastOfflineRasterPlaneCoverageUpdateSeconds < FMath::Max(0.25f, UpdateIntervalSeconds))
+	{
+		return;
+	}
+	LastOfflineRasterPlaneCoverageUpdateSeconds = NowSeconds;
+
+	const int32 DesiredFarRadius = ComputeOfflineRasterPlaneRadiusForCamera(FarZoom, FarRadius, OfflineRasterPlaneLatitude, OfflineRasterPlaneHeightMeters);
+	const int32 DesiredMidRadius = ComputeOfflineRasterPlaneRadiusForCamera(MidZoom, MidRadius, OfflineRasterPlaneLatitude, OfflineRasterPlaneHeightMeters);
+	const int32 DesiredNearRadius = ComputeOfflineRasterPlaneRadiusForCamera(NearZoom, NearRadius, OfflineRasterPlaneLatitude, OfflineRasterPlaneHeightMeters);
+	const int32 DesiredPlaneRadius = ComputeOfflineRasterPlaneRadiusForCamera(PlaneZoom, PlaneRadius, OfflineRasterPlaneLatitude, OfflineRasterPlaneHeightMeters);
+	const FString DesiredKey = bUsePlaneLod
+		? FString::Printf(TEXT("lod:%d/%d:%d/%d:%d/%d"), FarZoom, DesiredFarRadius, MidZoom, DesiredMidRadius, NearZoom, DesiredNearRadius)
+		: FString::Printf(TEXT("single:%d/%d"), PlaneZoom, DesiredPlaneRadius);
+
+	if (DesiredKey.Equals(LastOfflineRasterPlaneCoverageKey, ESearchCase::CaseSensitive))
+	{
+		return;
+	}
+
+	CreateOfflineRasterPlaneAround(OfflineRasterPlaneLatitude, OfflineRasterPlaneLongitude, OfflineRasterPlaneHeightMeters);
 }
 
 void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double Longitude, double HeightMeters)
@@ -866,6 +1181,7 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 	int32 PlaneMaxTiles = 600;
 	float PlaneVerticalOffsetCm = 0.0f;
 	float PlaneLodVerticalStepCm = 2.0f;
+	float PlaneTileBrightness = 0.72f;
 	bool bPlaneCollision = true;
 
 	if (GConfig)
@@ -887,13 +1203,28 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneMaxTiles"), PlaneMaxTiles, GEngineIni);
 		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneVerticalOffsetCm"), PlaneVerticalOffsetCm, GEngineIni);
 		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneLodVerticalStepCm"), PlaneLodVerticalStepCm, GEngineIni);
+		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneTileBrightness"), PlaneTileBrightness, GEngineIni);
 		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneCollision"), bPlaneCollision, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterTileMaxCacheItems"), OfflineRasterTileMaxCacheItems, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterTileMaxRetries"), OfflineRasterTileMaxRetries, GEngineIni);
+		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterTileMinimumBytes"), OfflineRasterTileMinimumBytes, GEngineIni);
+		GConfig->GetFloat(TEXT("CesiumTileServer"), TEXT("OfflineRasterTileRetryDelaySeconds"), OfflineRasterTileRetryDelaySeconds, GEngineIni);
 	}
 
 	if (!bUseLocalTileServer || !bUseOfflineRasterPlane)
 	{
 		return;
 	}
+
+	OfflineRasterPlaneLatitude = Latitude;
+	OfflineRasterPlaneLongitude = Longitude;
+	OfflineRasterPlaneHeightMeters = HeightMeters;
+	bOfflineRasterPlaneActive = true;
+	OfflineRasterTileMaxCacheItems = FMath::Clamp(OfflineRasterTileMaxCacheItems, 32, 8192);
+	OfflineRasterTileMaxRetries = FMath::Clamp(OfflineRasterTileMaxRetries, 1, 8);
+	OfflineRasterTileMinimumBytes = FMath::Clamp(OfflineRasterTileMinimumBytes, 0, 1024 * 1024);
+	OfflineRasterTileRetryDelaySeconds = FMath::Clamp(OfflineRasterTileRetryDelaySeconds, 0.1f, 30.0f);
+	PlaneTileBrightness = FMath::Clamp(PlaneTileBrightness, 0.05f, 2.0f);
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -938,13 +1269,17 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 	TArray<FOfflineRasterPlaneLod> LodLevels;
 	if (bUsePlaneLod)
 	{
-		LodLevels.Add({ FMath::Clamp(PlaneFarZoom, 0, 30), FMath::Clamp(PlaneFarRadius, 0, 32), 0 });
-		LodLevels.Add({ FMath::Clamp(PlaneMidZoom, 0, 30), FMath::Clamp(PlaneMidRadius, 0, 32), 1 });
-		LodLevels.Add({ FMath::Clamp(PlaneNearZoom, 0, 30), FMath::Clamp(PlaneNearRadius, 0, 32), 2 });
+		const int32 ClampedFarZoom = FMath::Clamp(PlaneFarZoom, 0, 30);
+		const int32 ClampedMidZoom = FMath::Clamp(PlaneMidZoom, 0, 30);
+		const int32 ClampedNearZoom = FMath::Clamp(PlaneNearZoom, 0, 30);
+		LodLevels.Add({ ClampedFarZoom, ComputeOfflineRasterPlaneRadiusForCamera(ClampedFarZoom, FMath::Clamp(PlaneFarRadius, 0, 32), Latitude, HeightMeters), 0 });
+		LodLevels.Add({ ClampedMidZoom, ComputeOfflineRasterPlaneRadiusForCamera(ClampedMidZoom, FMath::Clamp(PlaneMidRadius, 0, 32), Latitude, HeightMeters), 1 });
+		LodLevels.Add({ ClampedNearZoom, ComputeOfflineRasterPlaneRadiusForCamera(ClampedNearZoom, FMath::Clamp(PlaneNearRadius, 0, 32), Latitude, HeightMeters), 2 });
 	}
 	else
 	{
-		LodLevels.Add({ FMath::Clamp(PlaneZoom, 0, 30), FMath::Clamp(PlaneRadius, 0, 32), 0 });
+		const int32 ClampedPlaneZoom = FMath::Clamp(PlaneZoom, 0, 30);
+		LodLevels.Add({ ClampedPlaneZoom, ComputeOfflineRasterPlaneRadiusForCamera(ClampedPlaneZoom, FMath::Clamp(PlaneRadius, 0, 32), Latitude, HeightMeters), 0 });
 	}
 
 	LodLevels.Sort([](const FOfflineRasterPlaneLod& A, const FOfflineRasterPlaneLod& B)
@@ -958,6 +1293,9 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 		return;
 	}
 	PlaneLodVerticalStepCm = FMath::Clamp(PlaneLodVerticalStepCm, 0.0f, 50.0f);
+	LastOfflineRasterPlaneCoverageKey = bUsePlaneLod && LodLevels.Num() >= 3
+		? FString::Printf(TEXT("lod:%d/%d:%d/%d:%d/%d"), LodLevels[0].Zoom, LodLevels[0].Radius, LodLevels[1].Zoom, LodLevels[1].Radius, LodLevels[2].Zoom, LodLevels[2].Radius)
+		: FString::Printf(TEXT("single:%d/%d"), LodLevels[0].Zoom, LodLevels[0].Radius);
 
 	const FName PlaneTag(TEXT("DroneOpsOfflineRasterPlane"));
 	for (TActorIterator<AActor> It(World); It; ++It)
@@ -1073,40 +1411,10 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 				{
 					UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(PlaneMaterial, TileMesh);
 					TileMesh->SetMaterial(0, DynamicMaterial);
+					DynamicMaterial->SetScalarParameterValue(TEXT("TileBrightness"), PlaneTileBrightness);
 
 					const FString TileUrl = BuildRasterTileUrlFromTemplate(RasterTemplateUrl, Lod.Zoom, TileX, TileY);
-					TWeakObjectPtr<UProceduralMeshComponent> WeakTileMesh(TileMesh);
-					TWeakObjectPtr<UMaterialInstanceDynamic> WeakMaterial(DynamicMaterial);
-					TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-					Request->SetURL(TileUrl);
-					Request->SetVerb(TEXT("GET"));
-					Request->SetTimeout(8.0f);
-					Request->OnProcessRequestComplete().BindLambda([WeakTileMesh, WeakMaterial](FHttpRequestPtr CompletedRequest, FHttpResponsePtr Response, bool bSucceeded)
-					{
-						if (!bSucceeded || !Response.IsValid() || Response->GetResponseCode() >= 400)
-						{
-							UE_LOG(LogTemp, Warning, TEXT("DroneOpsGameMode: Offline raster plane tile request failed '%s' status=%d"),
-								CompletedRequest.IsValid() ? *CompletedRequest->GetURL() : TEXT("<invalid>"),
-								Response.IsValid() ? Response->GetResponseCode() : -1);
-							return;
-						}
-
-						if (!WeakTileMesh.IsValid() || !WeakMaterial.IsValid())
-						{
-							return;
-						}
-
-						UTexture2D* TileTexture = CreateTextureFromCompressedImage(Response->GetContent(), WeakTileMesh.Get());
-						if (!TileTexture)
-						{
-							UE_LOG(LogTemp, Warning, TEXT("DroneOpsGameMode: Failed to decode offline raster tile '%s'."),
-								CompletedRequest.IsValid() ? *CompletedRequest->GetURL() : TEXT("<invalid>"));
-							return;
-						}
-
-						WeakMaterial->SetTextureParameterValue(TEXT("TileTexture"), TileTexture);
-					});
-					Request->ProcessRequest();
+					RequestOfflineRasterTile(TileUrl, DynamicMaterial);
 				}
 
 				++CreatedTiles;

@@ -11,6 +11,8 @@ class APawn;
 class AController;
 class ARealTimeDroneReceiver;
 class AMultiDroneCharacter;
+class UMaterialInstanceDynamic;
+class UTexture2D;
 
 /**
  * Game mode for drone operations
@@ -26,6 +28,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot) override;
 	virtual void PreInitializeComponents() override;
@@ -83,6 +86,21 @@ private:
 	/** Ensure the offline map still has Cesium sky, sunlight, and skylight for normal material rendering. */
 	void EnsureOfflineCesiumSunSky(double Latitude, double Longitude);
 
+	/** Expand/rebuild the offline raster plane when the camera rises enough that the current coverage is visibly too small. */
+	void UpdateOfflineRasterPlaneCoverageFromCamera();
+
+	/** Estimate how many tiles are needed to cover the camera's current ground footprint for a given zoom. */
+	int32 ComputeOfflineRasterPlaneRadiusForCamera(int32 Zoom, int32 BaseRadius, double Latitude, double HeightMeters) const;
+
+	/** Request a tile texture with in-memory caching, retries, and a fallback texture while loading. */
+	void RequestOfflineRasterTile(const FString& TileUrl, UMaterialInstanceDynamic* DynamicMaterial);
+
+	/** Return a small neutral texture used before/when an offline tile request fails. */
+	UTexture2D* GetOfflineRasterFallbackTexture();
+
+	/** Keep the recent tile texture cache bounded. */
+	void PruneOfflineRasterTileCache();
+
 	/** Called by CesiumGeoreference::OnGeoreferenceUpdated after origin change. */
 	UFUNCTION()
 	void OnGeoreferenceUpdated();
@@ -92,4 +110,27 @@ private:
 
 	/** True when we deferred SpawnReceiversFromRegistry to wait for Georeference update. */
 	bool bPendingSpawnAfterGeoreferenceUpdate = false;
+
+	bool bOfflineRasterPlaneActive = false;
+	double OfflineRasterPlaneLatitude = 0.0;
+	double OfflineRasterPlaneLongitude = 0.0;
+	double OfflineRasterPlaneHeightMeters = 0.0;
+	double LastOfflineRasterPlaneCoverageUpdateSeconds = 0.0;
+	FString LastOfflineRasterPlaneCoverageKey;
+	int32 OfflineRasterTileCacheFrame = 0;
+	int32 OfflineRasterTileMaxCacheItems = 1024;
+	int32 OfflineRasterTileMaxRetries = 2;
+	int32 OfflineRasterTileMinimumBytes = 1024;
+	float OfflineRasterTileRetryDelaySeconds = 1.0f;
+
+	UPROPERTY(Transient)
+	TMap<FString, TObjectPtr<UTexture2D>> OfflineRasterTileTextureCache;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> OfflineRasterFallbackTexture;
+
+	TMap<FString, int32> OfflineRasterTileLastUsedFrame;
+	TMap<FString, int32> OfflineRasterTileRetryCounts;
+	TSet<FString> OfflineRasterTileRequestsInFlight;
+	TMap<FString, TArray<TWeakObjectPtr<UMaterialInstanceDynamic>>> OfflineRasterTileWaitingMaterials;
 };
