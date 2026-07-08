@@ -74,6 +74,15 @@ private:
 	/** Read [CesiumTileServer] config and switch Cesium URL-based sources to the local tile server when enabled. */
 	void ApplyCesiumTileServerConfig();
 
+	/** Warm local raster tiles around a geospatial point so nearby map imagery is ready when the view moves. */
+	void PrefetchLocalRasterTilesAround(double Latitude, double Longitude);
+
+	/** Create a flat runtime mesh around the georeference origin and project local raster tiles onto it. */
+	void CreateOfflineRasterPlaneAround(double Latitude, double Longitude, double HeightMeters);
+
+	/** Ensure the offline map still has Cesium sky, sunlight, and skylight for normal material rendering. */
+	void EnsureOfflineCesiumSunSky(double Latitude, double Longitude);
+
 	/** Called by CesiumGeoreference::OnGeoreferenceUpdated after origin change. */
 	UFUNCTION()
 	void OnGeoreferenceUpdated();

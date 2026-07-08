@@ -30,7 +30,8 @@ public class UE5DroneControl : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"CesiumRuntime",
-			"HTTP"
+			"ProceduralMeshComponent",
+			"ImageWrapper"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
