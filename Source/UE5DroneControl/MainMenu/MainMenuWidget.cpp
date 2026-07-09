@@ -204,6 +204,26 @@ void UMainMenuWidget::LoadSettings(FString& OutBackendAddress, float& OutMapCent
 	OutMapCenterAlt   = 43.0f;
 	OutbUseCesium     = true;
 }
+
+void UMainMenuWidget::LoadMapSettings(FDroneMapSettings& OutSettings) const
+{
+	UDroneMapSettingsBlueprintLibrary::LoadDroneMapSettings(OutSettings);
+}
+
+void UMainMenuWidget::SaveMapSettings(const FDroneMapSettings& Settings)
+{
+	UDroneMapSettingsBlueprintLibrary::SaveDroneMapSettings(Settings);
+}
+
+void UMainMenuWidget::SetOfflineMapEnabled(bool bUseOfflineMap)
+{
+	UDroneMapSettingsBlueprintLibrary::SetOfflineMapEnabled(this, bUseOfflineMap, false);
+}
+
+bool UMainMenuWidget::IsOfflineMapEnabled() const
+{
+	return UDroneMapSettingsBlueprintLibrary::IsOfflineMapEnabled();
+}
 // ---------------------------------------------------------------------------
 // 导航
 // ---------------------------------------------------------------------------

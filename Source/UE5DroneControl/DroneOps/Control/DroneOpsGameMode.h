@@ -26,6 +26,21 @@ class UE5DRONECONTROL_API ADroneOpsGameMode : public AGameModeBase
 public:
 	ADroneOpsGameMode();
 
+	/** Apply the current [CesiumTileServer] config to the running map. Safe to call from UI. */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Map")
+	void ApplyMapModeFromConfig(bool bRebuildOfflinePlane = true);
+
+	/** Switch between online Cesium imagery and the offline Ovit raster plane at runtime. */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Map")
+	void SetOfflineMapModeRuntime(bool bUseOfflineMap, bool bRebuildNow = true);
+
+	/**
+	 * Validate that Cesium WGS84 transforms and offline raster tile placement agree at the current origin.
+	 * Returns true when the measured round-trip errors are within ToleranceMeters.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Map")
+	bool ValidateMapCoordinateAlignment(float ToleranceMeters, FString& OutReport) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -82,6 +97,9 @@ private:
 
 	/** Create a flat runtime mesh around the georeference origin and project local raster tiles onto it. */
 	void CreateOfflineRasterPlaneAround(double Latitude, double Longitude, double HeightMeters);
+
+	/** Destroy the runtime offline raster plane and clear its transient tile state. */
+	void DestroyOfflineRasterPlane();
 
 	/** Ensure the offline map still has Cesium sky, sunlight, and skylight for normal material rendering. */
 	void EnsureOfflineCesiumSunSky(double Latitude, double Longitude);

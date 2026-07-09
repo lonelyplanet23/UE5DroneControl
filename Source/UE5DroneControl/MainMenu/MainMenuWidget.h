@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "DroneOps/Control/DroneMapSettingsBlueprintLibrary.h"
 #include "DroneOps/Network/DroneHttpClient.h"
 #include "MainMenuWidget.generated.h"
 
@@ -91,6 +92,21 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MainMenu|Settings")
 	void LoadSettings(FString& OutBackendAddress, float& OutMapCenterLat, float& OutMapCenterLon, float& OutMapCenterAlt, bool& OutbUseCesium) const;
+
+	/** Load map source/tile settings for MainMenu controls. */
+	UFUNCTION(BlueprintCallable, Category = "MainMenu|MapSettings")
+	void LoadMapSettings(FDroneMapSettings& OutSettings) const;
+
+	/** Save map source/tile settings from MainMenu controls. */
+	UFUNCTION(BlueprintCallable, Category = "MainMenu|MapSettings")
+	void SaveMapSettings(const FDroneMapSettings& Settings);
+
+	/** Convenience toggle for Online/Cesium vs Offline/Ovit map mode. */
+	UFUNCTION(BlueprintCallable, Category = "MainMenu|MapSettings")
+	void SetOfflineMapEnabled(bool bUseOfflineMap);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MainMenu|MapSettings")
+	bool IsOfflineMapEnabled() const;
 
 	// -----------------------------------------------------------------------
 	// 导航（供蓝图按钮 OnClicked 绑定）

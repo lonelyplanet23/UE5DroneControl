@@ -42,7 +42,7 @@ public:
 	/**
 	 * Convert UE5 world coordinates to geographic coordinates (optional, for Cesium)
 	 * @param WorldLocation UE5 world location in centimeters
-	 * @return Geographic location (Latitude, Longitude, Altitude)
+	 * @return Geographic location (Longitude, Latitude, HeightMeters), matching ACesiumGeoreference.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Coordinate")
 	FVector WorldToGeographic(const FVector& WorldLocation) const;

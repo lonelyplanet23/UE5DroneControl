@@ -1,2 +1,2 @@
-*.umap binary
-*.uasset binary
+*.umap filter=lfs diff=lfs merge=lfs -text
+*.uasset filter=lfs diff=lfs merge=lfs -text

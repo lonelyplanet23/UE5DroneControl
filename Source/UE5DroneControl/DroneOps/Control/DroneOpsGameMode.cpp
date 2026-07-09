@@ -2,6 +2,7 @@
 
 #include "DroneOpsGameMode.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
+#include "DroneOps/Core/ICoordinateService.h"
 #include "DroneOps/Core/SimpleCoordinateService.h"
 #include "DroneOps/Core/CesiumCoordinateService.h"
 #include "DroneOps/Network/DroneNetworkManager.h"
@@ -141,6 +142,144 @@ double WebMercatorTileYToLatitude(int64 Y, int32 Zoom)
 	const double N = FMath::Pow(2.0, static_cast<double>(Zoom));
 	const double MercatorN = UE_DOUBLE_PI - (2.0 * UE_DOUBLE_PI * static_cast<double>(Y) / N);
 	return FMath::RadiansToDegrees(FMath::Atan(FMath::Sinh(MercatorN)));
+}
+
+bool IsInsideChinaForGcj02(double Longitude, double Latitude)
+{
+	return Longitude >= 72.004 && Longitude <= 137.8347 && Latitude >= 0.8293 && Latitude <= 55.8271;
+}
+
+double TransformGcjLatitude(double X, double Y)
+{
+	double Ret = -100.0 + 2.0 * X + 3.0 * Y + 0.2 * Y * Y + 0.1 * X * Y + 0.2 * FMath::Sqrt(FMath::Abs(X));
+	Ret += (20.0 * FMath::Sin(6.0 * X * UE_DOUBLE_PI) + 20.0 * FMath::Sin(2.0 * X * UE_DOUBLE_PI)) * 2.0 / 3.0;
+	Ret += (20.0 * FMath::Sin(Y * UE_DOUBLE_PI) + 40.0 * FMath::Sin(Y / 3.0 * UE_DOUBLE_PI)) * 2.0 / 3.0;
+	Ret += (160.0 * FMath::Sin(Y / 12.0 * UE_DOUBLE_PI) + 320.0 * FMath::Sin(Y * UE_DOUBLE_PI / 30.0)) * 2.0 / 3.0;
+	return Ret;
+}
+
+double TransformGcjLongitude(double X, double Y)
+{
+	double Ret = 300.0 + X + 2.0 * Y + 0.1 * X * X + 0.1 * X * Y + 0.1 * FMath::Sqrt(FMath::Abs(X));
+	Ret += (20.0 * FMath::Sin(6.0 * X * UE_DOUBLE_PI) + 20.0 * FMath::Sin(2.0 * X * UE_DOUBLE_PI)) * 2.0 / 3.0;
+	Ret += (20.0 * FMath::Sin(X * UE_DOUBLE_PI) + 40.0 * FMath::Sin(X / 3.0 * UE_DOUBLE_PI)) * 2.0 / 3.0;
+	Ret += (150.0 * FMath::Sin(X / 12.0 * UE_DOUBLE_PI) + 300.0 * FMath::Sin(X / 30.0 * UE_DOUBLE_PI)) * 2.0 / 3.0;
+	return Ret;
+}
+
+FVector2D Wgs84ToGcj02(double Longitude, double Latitude)
+{
+	if (!IsInsideChinaForGcj02(Longitude, Latitude))
+	{
+		return FVector2D(Longitude, Latitude);
+	}
+
+	constexpr double SemiMajorAxis = 6378245.0;
+	constexpr double EccentricitySquared = 0.00669342162296594323;
+	double DLat = TransformGcjLatitude(Longitude - 105.0, Latitude - 35.0);
+	double DLon = TransformGcjLongitude(Longitude - 105.0, Latitude - 35.0);
+	const double RadLat = FMath::DegreesToRadians(Latitude);
+	double Magic = FMath::Sin(RadLat);
+	Magic = 1.0 - EccentricitySquared * Magic * Magic;
+	const double SqrtMagic = FMath::Sqrt(Magic);
+	DLat = (DLat * 180.0) / ((SemiMajorAxis * (1.0 - EccentricitySquared)) / (Magic * SqrtMagic) * UE_DOUBLE_PI);
+	DLon = (DLon * 180.0) / (SemiMajorAxis / SqrtMagic * FMath::Cos(RadLat) * UE_DOUBLE_PI);
+	return FVector2D(Longitude + DLon, Latitude + DLat);
+}
+
+FVector2D Gcj02ToWgs84(double Longitude, double Latitude)
+{
+	if (!IsInsideChinaForGcj02(Longitude, Latitude))
+	{
+		return FVector2D(Longitude, Latitude);
+	}
+
+	double WgsLongitude = Longitude;
+	double WgsLatitude = Latitude;
+	for (int32 Iteration = 0; Iteration < 3; ++Iteration)
+	{
+		const FVector2D Gcj = Wgs84ToGcj02(WgsLongitude, WgsLatitude);
+		WgsLongitude -= Gcj.X - Longitude;
+		WgsLatitude -= Gcj.Y - Latitude;
+	}
+	return FVector2D(WgsLongitude, WgsLatitude);
+}
+
+bool RasterCoordinateSystemUsesGcj02(const FString& CoordinateSystem)
+{
+	return CoordinateSystem.Equals(TEXT("GCJ02"), ESearchCase::IgnoreCase) ||
+		CoordinateSystem.Equals(TEXT("GCJ-02"), ESearchCase::IgnoreCase) ||
+		CoordinateSystem.Contains(TEXT("China"), ESearchCase::IgnoreCase) ||
+		CoordinateSystem.Contains(TEXT("Mercator(china)"), ESearchCase::IgnoreCase);
+}
+
+double EstimateLonLatDistanceMeters(double LongitudeA, double LatitudeA, double LongitudeB, double LatitudeB)
+{
+	const double MeanLatitude = (LatitudeA + LatitudeB) * 0.5;
+	const double MetersPerDegreeLatitude = 111320.0;
+	const double MetersPerDegreeLongitude = 111320.0 * FMath::Cos(FMath::DegreesToRadians(MeanLatitude));
+	const double DX = (LongitudeB - LongitudeA) * MetersPerDegreeLongitude;
+	const double DY = (LatitudeB - LatitudeA) * MetersPerDegreeLatitude;
+	return FMath::Sqrt(DX * DX + DY * DY);
+}
+
+FVector2D OffsetWgs84ByMeters(double Longitude, double Latitude, double EastMeters, double NorthMeters)
+{
+	const double MetersPerDegreeLatitude = 111320.0;
+	const double MetersPerDegreeLongitude = FMath::Max(1.0, 111320.0 * FMath::Cos(FMath::DegreesToRadians(Latitude)));
+	return FVector2D(
+		Longitude + (EastMeters / MetersPerDegreeLongitude),
+		Latitude + (NorthMeters / MetersPerDegreeLatitude));
+}
+
+double Cross2D(const FVector2D& A, const FVector2D& B, const FVector2D& C)
+{
+	return (B.X - A.X) * (C.Y - A.Y) - (B.Y - A.Y) * (C.X - A.X);
+}
+
+bool IsPointInTriangle2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C)
+{
+	const double C1 = Cross2D(A, B, Point);
+	const double C2 = Cross2D(B, C, Point);
+	const double C3 = Cross2D(C, A, Point);
+	const bool bHasNegative = C1 < 0.0 || C2 < 0.0 || C3 < 0.0;
+	const bool bHasPositive = C1 > 0.0 || C2 > 0.0 || C3 > 0.0;
+	return !(bHasNegative && bHasPositive);
+}
+
+bool IsPointInQuad2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
+{
+	return IsPointInTriangle2D(Point, A, B, C) || IsPointInTriangle2D(Point, A, C, D);
+}
+
+bool GetCesiumTileServerBool(const TCHAR* Key, bool DefaultValue)
+{
+	bool Value = DefaultValue;
+	if (GConfig)
+	{
+		GConfig->GetBool(TEXT("CesiumTileServer"), Key, Value, GEngineIni);
+	}
+	return Value;
+}
+
+FString GetCesiumTileServerString(const TCHAR* Key, const FString& DefaultValue)
+{
+	FString Value = DefaultValue;
+	if (GConfig)
+	{
+		GConfig->GetString(TEXT("CesiumTileServer"), Key, Value, GEngineIni);
+	}
+	return Value;
+}
+
+int32 GetCesiumTileServerInt(const TCHAR* Key, int32 DefaultValue)
+{
+	int32 Value = DefaultValue;
+	if (GConfig)
+	{
+		GConfig->GetInt(TEXT("CesiumTileServer"), Key, Value, GEngineIni);
+	}
+	return Value;
 }
 
 UTexture2D* CreateTextureFromCompressedImage(const TArray<uint8>& CompressedImage, UObject* Outer)
@@ -326,6 +465,291 @@ void ADroneOpsGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateOfflineRasterPlaneCoverageFromCamera();
+}
+
+void ADroneOpsGameMode::ApplyMapModeFromConfig(bool bRebuildOfflinePlane)
+{
+	ApplyCesiumTileServerConfig();
+
+	const bool bUseLocalTileServer = GetCesiumTileServerBool(TEXT("UseLocalTileServer"), false);
+	const bool bUseOfflineRasterPlane = GetCesiumTileServerBool(TEXT("UseOfflineRasterPlane"), true);
+	if (!bUseLocalTileServer || !bUseOfflineRasterPlane)
+	{
+		DestroyOfflineRasterPlane();
+		return;
+	}
+
+	if (!bRebuildOfflinePlane)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	for (TActorIterator<ACesiumGeoreference> It(World); It; ++It)
+	{
+		ACesiumGeoreference* Georeference = *It;
+		if (!IsValid(Georeference))
+		{
+			continue;
+		}
+
+		const double Latitude = bOfflineRasterPlaneActive ? OfflineRasterPlaneLatitude : Georeference->GetOriginLatitude();
+		const double Longitude = bOfflineRasterPlaneActive ? OfflineRasterPlaneLongitude : Georeference->GetOriginLongitude();
+		const double HeightMeters = bOfflineRasterPlaneActive ? OfflineRasterPlaneHeightMeters : Georeference->GetOriginHeight();
+		EnsureOfflineCesiumSunSky(Latitude, Longitude);
+		CreateOfflineRasterPlaneAround(Latitude, Longitude, HeightMeters);
+		return;
+	}
+}
+
+void ADroneOpsGameMode::SetOfflineMapModeRuntime(bool bUseOfflineMap, bool bRebuildNow)
+{
+	if (GConfig)
+	{
+		GConfig->SetBool(TEXT("CesiumTileServer"), TEXT("UseLocalTileServer"), bUseOfflineMap, GEngineIni);
+		GConfig->SetBool(TEXT("CesiumTileServer"), TEXT("UseOfflineRasterPlane"), bUseOfflineMap, GEngineIni);
+		GConfig->SetBool(TEXT("CesiumTileServer"), TEXT("SwitchTilesetsToLocal"), false, GEngineIni);
+		GConfig->SetBool(TEXT("CesiumTileServer"), TEXT("CreateUrlTemplateRasterOverlay"), false, GEngineIni);
+		GConfig->SetBool(TEXT("CesiumTileServer"), TEXT("DisableNonUrlRasterOverlays"), bUseOfflineMap, GEngineIni);
+		GConfig->Flush(false, GEngineIni);
+	}
+
+	ApplyMapModeFromConfig(bRebuildNow);
+}
+
+bool ADroneOpsGameMode::ValidateMapCoordinateAlignment(float ToleranceMeters, FString& OutReport) const
+{
+	OutReport.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		OutReport = TEXT("Map validation failed: World is null.");
+		return false;
+	}
+
+	ACesiumGeoreference* Georeference = nullptr;
+	for (TActorIterator<ACesiumGeoreference> It(World); It; ++It)
+	{
+		if (IsValid(*It))
+		{
+			Georeference = *It;
+			break;
+		}
+	}
+
+	if (!Georeference)
+	{
+		OutReport = TEXT("Map validation failed: no ACesiumGeoreference found.");
+		return false;
+	}
+
+	const double Latitude = bOfflineRasterPlaneActive ? OfflineRasterPlaneLatitude : Georeference->GetOriginLatitude();
+	const double Longitude = bOfflineRasterPlaneActive ? OfflineRasterPlaneLongitude : Georeference->GetOriginLongitude();
+	const double HeightMeters = bOfflineRasterPlaneActive ? OfflineRasterPlaneHeightMeters : Georeference->GetOriginHeight();
+	const float ClampedToleranceMeters = FMath::Max(0.01f, ToleranceMeters);
+
+	const FString RasterCoordinateSystem = GetCesiumTileServerString(TEXT("RasterCoordinateSystem"), TEXT("WGS84"));
+	const bool bRasterUsesGcj02 = RasterCoordinateSystemUsesGcj02(RasterCoordinateSystem);
+	const bool bUsePlaneLod = GetCesiumTileServerBool(TEXT("UseOfflineRasterPlaneLod"), true);
+	const int32 ValidationZoom = bUsePlaneLod
+		? GetCesiumTileServerInt(TEXT("OfflineRasterPlaneNearZoom"), 18)
+		: GetCesiumTileServerInt(TEXT("OfflineRasterPlaneZoom"), 18);
+	const int32 ClampedValidationZoom = FMath::Clamp(ValidationZoom, 0, 30);
+
+	UObject* CoordinateServiceObject = nullptr;
+	bool bCoordinateServiceReady = false;
+	bool bCoordinateServiceGeographic = false;
+	if (UGameInstance* GameInstance = World->GetGameInstance())
+	{
+		if (UDroneRegistrySubsystem* Registry = GameInstance->GetSubsystem<UDroneRegistrySubsystem>())
+		{
+			TScriptInterface<ICoordinateService> CoordinateService = Registry->GetCoordinateService();
+			CoordinateServiceObject = CoordinateService.GetObject();
+			if (CoordinateServiceObject)
+			{
+				bCoordinateServiceReady = ICoordinateService::Execute_IsCoordinateSystemReady(CoordinateServiceObject);
+				bCoordinateServiceGeographic = ICoordinateService::Execute_IsGeographicSupported(CoordinateServiceObject);
+			}
+		}
+	}
+
+	struct FValidationSample
+	{
+		FString Name;
+		double EastMeters = 0.0;
+		double NorthMeters = 0.0;
+	};
+
+	TArray<FValidationSample> Samples;
+	auto AddValidationSample = [&Samples](const TCHAR* Name, double EastMeters, double NorthMeters)
+	{
+		FValidationSample Sample;
+		Sample.Name = Name;
+		Sample.EastMeters = EastMeters;
+		Sample.NorthMeters = NorthMeters;
+		Samples.Add(Sample);
+	};
+	AddValidationSample(TEXT("center"), 0.0, 0.0);
+	AddValidationSample(TEXT("east_100m"), 100.0, 0.0);
+	AddValidationSample(TEXT("west_100m"), -100.0, 0.0);
+	AddValidationSample(TEXT("north_100m"), 0.0, 100.0);
+	AddValidationSample(TEXT("south_100m"), 0.0, -100.0);
+	AddValidationSample(TEXT("northeast_250m"), 250.0, 250.0);
+	AddValidationSample(TEXT("southwest_250m"), -250.0, -250.0);
+
+	double MaxCesiumHorizontalErrorMeters = 0.0;
+	double MaxCesiumHeightErrorMeters = 0.0;
+	double MaxRasterRoundTripErrorMeters = 0.0;
+	double MaxCoordinateServiceWorldErrorMeters = 0.0;
+	double MaxCoordinateServiceRoundTripErrorMeters = 0.0;
+	bool bAllSamplesPassed = true;
+
+	FString SampleReport;
+	for (const FValidationSample& Sample : Samples)
+	{
+		const FVector2D SampleWgsLonLat = OffsetWgs84ByMeters(Longitude, Latitude, Sample.EastMeters, Sample.NorthMeters);
+		const FVector SampleWorldPosition = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(
+			FVector(SampleWgsLonLat.X, SampleWgsLonLat.Y, HeightMeters));
+		const FVector RoundTripLonLatHeight = Georeference->TransformUnrealPositionToLongitudeLatitudeHeight(SampleWorldPosition);
+		const double CesiumHorizontalErrorMeters = EstimateLonLatDistanceMeters(
+			SampleWgsLonLat.X,
+			SampleWgsLonLat.Y,
+			RoundTripLonLatHeight.X,
+			RoundTripLonLatHeight.Y);
+		const double CesiumHeightErrorMeters = FMath::Abs(RoundTripLonLatHeight.Z - HeightMeters);
+		MaxCesiumHorizontalErrorMeters = FMath::Max(MaxCesiumHorizontalErrorMeters, CesiumHorizontalErrorMeters);
+		MaxCesiumHeightErrorMeters = FMath::Max(MaxCesiumHeightErrorMeters, CesiumHeightErrorMeters);
+
+		double CoordinateServiceWorldErrorMeters = 0.0;
+		double CoordinateServiceRoundTripErrorMeters = 0.0;
+		bool bCoordinateServiceSampleOk = bCoordinateServiceReady && bCoordinateServiceGeographic && CoordinateServiceObject;
+		if (bCoordinateServiceSampleOk)
+		{
+			const FVector ServiceWorldPosition = ICoordinateService::Execute_GeographicToWorld(
+				CoordinateServiceObject,
+				SampleWgsLonLat.Y,
+				SampleWgsLonLat.X,
+				HeightMeters);
+			CoordinateServiceWorldErrorMeters = FVector::Dist(ServiceWorldPosition, SampleWorldPosition) / 100.0;
+			const FVector ServiceLonLatHeight = ICoordinateService::Execute_WorldToGeographic(CoordinateServiceObject, SampleWorldPosition);
+			CoordinateServiceRoundTripErrorMeters = EstimateLonLatDistanceMeters(
+				SampleWgsLonLat.X,
+				SampleWgsLonLat.Y,
+				ServiceLonLatHeight.X,
+				ServiceLonLatHeight.Y);
+			CoordinateServiceRoundTripErrorMeters = FMath::Max(
+				CoordinateServiceRoundTripErrorMeters,
+				FMath::Abs(ServiceLonLatHeight.Z - HeightMeters));
+			MaxCoordinateServiceWorldErrorMeters = FMath::Max(MaxCoordinateServiceWorldErrorMeters, CoordinateServiceWorldErrorMeters);
+			MaxCoordinateServiceRoundTripErrorMeters = FMath::Max(MaxCoordinateServiceRoundTripErrorMeters, CoordinateServiceRoundTripErrorMeters);
+		}
+
+		const FVector2D RasterLonLat = bRasterUsesGcj02
+			? Wgs84ToGcj02(SampleWgsLonLat.X, SampleWgsLonLat.Y)
+			: SampleWgsLonLat;
+		const FVector2D RasterRoundTripWgs = bRasterUsesGcj02
+			? Gcj02ToWgs84(RasterLonLat.X, RasterLonLat.Y)
+			: RasterLonLat;
+		const double RasterRoundTripMeters = EstimateLonLatDistanceMeters(
+			SampleWgsLonLat.X,
+			SampleWgsLonLat.Y,
+			RasterRoundTripWgs.X,
+			RasterRoundTripWgs.Y);
+		MaxRasterRoundTripErrorMeters = FMath::Max(MaxRasterRoundTripErrorMeters, RasterRoundTripMeters);
+
+		int64 TileX = 0;
+		int64 TileY = 0;
+		const bool bTileOk = LonLatToWebMercatorTile(RasterLonLat.X, RasterLonLat.Y, ClampedValidationZoom, TileX, TileY);
+		bool bInsideTileBounds = false;
+		bool bInsideOfflineMeshQuad = false;
+		if (bTileOk)
+		{
+			const double West = WebMercatorTileXToLongitude(TileX, ClampedValidationZoom);
+			const double East = WebMercatorTileXToLongitude(TileX + 1, ClampedValidationZoom);
+			const double North = WebMercatorTileYToLatitude(TileY, ClampedValidationZoom);
+			const double South = WebMercatorTileYToLatitude(TileY + 1, ClampedValidationZoom);
+			bInsideTileBounds = RasterLonLat.X >= West && RasterLonLat.X <= East && RasterLonLat.Y <= North && RasterLonLat.Y >= South;
+
+			const FVector2D NorthwestLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(West, North) : FVector2D(West, North);
+			const FVector2D NortheastLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(East, North) : FVector2D(East, North);
+			const FVector2D SoutheastLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(East, South) : FVector2D(East, South);
+			const FVector2D SouthwestLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(West, South) : FVector2D(West, South);
+			const FVector NorthwestWorld = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(NorthwestLonLat.X, NorthwestLonLat.Y, HeightMeters));
+			const FVector NortheastWorld = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(NortheastLonLat.X, NortheastLonLat.Y, HeightMeters));
+			const FVector SoutheastWorld = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(SoutheastLonLat.X, SoutheastLonLat.Y, HeightMeters));
+			const FVector SouthwestWorld = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(SouthwestLonLat.X, SouthwestLonLat.Y, HeightMeters));
+
+			bInsideOfflineMeshQuad = IsPointInQuad2D(
+				FVector2D(SampleWorldPosition.X, SampleWorldPosition.Y),
+				FVector2D(NorthwestWorld.X, NorthwestWorld.Y),
+				FVector2D(NortheastWorld.X, NortheastWorld.Y),
+				FVector2D(SoutheastWorld.X, SoutheastWorld.Y),
+				FVector2D(SouthwestWorld.X, SouthwestWorld.Y));
+		}
+
+		const bool bSamplePassed =
+			CesiumHorizontalErrorMeters <= ClampedToleranceMeters &&
+			CesiumHeightErrorMeters <= ClampedToleranceMeters &&
+			RasterRoundTripMeters <= ClampedToleranceMeters &&
+			bCoordinateServiceSampleOk &&
+			CoordinateServiceWorldErrorMeters <= ClampedToleranceMeters &&
+			CoordinateServiceRoundTripErrorMeters <= ClampedToleranceMeters &&
+			bTileOk &&
+			bInsideTileBounds &&
+			bInsideOfflineMeshQuad;
+		bAllSamplesPassed = bAllSamplesPassed && bSamplePassed;
+
+		SampleReport += FString::Printf(
+			TEXT("  [%s] %s WGS(lon=%.8f lat=%.8f) raster(lon=%.8f lat=%.8f) tile=%d/%lld/%lld cesiumErr=%.6fm/%.6fm coordSvcErr=%.6fm/%.6fm rasterErr=%.6fm tileContains=%s meshContains=%s\n"),
+			*Sample.Name,
+			bSamplePassed ? TEXT("OK") : TEXT("FAIL"),
+			SampleWgsLonLat.X,
+			SampleWgsLonLat.Y,
+			RasterLonLat.X,
+			RasterLonLat.Y,
+			ClampedValidationZoom,
+			TileX,
+			TileY,
+			CesiumHorizontalErrorMeters,
+			CesiumHeightErrorMeters,
+			CoordinateServiceWorldErrorMeters,
+			CoordinateServiceRoundTripErrorMeters,
+			RasterRoundTripMeters,
+			bInsideTileBounds ? TEXT("true") : TEXT("false"),
+			bInsideOfflineMeshQuad ? TEXT("true") : TEXT("false"));
+	}
+
+	const bool bPassed = bAllSamplesPassed;
+
+	OutReport = FString::Printf(
+		TEXT("Map validation %s\nWGS84 origin: lon=%.8f lat=%.8f height=%.3fm\nTolerance: %.3fm\nRaster CS: %s usesGcj02=%s validationZoom=%d\nCoordinateService: object=%s ready=%s geographic=%s\nMax errors: cesiumHorizontal=%.6fm cesiumHeight=%.6fm coordinateServiceWorld=%.6fm coordinateServiceRoundTrip=%.6fm rasterRoundTrip=%.6fm\nSamples:\n%s"),
+		bPassed ? TEXT("PASSED") : TEXT("FAILED"),
+		Longitude,
+		Latitude,
+		HeightMeters,
+		ClampedToleranceMeters,
+		*RasterCoordinateSystem,
+		bRasterUsesGcj02 ? TEXT("true") : TEXT("false"),
+		ClampedValidationZoom,
+		CoordinateServiceObject ? *CoordinateServiceObject->GetClass()->GetName() : TEXT("<null>"),
+		bCoordinateServiceReady ? TEXT("true") : TEXT("false"),
+		bCoordinateServiceGeographic ? TEXT("true") : TEXT("false"),
+		MaxCesiumHorizontalErrorMeters,
+		MaxCesiumHeightErrorMeters,
+		MaxCoordinateServiceWorldErrorMeters,
+		MaxCoordinateServiceRoundTripErrorMeters,
+		MaxRasterRoundTripErrorMeters,
+		*SampleReport);
+	OutReport += TEXT("Conclusion: online Cesium and offline plane use the same ACesiumGeoreference WGS84 world coordinates; offline raster imagery is corrected from its configured raster coordinate system before mesh placement.\n");
+
+	UE_LOG(LogTemp, Log, TEXT("%s"), *OutReport);
+	return bPassed;
 }
 
 void ADroneOpsGameMode::PostLogin(APlayerController* NewPlayer)
@@ -726,6 +1150,7 @@ void ADroneOpsGameMode::PrefetchLocalRasterTilesAround(double Latitude, double L
 	bool bPrefetchLocalRasterTiles = true;
 	FString LocalTileServerUrl = TEXT("http://localhost:8070");
 	FString RasterTemplateUrlConfig;
+	FString RasterCoordinateSystem = TEXT("WGS84");
 	int32 PrefetchMinimumLevel = 14;
 	int32 PrefetchMaximumLevel = 16;
 	int32 PrefetchRadius = 2;
@@ -737,6 +1162,7 @@ void ADroneOpsGameMode::PrefetchLocalRasterTilesAround(double Latitude, double L
 		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("PrefetchLocalRasterTiles"), bPrefetchLocalRasterTiles, GEngineIni);
 		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("LocalTileServerUrl"), LocalTileServerUrl, GEngineIni);
 		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("RasterTemplateUrl"), RasterTemplateUrlConfig, GEngineIni);
+		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("RasterCoordinateSystem"), RasterCoordinateSystem, GEngineIni);
 		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("PrefetchMinimumLevel"), PrefetchMinimumLevel, GEngineIni);
 		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("PrefetchMaximumLevel"), PrefetchMaximumLevel, GEngineIni);
 		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("PrefetchRadius"), PrefetchRadius, GEngineIni);
@@ -769,11 +1195,14 @@ void ADroneOpsGameMode::PrefetchLocalRasterTilesAround(double Latitude, double L
 	}
 
 	int32 RequestCount = 0;
+	const FVector2D TileCenterLonLat = RasterCoordinateSystemUsesGcj02(RasterCoordinateSystem)
+		? Wgs84ToGcj02(Longitude, Latitude)
+		: FVector2D(Longitude, Latitude);
 	for (int32 Zoom = PrefetchMinimumLevel; Zoom <= PrefetchMaximumLevel && RequestCount < PrefetchMaxRequests; ++Zoom)
 	{
 		int64 CenterX = 0;
 		int64 CenterY = 0;
-		if (!LonLatToWebMercatorTile(Longitude, Latitude, Zoom, CenterX, CenterY))
+		if (!LonLatToWebMercatorTile(TileCenterLonLat.X, TileCenterLonLat.Y, Zoom, CenterX, CenterY))
 		{
 			continue;
 		}
@@ -923,6 +1352,37 @@ void ADroneOpsGameMode::PruneOfflineRasterTileCache()
 		OfflineRasterTileTextureCache.Remove(OldestUrl);
 		OfflineRasterTileLastUsedFrame.Remove(OldestUrl);
 		OfflineRasterTileRetryCounts.Remove(OldestUrl);
+	}
+}
+
+void ADroneOpsGameMode::DestroyOfflineRasterPlane()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const FName PlaneTag(TEXT("DroneOpsOfflineRasterPlane"));
+	int32 DestroyedActors = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* ExistingActor = *It;
+		if (IsValid(ExistingActor) && ExistingActor->Tags.Contains(PlaneTag))
+		{
+			ExistingActor->Destroy();
+			++DestroyedActors;
+		}
+	}
+
+	bOfflineRasterPlaneActive = false;
+	LastOfflineRasterPlaneCoverageKey.Reset();
+	OfflineRasterTileWaitingMaterials.Empty();
+	OfflineRasterTileRequestsInFlight.Empty();
+
+	if (DestroyedActors > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Destroyed %d offline raster plane actor(s)."), DestroyedActors);
 	}
 }
 
@@ -1168,6 +1628,7 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 	bool bUseOfflineRasterPlane = true;
 	FString LocalTileServerUrl = TEXT("http://localhost:8070");
 	FString RasterTemplateUrlConfig;
+	FString RasterCoordinateSystem = TEXT("WGS84");
 	FString PlaneMaterialPath = TEXT("/Game/DroneOps/Materials/M_OfflineRasterTile.M_OfflineRasterTile");
 	bool bUsePlaneLod = true;
 	int32 PlaneZoom = 18;
@@ -1190,6 +1651,7 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("UseOfflineRasterPlane"), bUseOfflineRasterPlane, GEngineIni);
 		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("LocalTileServerUrl"), LocalTileServerUrl, GEngineIni);
 		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("RasterTemplateUrl"), RasterTemplateUrlConfig, GEngineIni);
+		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("RasterCoordinateSystem"), RasterCoordinateSystem, GEngineIni);
 		GConfig->GetString(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneMaterial"), PlaneMaterialPath, GEngineIni);
 		GConfig->GetBool(TEXT("CesiumTileServer"), TEXT("UseOfflineRasterPlaneLod"), bUsePlaneLod, GEngineIni);
 		GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("OfflineRasterPlaneZoom"), PlaneZoom, GEngineIni);
@@ -1327,13 +1789,17 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 	}
 
 	const FVector CenterWorld = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(Longitude, Latitude, HeightMeters));
+	const bool bRasterUsesGcj02 = RasterCoordinateSystemUsesGcj02(RasterCoordinateSystem);
+	const FVector2D TileCenterLonLat = bRasterUsesGcj02
+		? Wgs84ToGcj02(Longitude, Latitude)
+		: FVector2D(Longitude, Latitude);
 	int32 CreatedTiles = 0;
 
 	for (const FOfflineRasterPlaneLod& Lod : LodLevels)
 	{
 		int64 CenterX = 0;
 		int64 CenterY = 0;
-		if (!LonLatToWebMercatorTile(Longitude, Latitude, Lod.Zoom, CenterX, CenterY))
+		if (!LonLatToWebMercatorTile(TileCenterLonLat.X, TileCenterLonLat.Y, Lod.Zoom, CenterX, CenterY))
 		{
 			continue;
 		}
@@ -1353,10 +1819,15 @@ void ADroneOpsGameMode::CreateOfflineRasterPlaneAround(double Latitude, double L
 				const double North = WebMercatorTileYToLatitude(TileY, Lod.Zoom);
 				const double South = WebMercatorTileYToLatitude(TileY + 1, Lod.Zoom);
 
-				FVector Northwest = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(West, North, HeightMeters));
-				FVector Northeast = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(East, North, HeightMeters));
-				FVector Southeast = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(East, South, HeightMeters));
-				FVector Southwest = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(West, South, HeightMeters));
+				const FVector2D NorthwestLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(West, North) : FVector2D(West, North);
+				const FVector2D NortheastLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(East, North) : FVector2D(East, North);
+				const FVector2D SoutheastLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(East, South) : FVector2D(East, South);
+				const FVector2D SouthwestLonLat = bRasterUsesGcj02 ? Gcj02ToWgs84(West, South) : FVector2D(West, South);
+
+				FVector Northwest = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(NorthwestLonLat.X, NorthwestLonLat.Y, HeightMeters));
+				FVector Northeast = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(NortheastLonLat.X, NortheastLonLat.Y, HeightMeters));
+				FVector Southeast = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(SoutheastLonLat.X, SoutheastLonLat.Y, HeightMeters));
+				FVector Southwest = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(FVector(SouthwestLonLat.X, SouthwestLonLat.Y, HeightMeters));
 				Northwest.Z = PlaneZ;
 				Northeast.Z = PlaneZ;
 				Southeast.Z = PlaneZ;
@@ -1467,9 +1938,50 @@ void ADroneOpsGameMode::ApplyCesiumTileServerConfig()
 		bHasRasterMaximumLevel = GConfig->GetInt(TEXT("CesiumTileServer"), TEXT("RasterMaximumLevel"), RasterMaximumLevel, GEngineIni);
 	}
 
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	if (!bUseLocalTileServer)
 	{
-		UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Cesium local tile server disabled; keeping online Cesium/Google sources."));
+		DestroyOfflineRasterPlane();
+		int32 ReactivatedOverlayCount = 0;
+		int32 DisabledLocalOverlayCount = 0;
+		for (TActorIterator<ACesium3DTileset> It(World); It; ++It)
+		{
+			ACesium3DTileset* Tileset = *It;
+			if (!IsValid(Tileset))
+			{
+				continue;
+			}
+
+			TArray<UCesiumRasterOverlay*> RasterOverlays;
+			Tileset->GetComponents<UCesiumRasterOverlay>(RasterOverlays);
+			for (UCesiumRasterOverlay* Overlay : RasterOverlays)
+			{
+				if (!IsValid(Overlay))
+				{
+					continue;
+				}
+
+				if (Overlay->GetName().StartsWith(TEXT("OvitLocalRasterOverlay")))
+				{
+					Overlay->Deactivate();
+					++DisabledLocalOverlayCount;
+					continue;
+				}
+
+				Overlay->Activate(true);
+				Overlay->Refresh();
+				++ReactivatedOverlayCount;
+			}
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Cesium local tile server disabled; online Cesium/Google sources reactivated=%d localOverlaysDisabled=%d."),
+			ReactivatedOverlayCount,
+			DisabledLocalOverlayCount);
 		return;
 	}
 
@@ -1477,12 +1989,6 @@ void ADroneOpsGameMode::ApplyCesiumTileServerConfig()
 	if (LocalTileServerUrl.IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("DroneOpsGameMode: UseLocalTileServer=true but LocalTileServerUrl is empty; keeping existing Cesium sources."));
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
 		return;
 	}
 
