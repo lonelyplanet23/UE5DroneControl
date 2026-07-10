@@ -112,7 +112,20 @@ struct AssemblyProgress {
     int total_count = 0;
 };
 
+/// Backend-authoritative high-level task state pushed to UE over WebSocket.
+struct DroneTaskState {
+    int drone_id = 0;
+    std::string array_id;
+    std::string mode = "move";
+    std::string state = "standby";
+    int current_wp = 0;
+    int waypoint_count = 0;
+    std::string detail;
+    double updated_at = 0.0;
+};
+
 using TelemetryCallback = std::function<void(int drone_id, const TelemetryData&)>;
 using StateChangeCallback = std::function<void(int drone_id, StateEvent event, const GpsAnchor&)>;
 using AlertCallback = std::function<void(int drone_id, const std::string& alert_type, int value)>;
 using AssemblyCallback = std::function<void(const AssemblyProgress&)>;
+using TaskStateCallback = std::function<void(const DroneTaskState&)>;

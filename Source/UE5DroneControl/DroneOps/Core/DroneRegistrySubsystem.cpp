@@ -64,6 +64,7 @@ void UDroneRegistrySubsystem::Deinitialize()
 	SenderPawns.Empty();
 	ReceiverActors.Empty();
 	TelemetryCache.Empty();
+	TaskStateCache.Empty();
 	ControlLocks.Empty();
 	CommandModes.Empty();
 
@@ -297,6 +298,7 @@ void UDroneRegistrySubsystem::UnregisterDrone(int32 DroneId)
 	SenderPawns.Remove(DroneId);
 	ReceiverActors.Remove(DroneId);
 	TelemetryCache.Remove(DroneId);
+	TaskStateCache.Remove(DroneId);
 	ControlLocks.Remove(DroneId);
 	CommandModes.Remove(DroneId);
 
@@ -325,6 +327,31 @@ bool UDroneRegistrySubsystem::GetTelemetry(int32 DroneId, FDroneTelemetrySnapsho
 		return true;
 	}
 	return false;
+}
+
+void UDroneRegistrySubsystem::UpdateTaskState(int32 DroneId, const FDroneTaskStateSnapshot& State)
+{
+	if (DroneId <= 0)
+	{
+		return;
+	}
+
+	FDroneTaskStateSnapshot Stored = State;
+	Stored.DroneId = DroneId;
+	TaskStateCache.Add(DroneId, Stored);
+	OnDroneTaskStateUpdated.Broadcast(DroneId, Stored);
+}
+
+bool UDroneRegistrySubsystem::GetTaskState(int32 DroneId, FDroneTaskStateSnapshot& OutState) const
+{
+	const FDroneTaskStateSnapshot* Found = TaskStateCache.Find(DroneId);
+	if (!Found)
+	{
+		return false;
+	}
+
+	OutState = *Found;
+	return true;
 }
 
 void UDroneRegistrySubsystem::SetPrimarySelectedDrone(int32 DroneId)

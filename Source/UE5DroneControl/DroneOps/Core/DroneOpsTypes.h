@@ -52,6 +52,37 @@ enum class EDroneCommandMode : uint8
 	Attack UMETA(DisplayName = "Attack")
 };
 
+/** Backend-authoritative high-level task state. */
+UENUM(BlueprintType)
+enum class EDroneTaskState : uint8
+{
+	Standby UMETA(DisplayName = "Standby"),
+	Moving UMETA(DisplayName = "Moving"),
+	Assembling UMETA(DisplayName = "Assembling"),
+	Scouting UMETA(DisplayName = "Scouting"),
+	Patrolling UMETA(DisplayName = "Patrolling"),
+	Attacking UMETA(DisplayName = "Attacking"),
+	Paused UMETA(DisplayName = "Paused"),
+	Avoiding UMETA(DisplayName = "Avoiding"),
+	Completed UMETA(DisplayName = "Completed"),
+	Error UMETA(DisplayName = "Error")
+};
+
+static inline EDroneTaskState DroneTaskStateFromProtocolString(const FString& StateText)
+{
+	const FString State = StateText.ToLower();
+	if (State == TEXT("moving")) return EDroneTaskState::Moving;
+	if (State == TEXT("assembling")) return EDroneTaskState::Assembling;
+	if (State == TEXT("scouting")) return EDroneTaskState::Scouting;
+	if (State == TEXT("patrolling")) return EDroneTaskState::Patrolling;
+	if (State == TEXT("attacking")) return EDroneTaskState::Attacking;
+	if (State == TEXT("paused")) return EDroneTaskState::Paused;
+	if (State == TEXT("avoiding")) return EDroneTaskState::Avoiding;
+	if (State == TEXT("completed")) return EDroneTaskState::Completed;
+	if (State == TEXT("error")) return EDroneTaskState::Error;
+	return EDroneTaskState::Standby;
+}
+
 static inline FString DroneCommandModeToProtocolString(EDroneCommandMode Mode)
 {
 	switch (Mode)
@@ -179,9 +210,44 @@ struct FDroneTelemetrySnapshot
 	float Altitude = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
+	int32 Battery = -1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
+	bool bArmed = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
+	bool bOffboard = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
+	bool bGpsFix = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
 	double LastUpdateTime = 0.0;
 
 	FDroneTelemetrySnapshot() = default;
+};
+
+USTRUCT(BlueprintType)
+struct FDroneTaskStateSnapshot
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	int32 DroneId = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	FString ArrayId;
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	EDroneCommandMode Mode = EDroneCommandMode::Move;
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	EDroneTaskState State = EDroneTaskState::Standby;
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	int32 CurrentWaypoint = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	int32 WaypointCount = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	FString Detail;
+	UPROPERTY(BlueprintReadOnly, Category = "Task")
+	double UpdatedAt = 0.0;
 };
 
 /**

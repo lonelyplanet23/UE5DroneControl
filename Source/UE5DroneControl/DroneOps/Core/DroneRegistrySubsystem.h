@@ -35,6 +35,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnControlLockChanged, int32, Dro
  * Delegate for command mode changes.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneCommandModeChanged, int32, DroneId, EDroneCommandMode, Mode);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneTaskStateUpdated, int32, DroneId, const FDroneTaskStateSnapshot&, State);
 
 /**
  * Global drone registry and state management subsystem
@@ -87,6 +88,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
 	bool GetTelemetry(int32 DroneId, FDroneTelemetrySnapshot& OutSnapshot) const;
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void UpdateTaskState(int32 DroneId, const FDroneTaskStateSnapshot& State);
+
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	bool GetTaskState(int32 DroneId, FDroneTaskStateSnapshot& OutState) const;
 
 	// Selection management
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
@@ -172,6 +179,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
 	FOnDroneCommandModeChanged OnDroneCommandModeChanged;
 
+	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
+	FOnDroneTaskStateUpdated OnDroneTaskStateUpdated;
+
 private:
 	// Coordinate service
 	UPROPERTY()
@@ -190,6 +200,9 @@ private:
 	// Telemetry cache
 	UPROPERTY()
 	TMap<int32, FDroneTelemetrySnapshot> TelemetryCache;
+
+	UPROPERTY()
+	TMap<int32, FDroneTaskStateSnapshot> TaskStateCache;
 
 	// Selection state
 	UPROPERTY()

@@ -21,6 +21,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace beast = boost::beast;
@@ -71,6 +72,7 @@ public:
                AssemblyController& assembly_ctrl,
                ExecutionEngine& exec_engine,
                WsManager& ws_manager);
+    ~HttpServer();
 
     /// 启动 HTTP 和 WebSocket 监听线程（阻塞直到 stop() 被调用）
     void Run();
@@ -110,6 +112,7 @@ private:
     /// auto_assign=true 时：用匈牙利算法将在线无人机分配到各路径首航点，
     /// 写回 cfg.paths[].drone_id，并通过 WS 推送 assignment_result
     void AutoAssignDrones(AssemblyConfig& cfg);
+    void PublishTaskState(const DroneTaskState& state);
 
     // ---- Debug 路由 ----
     boost::json::value DebugDroneState(const std::string& id);
@@ -171,4 +174,9 @@ private:
     std::vector<DroneRecord> drone_records_;
     mutable std::mutex       records_mutex_;
     int                      next_drone_seq_ = 1;
+
+    mutable std::mutex task_state_mutex_;
+    std::unordered_map<int, DroneTaskState> task_states_;
+    std::unordered_map<int, std::string> paused_previous_states_;
+
 };

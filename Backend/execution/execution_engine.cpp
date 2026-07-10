@@ -2,6 +2,7 @@
 #include "conversion/coordinate_converter.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <spdlog/spdlog.h>
 
@@ -125,6 +126,14 @@ double segment_segment_distance_sq(const Vec3& p0, const Vec3& p1,
     return length_sq(dp);
 }
 
+double unix_seconds()
+{
+    return static_cast<double>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count())
+        / 1000000.0;
+}
+
 } // namespace
 
 ExecutionEngine::ExecutionEngine(double arrival_threshold_m,
@@ -145,6 +154,42 @@ void ExecutionEngine::SetMoveCallback(MoveCallback cb) { move_cb_ = std::move(cb
 void ExecutionEngine::SetTelemetryGetter(TelemetryGetter cb) { telemetry_getter_ = std::move(cb); }
 void ExecutionEngine::SetStateGetter(StateGetter cb) { state_getter_ = std::move(cb); }
 void ExecutionEngine::SetAvoidanceCallback(AvoidanceCallback cb) { avoidance_cb_ = std::move(cb); }
+void ExecutionEngine::SetTaskStateCallback(TaskStateCallback cb) { task_state_cb_ = std::move(cb); }
+
+std::string ExecutionEngine::RunningStateForMode(const std::string& mode)
+{
+    if (mode == "scout") return "scouting";
+    if (mode == "patrol") return "patrolling";
+    if (mode == "attack") return "attacking";
+    return "moving";
+}
+
+void ExecutionEngine::EmitTaskState(int drone_id, const std::string& state,
+                                    const std::string& detail)
+{
+    DroneTaskState event;
+    {
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+        auto it = tasks_.find(drone_id);
+        if (it == tasks_.end()) return;
+
+        if (!state.empty()) {
+            it->second.state = state;
+        }
+        const auto& task = it->second;
+        event.drone_id = task.drone_id;
+        event.array_id = task.array_id;
+        event.mode = task.mode;
+        event.state = task.state;
+        event.current_wp = task.current_wp;
+        event.waypoint_count = static_cast<int>(task.waypoints.size());
+        event.detail = detail;
+        event.updated_at = unix_seconds();
+    }
+    if (task_state_cb_) {
+        task_state_cb_(event);
+    }
+}
 
 void ExecutionEngine::StartTasks(const AssemblyConfig& config)
 {
@@ -173,7 +218,9 @@ void ExecutionEngine::StartTasks(const AssemblyConfig& config)
 
             DroneTask task;
             task.drone_id = drone_id;
+            task.array_id = config.array_id;
             task.mode = config.mode;
+            task.state = RunningStateForMode(config.mode);
             task.closed_loop = path.closed_loop;
             task.waypoints = path.waypoints;
             task.current_wp = 0;
@@ -190,6 +237,7 @@ void ExecutionEngine::StartTasks(const AssemblyConfig& config)
 
     for (const auto& [drone_id, task] : tasks_) {
         (void)task;
+        EmitTaskState(drone_id, RunningStateForMode(task.mode));
         threads_[drone_id] = std::make_unique<std::thread>(&ExecutionEngine::RunDroneTask, this, drone_id);
     }
 
@@ -200,6 +248,16 @@ void ExecutionEngine::StartTasks(const AssemblyConfig& config)
 
 void ExecutionEngine::StopAll()
 {
+    std::vector<int> stopped_drone_ids;
+    {
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+        stopped_drone_ids.reserve(tasks_.size());
+        for (const auto& [drone_id, task] : tasks_) {
+            (void)task;
+            stopped_drone_ids.push_back(drone_id);
+        }
+    }
+
     running_ = false;
 
     if (avoidance_thread_.joinable()) {
@@ -213,6 +271,10 @@ void ExecutionEngine::StopAll()
         }
     }
     threads_.clear();
+
+    for (int drone_id : stopped_drone_ids) {
+        EmitTaskState(drone_id, "standby", "stopped");
+    }
 
     {
         std::lock_guard<std::mutex> lock(tasks_mutex_);
@@ -264,7 +326,9 @@ std::vector<ExecutionTaskSnapshot> ExecutionEngine::GetTaskSnapshots() const
     for (const auto& [drone_id, task] : tasks_) {
         ExecutionTaskSnapshot snapshot;
         snapshot.drone_id = drone_id;
+        snapshot.array_id = task.array_id;
         snapshot.mode = task.mode;
+        snapshot.state = task.state;
         snapshot.closed_loop = task.closed_loop;
         snapshot.current_wp = task.current_wp;
         snapshot.waypoint_count = static_cast<int>(task.waypoints.size());
@@ -345,13 +409,14 @@ void ExecutionEngine::RunDroneTask(int drone_id)
                 if (move_cb_) move_cb_(drone_id, ned_n, ned_e, ned_d);
                 WaitForArrival(drone_id, ned_n, ned_e, ned_d);
                 spdlog::info("[Exec] Drone {} patrol: target reached, stopping", drone_id);
-                break;
+                EmitTaskState(drone_id, "completed", "target_reached");
+                return;
             }
         }
 
         int wp_idx = task.current_wp;
         if (wp_idx >= static_cast<int>(task.waypoints.size())) {
-            if (task.mode == "scout" && task.closed_loop) {
+            if ((task.mode == "scout" || task.mode == "patrol") && task.closed_loop) {
                 std::lock_guard<std::mutex> lock(tasks_mutex_);
                 auto it = tasks_.find(drone_id);
                 if (it != tasks_.end()) {
@@ -361,7 +426,8 @@ void ExecutionEngine::RunDroneTask(int drone_id)
             }
 
             spdlog::info("[Exec] Drone {} completed all waypoints, hovering", drone_id);
-            break;
+            EmitTaskState(drone_id, "completed", "path_completed");
+            return;
         }
 
         const auto& wp = task.waypoints[wp_idx];
@@ -386,6 +452,8 @@ void ExecutionEngine::RunDroneTask(int drone_id)
         }
 
         if (move_cb_) move_cb_(drone_id, ned_n, ned_e, ned_d);
+        // Progress updates must not overwrite a concurrent patrol -> attack transition.
+        EmitTaskState(drone_id, "");
 
         bool arrived = WaitForArrival(drone_id, ned_n, ned_e, ned_d);
         if (!arrived) break;
@@ -402,7 +470,7 @@ void ExecutionEngine::RunDroneTask(int drone_id)
             auto it = tasks_.find(drone_id);
             if (it != tasks_.end()) {
                 it->second.current_wp++;
-                if (it->second.mode == "scout" && it->second.closed_loop &&
+                if ((it->second.mode == "scout" || it->second.mode == "patrol") && it->second.closed_loop &&
                     it->second.current_wp >= static_cast<int>(it->second.waypoints.size())) {
                     it->second.current_wp = 0;
                 }
