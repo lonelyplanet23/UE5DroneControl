@@ -21,6 +21,7 @@ AppConfig LoadConfig(const std::string& path)
         if (auto d = root["drone"]) {
             cfg.max_count               = d["max_count"].as<int>(cfg.max_count);
             cfg.heartbeat_hz            = d["heartbeat_hz"].as<int>(cfg.heartbeat_hz);
+            cfg.command_repeat_count    = d["command_repeat_count"].as<int>(cfg.command_repeat_count);
             cfg.lost_timeout_sec        = d["lost_timeout_sec"].as<int>(cfg.lost_timeout_sec);
             cfg.arrival_threshold_m     = d["arrival_threshold_m"].as<double>(cfg.arrival_threshold_m);
             cfg.assembly_timeout_sec    = d["assembly_timeout_sec"].as<int>(cfg.assembly_timeout_sec);
@@ -75,6 +76,10 @@ void ValidateConfig(const AppConfig& cfg)
     if (cfg.heartbeat_hz < 2) {
         throw std::invalid_argument(
             "heartbeat_hz must be >= 2 (PX4 offboard requirement)");
+    }
+    if (cfg.command_repeat_count < 3 || cfg.command_repeat_count > 20) {
+        throw std::invalid_argument(
+            "command_repeat_count must be 3~20");
     }
     if (cfg.lost_timeout_sec <= 0) {
         throw std::invalid_argument(

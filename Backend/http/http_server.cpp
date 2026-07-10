@@ -666,6 +666,8 @@ boost::json::value HttpServer::DebugDroneState(const std::string& id) {
         {"gps_lat", status.anchor.latitude},
         {"gps_lon", status.anchor.longitude},
         {"gps_alt", status.anchor.altitude},
+        {"control_ack_command_id", status.control_ack_command_id},
+        {"control_ack_sequence", static_cast<int64_t>(status.control_ack_sequence)},
     };
 }
 
@@ -675,11 +677,16 @@ boost::json::value HttpServer::DebugDroneQueue(const std::string& id) {
     boost::json::array items;
     for (const auto& cmd : drone_mgr_.GetCommandQueueSnapshot(drone_id)) {
         items.push_back(boost::json::object{
+            {"sequence", static_cast<int64_t>(cmd.sequence)},
             {"timestamp", cmd.timestamp},
+            {"slot", cmd.slot},
             {"x", cmd.x},
             {"y", cmd.y},
             {"z", cmd.z},
             {"mode", cmd.mode},
+            {"coordinate_frame", "NED"},
+            {"reference", "power_on_origin"},
+            {"unit", "m"},
         });
     }
     return boost::json::object{
@@ -701,9 +708,14 @@ boost::json::value HttpServer::DebugHeartbeat(const std::string& id) {
         {"running", hb.running},
         {"last_sent_time", hb.last_sent_time},
         {"sent_count", static_cast<int64_t>(hb.sent_count)},
+        {"send_failed_count", static_cast<int64_t>(hb.send_failed_count)},
         {"last_ned_x", hb.last_ned_x},
         {"last_ned_y", hb.last_ned_y},
         {"last_ned_z", hb.last_ned_z},
+        {"active_sequence", static_cast<int64_t>(hb.active_sequence)},
+        {"active_mode", hb.active_mode},
+        {"repeat_index", hb.repeat_index},
+        {"repeat_total", hb.repeat_total},
     };
 }
 

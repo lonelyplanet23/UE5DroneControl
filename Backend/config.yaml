@@ -8,7 +8,8 @@ server:
 
 drone:
   max_count: 6              # 最大注册无人机数量
-  heartbeat_hz: 2           # 心跳发送频率（Hz），不得低于 2
+  heartbeat_hz: 5           # 后端→Jetson JSON 发送频率；5Hz 下 3 包确认约 0.4s
+  command_repeat_count: 5   # 每条 move 指令使用同一 command_id 重发 5 次
   lost_timeout_sec: 10      # 超时失联阈值（秒）
   arrival_threshold_m: 1.0  # 到达航点的位置误差阈值（米）
   assembly_timeout_sec: 60  # 集结超时阈值（秒）

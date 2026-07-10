@@ -15,14 +15,17 @@ double now_unix_seconds()
             std::chrono::system_clock::now().time_since_epoch()).count()) / 1000000.0;
 }
 
-DroneControlPacket make_packet(double ned_n, double ned_e, double ned_d, uint32_t mode)
+DroneControlPacket make_packet(int slot, double ned_n, double ned_e,
+                               double ned_d, uint32_t mode)
 {
     DroneControlPacket cmd{};
+    cmd.sequence = NextControlSequence();
     cmd.timestamp = now_unix_seconds();
     cmd.x = static_cast<float>(ned_n);
     cmd.y = static_cast<float>(ned_e);
     cmd.z = static_cast<float>(ned_d);
     cmd.mode = mode;
+    cmd.slot = slot;
     return cmd;
 }
 
@@ -78,18 +81,34 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
             switch (event) {
                 case StateEvent::PowerOn:
                 case StateEvent::Reconnect:
+                    if (event == StateEvent::Reconnect) {
+                        // 重上电后 PX4 本地 NED 原点已改变，旧相对坐标绝不能重放。
+                        ctx->command_queue->Clear();
+                        ctx->last_ned_x = 0.0;
+                        ctx->last_ned_y = 0.0;
+                        ctx->last_ned_z = 0.0;
+                        spdlog::warn(
+                            "Drone {} reconnected: cleared commands tied to old "
+                            "power-on NED origin",
+                            drone_id);
+                    }
                     if (state_change_cb_) {
                         state_change_cb_(drone_id, event, anchor_manager_.GetAnchor(drone_id));
                     }
-                    hb_manager_.Start(drone_id, ctx->jetson_ip, ctx->send_port,
-                        [this, drone_id](DroneControlPacket& cmd) -> bool {
-                            auto* q_ctx = GetContext(drone_id);
-                            return q_ctx && q_ctx->command_queue->Pop(cmd);
+                    hb_manager_.Start(drone_id, ctx->slot, ctx->jetson_ip, ctx->send_port,
+                        [queue = ctx->command_queue.get()](DroneControlPacket& cmd) -> bool {
+                            // Queue 自身线程安全；避免 heartbeat 取指令时再次申请
+                            // drones_mutex_，否则断联回调持锁 Stop/join 会死锁。
+                            return queue && queue->Pop(cmd);
                         });
                     break;
 
                 case StateEvent::LostConnection:
                     hb_manager_.Stop(drone_id);
+                    ctx->command_queue->Clear();
+                    ctx->last_ned_x = 0.0;
+                    ctx->last_ned_y = 0.0;
+                    ctx->last_ned_z = 0.0;
                     if (state_change_cb_) {
                         state_change_cb_(drone_id, event, GpsAnchor{});
                     }
@@ -172,6 +191,10 @@ DroneStatus DroneManager::GetStatusInternal(int drone_id) const
             tel.velocity[0], tel.velocity[1], tel.velocity[2]);
     }
     s.anchor = anchor_manager_.GetAnchor(drone_id);
+    if (ctx->has_telemetry) {
+        s.control_ack_command_id = ctx->latest_telemetry.control_ack_command_id;
+        s.control_ack_sequence = ctx->latest_telemetry.control_ack_sequence;
+    }
     return s;
 }
 
@@ -247,10 +270,12 @@ bool DroneManager::ProcessMoveCommand(int drone_id, double ue_x, double ue_y, do
     CoordinateConverter::UeOffsetToNed(ue_x, ue_y, ue_z, ned_n, ned_e, ned_d);
 
     ctx->last_ned_x = ned_n;  ctx->last_ned_y = ned_e;  ctx->last_ned_z = ned_d;
-    hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
-    ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
-    spdlog::info("MoveCommand drone={}: NED({:.2f}, {:.2f}, {:.2f})",
-                  drone_id, ned_n, ned_e, ned_d);
+    const auto packet = make_packet(ctx->slot, ned_n, ned_e, ned_d, 1);
+    ctx->command_queue->Push(packet);
+    spdlog::info(
+        "MoveCommand drone={} sequence={}: UE-relative(cm)=({:.2f},{:.2f},{:.2f}) "
+        "-> power-on-relative NED(m)=({:.3f},{:.3f},{:.3f})",
+        drone_id, packet.sequence, ue_x, ue_y, ue_z, ned_n, ned_e, ned_d);
     return true;
 }
 
@@ -261,10 +286,12 @@ bool DroneManager::ProcessMoveCommandNed(int drone_id, double ned_n, double ned_
     if (!ctx) return false;
 
     ctx->last_ned_x = ned_n;  ctx->last_ned_y = ned_e;  ctx->last_ned_z = ned_d;
-    hb_manager_.UpdateLastPosition(drone_id, ned_n, ned_e, ned_d);
-    ctx->command_queue->Push(make_packet(ned_n, ned_e, ned_d, 1));
-    spdlog::info("MoveCommandNed drone={}: NED({:.2f}, {:.2f}, {:.2f})",
-                  drone_id, ned_n, ned_e, ned_d);
+    const auto packet = make_packet(ctx->slot, ned_n, ned_e, ned_d, 1);
+    ctx->command_queue->Push(packet);
+    spdlog::info(
+        "MoveCommandNed drone={} sequence={}: power-on-relative "
+        "NED(m)=({:.3f},{:.3f},{:.3f})",
+        drone_id, packet.sequence, ned_n, ned_e, ned_d);
     return true;
 }
 
@@ -275,8 +302,17 @@ bool DroneManager::ProcessPauseCommand(int drone_id)
     if (!ctx) return false;
 
     ctx->command_queue->SetPaused(true);
-    hb_manager_.UpdateLastPosition(drone_id, ctx->last_ned_x, ctx->last_ned_y, ctx->last_ned_z);
-    spdlog::info("Pause drone {}", drone_id);
+    // 暂停必须保持“当前实测位置”，不能继续保持尚未到达的旧目标点。
+    if (ctx->has_telemetry) {
+        ctx->last_ned_x = ctx->latest_telemetry.position_ned[0];
+        ctx->last_ned_y = ctx->latest_telemetry.position_ned[1];
+        ctx->last_ned_z = ctx->latest_telemetry.position_ned[2];
+    }
+    hb_manager_.RequestHold(
+        drone_id, ctx->last_ned_x, ctx->last_ned_y, ctx->last_ned_z);
+    spdlog::info(
+        "Pause drone {} at measured power-on-relative NED({:.3f},{:.3f},{:.3f})",
+        drone_id, ctx->last_ned_x, ctx->last_ned_y, ctx->last_ned_z);
     return true;
 }
 
@@ -373,8 +409,18 @@ void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
     }
 
     ctx.state_machine->OnTelemetryReceived();
-    hb_manager_.UpdateLastPosition(
-        drone_id, data.position_ned[0], data.position_ned[1], data.position_ned[2]);
+
+    // 遥测位置是“当前实际位置”，不能覆盖后端的“期望目标位置”。
+    // 否则 move 只发一帧，下一帧 heartbeat 就会把目标改成当前点，导致飞机停住。
+    if (data.control_ack_sequence > ctx.last_logged_control_ack_sequence) {
+        ctx.last_logged_control_ack_sequence = data.control_ack_sequence;
+        spdlog::info(
+            "[ControlAck] drone={} session={} command_id={} sequence={} "
+            "mode={} confirmed_packets={}",
+            drone_id, data.control_ack_session_id,
+            data.control_ack_command_id, data.control_ack_sequence,
+            data.control_ack_mode, data.control_ack_confirmed_packets);
+    }
 
     if (data.battery >= 0 && data.battery > low_battery_threshold_) {
         ctx.low_battery_alert_active = false;

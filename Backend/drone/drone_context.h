@@ -20,10 +20,11 @@ struct DroneContext {
     double last_telemetry_unix = 0.0;
 
     bool low_battery_alert_active = false;
+    uint64_t last_logged_control_ack_sequence = 0;
 
     double last_ned_x = 0.0;
     double last_ned_y = 0.0;
-    double last_ned_z = -1.0;
+    double last_ned_z = 0.0;
 
     std::string jetson_ip = "192.168.30.104";
     int send_port = 8889;

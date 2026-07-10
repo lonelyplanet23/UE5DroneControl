@@ -50,7 +50,8 @@ int main(int argc, char* argv[])
 
     // 6. 创建各模块
     UdpSender          udp_sender(io_context);
-    HeartbeatManager   hb_manager(udp_sender, config.heartbeat_hz);
+    HeartbeatManager   hb_manager(
+        udp_sender, config.heartbeat_hz, config.command_repeat_count);
     DroneManager       drone_mgr(hb_manager, config.low_battery_threshold);
     AssemblyController assembly_ctrl(config.assembly_timeout_sec, config.arrival_threshold_m);
     UdpReceiver        udp_receiver(io_context);

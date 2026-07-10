@@ -155,6 +155,25 @@ void UdpReceiver::HandleReceive(PortListener& listener,
             if (auto arm = root["arming_state"]) tel.arming_state = arm.as<uint8_t>(0);
             if (auto nav = root["nav_state"])    tel.nav_state    = nav.as<uint8_t>(0);
 
+            // Jetson 达到 3-of-5 确认阈值并真正应用 setpoint 后返回的应用层 ACK。
+            if (auto ack = root["control_ack"]; ack && ack.IsMap()) {
+                if (auto value = ack["session_id"]) {
+                    tel.control_ack_session_id = value.as<std::string>("");
+                }
+                if (auto value = ack["command_id"]) {
+                    tel.control_ack_command_id = value.as<std::string>("");
+                }
+                if (auto value = ack["sequence"]) {
+                    tel.control_ack_sequence = value.as<uint64_t>(0);
+                }
+                if (auto value = ack["mode"]) {
+                    tel.control_ack_mode = value.as<std::string>("");
+                }
+                if (auto value = ack["confirmed_packets"]) {
+                    tel.control_ack_confirmed_packets = value.as<uint32_t>(0);
+                }
+            }
+
             spdlog::debug("[UdpReceiver] Slot {} recv {}B: NED({:.2f},{:.2f},{:.2f}) bat={} gps_fix={}",
                          listener.slot, bytes_transferred,
                          tel.position_ned[0], tel.position_ned[1], tel.position_ned[2],
