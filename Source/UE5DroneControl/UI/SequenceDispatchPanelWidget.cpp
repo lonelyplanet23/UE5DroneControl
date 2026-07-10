@@ -13,7 +13,9 @@
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "DroneOps/Network/DroneNetworkManager.h"
+#include "DroneOps/Control/DroneOpsPlayerController.h"
 #include "PathEditor/DronePathActor.h"
+#include "PreviewConfirmPopupWidget.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -70,6 +72,15 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 		AutoAssignCheckBox->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnAutoAssignCheckChanged);
 		bAutoAssignEnabled = AutoAssignCheckBox->IsChecked();
 	}
+	if (PathEditToggle)
+	{
+		PathEditToggle->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnPathEditToggleChanged);
+	}
+	if (SavePathButton)
+	{
+		SavePathButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnSavePathClicked);
+		SavePathButton->SetVisibility(ESlateVisibility::Collapsed);
+	}
 	PopulateModeComboBox();
 
 	if (UGameInstance* GI = GetGameInstance())
@@ -86,6 +97,16 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 
 void USequenceDispatchPanelWidget::NativeDestruct()
 {
+	// 编辑中被销毁：清理临时路径，避免残留
+	if (bInPathEditMode)
+	{
+		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+		{
+			PC->ClearEditingPaths();
+		}
+		bInPathEditMode = false;
+	}
+
 	if (AssignmentResultHandle.IsValid())
 	{
 		if (UGameInstance* GI = GetGameInstance())
@@ -784,4 +805,226 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 	}
 
 	PendingRemappedMap.Empty();
+}
+
+// ================= 路径编辑模式 =================
+
+ADroneOpsPlayerController* USequenceDispatchPanelWidget::GetDroneOpsController() const
+{
+	return Cast<ADroneOpsPlayerController>(GetOwningPlayer());
+}
+
+void USequenceDispatchPanelWidget::OnPathEditToggleChanged(bool bIsChecked)
+{
+	if (bIsChecked)
+	{
+		// 收集当前选中无人机：优先多选，否则主选
+		TArray<int32> DroneIds;
+		UGameInstance* GI = GetGameInstance();
+		UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+		if (Registry)
+		{
+			DroneIds = Registry->GetMultiSelectedDrones();
+			if (DroneIds.IsEmpty())
+			{
+				const int32 Primary = Registry->GetPrimarySelectedDrone();
+				if (Primary > 0)
+				{
+					DroneIds.Add(Primary);
+				}
+			}
+		}
+
+		ADroneOpsPlayerController* PC = GetDroneOpsController();
+		if (!PC || DroneIds.IsEmpty() || !PC->BeginPathEditMode(DroneIds))
+		{
+			SetStatusMessage(TEXT("请先选择无人机再进入编辑模式"));
+			// 复位 Toggle（避免递归：SetIsChecked 不触发 OnCheckStateChanged）
+			if (PathEditToggle)
+			{
+				PathEditToggle->SetIsChecked(false);
+			}
+			return;
+		}
+
+		bInPathEditMode = true;
+		if (SavePathButton)
+		{
+			SavePathButton->SetVisibility(ESlateVisibility::Visible);
+		}
+		SetStatusMessage(FString::Printf(TEXT("编辑模式：%d 架无人机，点击地图加航点，拖拽 gizmo 微调"), DroneIds.Num()));
+	}
+	else
+	{
+		if (!bInPathEditMode)
+		{
+			return;
+		}
+
+		bInPathEditMode = false;
+		if (SavePathButton)
+		{
+			SavePathButton->SetVisibility(ESlateVisibility::Collapsed);
+		}
+
+		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+		{
+			PC->EndPathEditMode();
+		}
+
+		ShowPreviewConfirmPopup();
+	}
+}
+
+void USequenceDispatchPanelWidget::OnSavePathClicked()
+{
+	ADroneOpsPlayerController* PC = GetDroneOpsController();
+	if (!PC)
+	{
+		return;
+	}
+
+	SavedPreviewData = PC->BuildEditingPathsData();
+	bHasSavedPreviewData = !SavedPreviewData.IsEmpty();
+	SetStatusMessage(bHasSavedPreviewData
+		? FString::Printf(TEXT("已保存 %d 条路径到内存"), SavedPreviewData.Num())
+		: TEXT("没有可保存的航点"));
+}
+
+TMap<int32, FDronePathSaveData> USequenceDispatchPanelWidget::ResolvePreviewDispatchMap()
+{
+	if (bHasSavedPreviewData && !SavedPreviewData.IsEmpty())
+	{
+		return SavedPreviewData;
+	}
+
+	// 未点保存：实时从当前临时路径构建
+	if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+	{
+		return PC->BuildEditingPathsData();
+	}
+
+	return TMap<int32, FDronePathSaveData>();
+}
+
+void USequenceDispatchPanelWidget::ShowPreviewConfirmPopup()
+{
+	if (!PreviewConfirmPopupClass)
+	{
+		// 没配置弹窗类：默认取消并清理，避免临时路径残留
+		SetStatusMessage(TEXT("未配置确认弹窗，已取消并清理临时路径"));
+		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+		{
+			PC->ClearEditingPaths();
+		}
+		ResetPathEditState();
+		return;
+	}
+
+	UPreviewConfirmPopupWidget* Popup = CreateWidget<UPreviewConfirmPopupWidget>(GetOwningPlayer(), PreviewConfirmPopupClass);
+	if (!Popup)
+	{
+		return;
+	}
+
+	Popup->OnChoiceMade.AddDynamic(this, &USequenceDispatchPanelWidget::OnPreviewConfirmChoice);
+	Popup->AddToViewport(100);
+}
+
+void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice Choice)
+{
+	ADroneOpsPlayerController* PC = GetDroneOpsController();
+
+	switch (Choice)
+	{
+	case EPreviewConfirmChoice::LocalPreview:
+	{
+		TMap<int32, FDronePathSaveData> Map = ResolvePreviewDispatchMap();
+		// 先销毁编辑用临时路径，再用数据驱动影子机
+		if (PC)
+		{
+			PC->ClearEditingPaths();
+		}
+		if (Map.IsEmpty())
+		{
+			SetStatusMessage(TEXT("没有可预演的路径"));
+			break;
+		}
+		PendingRemappedMap = Map;
+		StartShadowDronePlayback();
+		SetStatusMessage(TEXT("本地预演已开始（未向后端发送指令）"));
+		break;
+	}
+	case EPreviewConfirmChoice::Dispatch:
+	{
+		TMap<int32, FDronePathSaveData> Map = ResolvePreviewDispatchMap();
+		if (PC)
+		{
+			PC->ClearEditingPaths();
+		}
+		if (Map.IsEmpty())
+		{
+			SetStatusMessage(TEXT("没有可派发的路径"));
+			break;
+		}
+
+		UGameInstance* GI = GetGameInstance();
+		UDroneNetworkManager* NetMgr = GI ? GI->GetSubsystem<UDroneNetworkManager>() : nullptr;
+		if (!NetMgr)
+		{
+			SetStatusMessage(TEXT("网络管理器不可用，派发失败"));
+			break;
+		}
+
+		// 临时路径已是预演世界坐标，直接发送，不做 anchor 重映射
+		FOnHttpResponse Callback;
+		Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnEditDispatchResponse);
+		PendingRemappedMap = Map;
+		NetMgr->SendArrayTaskFromData(Map, DispatchMode, Callback, /*bAutoAssign=*/false);
+		SetStatusMessage(FString::Printf(TEXT("正在派发 %d 条路径... mode=%s"),
+			Map.Num(), *DroneCommandModeToProtocolString(DispatchMode)));
+		break;
+	}
+	case EPreviewConfirmChoice::Cancel:
+	default:
+	{
+		if (PC)
+		{
+			PC->ClearEditingPaths();
+		}
+		SetStatusMessage(TEXT("已取消，临时路径已清理"));
+		break;
+	}
+	}
+
+	ResetPathEditState();
+}
+
+void USequenceDispatchPanelWidget::ResetPathEditState()
+{
+	bInPathEditMode = false;
+	bHasSavedPreviewData = false;
+	SavedPreviewData.Empty();
+	if (SavePathButton)
+	{
+		SavePathButton->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (PathEditToggle && PathEditToggle->IsChecked())
+	{
+		PathEditToggle->SetIsChecked(false);
+	}
+}
+
+void USequenceDispatchPanelWidget::OnEditDispatchResponse(bool bSuccess, const FString& ResponseBody)
+{
+	if (bSuccess)
+	{
+		SetStatusMessage(TEXT("派发成功，开始本地预演"));
+		StartShadowDronePlayback();
+	}
+	else
+	{
+		SetStatusMessage(FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
+		PendingRemappedMap.Empty();
+	}
 }
