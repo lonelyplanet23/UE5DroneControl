@@ -5,6 +5,7 @@
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "Components/ComboBoxString.h"
 #include "PathEditor/DronePathSaveLibrary.h"
+#include "PreviewConfirmPopupWidget.h"
 #include "SequenceDispatchPanelWidget.generated.h"
 
 class UPathFileListItemWidget;
@@ -66,11 +67,23 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UCheckBox* AutoAssignCheckBox;
 
+	/** 路径编辑模式开关：打开后以选中影子机位置为起点现场编辑路径 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UCheckBox* PathEditToggle;
+
+	/** 保存按钮：把当前临时路径存入内存（仅编辑模式可见） */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UButton* SavePathButton;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceDispatch")
 	TSubclassOf<UPathFileListItemWidget> FileListItemClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceDispatch")
 	TSubclassOf<UPathDroneMatchItemWidget> MatchItemClass;
+
+	/** 关闭编辑 Toggle 后弹出的三选确认弹窗类（指向 WBP 子类） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceDispatch")
+	TSubclassOf<UPreviewConfirmPopupWidget> PreviewConfirmPopupClass;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -93,6 +106,12 @@ private:
 	// 自动分配派发后缓存的重映射路径（PathId -> PathSaveData），
 	// 等收到 assignment_result 后再按分配结果转成 DroneId -> PathSaveData
 	TMap<int32, FDronePathSaveData> PendingAutoPathsByPathId;
+
+	// ---- 路径编辑模式状态 ----
+	bool bInPathEditMode = false;
+	bool bHasSavedPreviewData = false;
+	// 已保存到内存的临时路径（DroneId -> PathSaveData）
+	TMap<int32, FDronePathSaveData> SavedPreviewData;
 
 	// OnAssignmentResult 订阅句柄（NativeDestruct 中移除）
 	FDelegateHandle AssignmentResultHandle;
@@ -139,6 +158,32 @@ private:
 
 	UFUNCTION()
 	void OnAutoAssignCheckChanged(bool bIsChecked);
+
+	// ---- 路径编辑模式 ----
+	UFUNCTION()
+	void OnPathEditToggleChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnSavePathClicked();
+
+	UFUNCTION()
+	void OnPreviewConfirmChoice(EPreviewConfirmChoice Choice);
+
+	// 编辑模式指令派发的响应回调（不受 AutoAssign 分支影响）
+	UFUNCTION()
+	void OnEditDispatchResponse(bool bSuccess, const FString& ResponseBody);
+
+	// 拿到 DroneOps 控制器（编辑逻辑宿主）
+	class ADroneOpsPlayerController* GetDroneOpsController() const;
+
+	// 显示三选确认弹窗
+	void ShowPreviewConfirmPopup();
+
+	// 取当前要用于预演/派发的数据：优先已保存，否则实时构建
+	TMap<int32, FDronePathSaveData> ResolvePreviewDispatchMap();
+
+	// 复位编辑状态与 UI
+	void ResetPathEditState();
 
 	// 收到后端 assignment_result：同步槽位显示并启动影子机播放
 	void HandleAssignmentResult(const FString& ArrayId, const TArray<FDronePathAssignment>& Assignments);
