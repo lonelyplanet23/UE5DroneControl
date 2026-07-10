@@ -133,10 +133,38 @@ public:
 	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
 	virtual void StopClickTargetSending() override;
 
+	/** Set continuous vertical input (-1 down, +1 up). Local Z is handled separately from click movement. */
+	void SetVerticalMoveInput(float Direction);
+
+	/** Stop vertical movement. Optionally send the final height target once before stopping. */
+	void StopVerticalMove(bool bSendFinalCommand = true);
+
 private:
 	bool bInAssemblyMode = false;
 	bool bIsPaused = false;
 	bool bWasMovingBeforePause = false;
+	bool bVerticalMoveActive = false;
+	float VerticalMoveDirection = 0.0f;
+	FVector VerticalCommandTargetLocation = FVector::ZeroVector;
+
+	/** Local shadow-drone vertical speed in centimeters per second. */
+	UPROPERTY(EditAnywhere, Category = "Vertical Control", meta = (ClampMin = "1.0"))
+	float VerticalMoveSpeedCmPerSec = 300.0f;
+
+	/** Minimum target height in centimeters relative to the drone GPS anchor. */
+	UPROPERTY(EditAnywhere, Category = "Vertical Control")
+	float MinVerticalHeightCm = 50.0f;
+
+	/** Maximum target height in centimeters relative to the drone GPS anchor. */
+	UPROPERTY(EditAnywhere, Category = "Vertical Control")
+	float MaxVerticalHeightCm = 10000.0f;
+
+	/**
+	 * Shared WebSocket target interval for click and vertical movement.
+	 * Backend currently consumes one command at 2 Hz, so the default is 0.5 seconds.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Vertical Control", meta = (ClampMin = "0.05"))
+	float WebSocketTargetSendIntervalSec = 0.5f;
 
 	// Smooth speed for following mirror drone position (cm/s interp speed)
 	UPROPERTY(EditAnywhere, Category = "Assembly", meta = (ClampMin = "1.0"))
@@ -156,6 +184,8 @@ private:
 
 	// Send a WebSocket move command to the backend with anchor subtraction applied.
 	void SendWebSocketMoveCommand();
+	void RefreshVerticalCommandTarget();
+	float GetVerticalAnchorWorldZ() const;
 
 	float WsSendTimer = 0.0f;
 };

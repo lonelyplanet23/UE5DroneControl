@@ -166,12 +166,31 @@ void AMultiDroneCharacter::Tick(float DeltaTime)
 	if (bIsPaused)
 	{
 		bSendClickTarget = false;
+		bVerticalMoveActive = false;
+		VerticalMoveDirection = 0.0f;
 	}
 
 	// Disable parent UDP send — shadow drones use WebSocket exclusively
 	bEnableUDPSend = false;
 
 	Super::Tick(DeltaTime);
+
+	// Parent click movement intentionally preserves the current Actor Z. Apply
+	// shadow-drone vertical movement afterwards so Q/E owns Z independently.
+	if (bVerticalMoveActive && !bIsPaused && !bInAssemblyMode)
+	{
+		FVector NewLocation = GetActorLocation();
+		const float AnchorWorldZ = GetVerticalAnchorWorldZ();
+		const float MinAllowedHeight = FMath::Min(MinVerticalHeightCm, MaxVerticalHeightCm);
+		const float MaxAllowedHeight = FMath::Max(MinVerticalHeightCm, MaxVerticalHeightCm);
+		const float NewRelativeZ = FMath::Clamp(
+			(NewLocation.Z - AnchorWorldZ) + VerticalMoveDirection * VerticalMoveSpeedCmPerSec * DeltaTime,
+			MinAllowedHeight,
+			MaxAllowedHeight);
+		NewLocation.Z = AnchorWorldZ + NewRelativeZ;
+		SetActorLocation(NewLocation);
+		RefreshVerticalCommandTarget();
+	}
 
 	if (!Registry)
 	{
@@ -205,13 +224,15 @@ void AMultiDroneCharacter::Tick(float DeltaTime)
 		}
 	}
 
-	// Periodic WebSocket move command (10 Hz) while moving toward a target
-	if (bSendClickTarget && !bIsPaused)
+	// Use one rate limiter for click and vertical targets. The default 0.5 s
+	// interval matches the backend's current 2 Hz command consumption rate.
+	if ((bSendClickTarget || bVerticalMoveActive) && !bIsPaused)
 	{
 		WsSendTimer += DeltaTime;
-		if (WsSendTimer >= SendInterval)
+		const float SafeSendInterval = FMath::Max(WebSocketTargetSendIntervalSec, 0.05f);
+		if (WsSendTimer >= SafeSendInterval)
 		{
-			WsSendTimer = 0.0f;
+			WsSendTimer = FMath::Fmod(WsSendTimer, SafeSendInterval);
 			SendWebSocketMoveCommand();
 		}
 	}
@@ -230,6 +251,9 @@ void AMultiDroneCharacter::EnterAssemblyMode()
 
 	bInAssemblyMode = true;
 	bSendClickTarget = false;
+	bVerticalMoveActive = false;
+	VerticalMoveDirection = 0.0f;
+	WsSendTimer = 0.0f;
 
 	if (Registry)
 	{
@@ -297,6 +321,9 @@ void AMultiDroneCharacter::SetPaused(bool bPause)
 	{
 		bWasMovingBeforePause = bSendClickTarget;
 		bSendClickTarget = false;
+		bVerticalMoveActive = false;
+		VerticalMoveDirection = 0.0f;
+		WsSendTimer = 0.0f;
 	}
 	else
 	{
@@ -357,11 +384,21 @@ void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 
 	bFollowingMirror = false;
 
 	ClickTargetLocation = TargetLocation;
+	if (bVerticalMoveActive)
+	{
+		// A map click may carry ground Z. Keep the height currently owned by Q/E.
+		ClickTargetLocation.Z = GetActorLocation().Z;
+	}
 	ClickTargetMode = Mode;
 	bSendClickTarget = true;
 	ClickSendTimer = ClickSendInterval;
+	if (bVerticalMoveActive)
+	{
+		RefreshVerticalCommandTarget();
+	}
 
 	SendWebSocketMoveCommand();
+	WsSendTimer = 0.0f;
 }
 
 void AMultiDroneCharacter::SendWebSocketMoveCommand()
@@ -378,7 +415,7 @@ void AMultiDroneCharacter::SendWebSocketMoveCommand()
 		return;
 	}
 
-	FVector SendLocation = ClickTargetLocation;
+	FVector SendLocation = bVerticalMoveActive ? VerticalCommandTargetLocation : ClickTargetLocation;
 	if (Registry)
 	{
 		if (AActor* ReceiverActor = Registry->GetReceiverActor(DroneId))
@@ -387,7 +424,8 @@ void AMultiDroneCharacter::SendWebSocketMoveCommand()
 			{
 				if (Receiver->bHasGpsAnchor)
 				{
-					SendLocation = ClickTargetLocation - Receiver->AnchorWorldLocation;
+					const FVector WorldTarget = bVerticalMoveActive ? VerticalCommandTargetLocation : ClickTargetLocation;
+					SendLocation = WorldTarget - Receiver->AnchorWorldLocation;
 				}
 				else
 				{
@@ -409,6 +447,97 @@ void AMultiDroneCharacter::SendWebSocketMoveCommand()
 void AMultiDroneCharacter::StopClickTargetSending()
 {
 	bSendClickTarget = false;
+	if (bVerticalMoveActive)
+	{
+		const FVector CurrentLocation = GetActorLocation();
+		VerticalCommandTargetLocation.X = CurrentLocation.X;
+		VerticalCommandTargetLocation.Y = CurrentLocation.Y;
+		VerticalCommandTargetLocation.Z = CurrentLocation.Z;
+	}
+}
+
+void AMultiDroneCharacter::SetVerticalMoveInput(float Direction)
+{
+	const float ClampedDirection = FMath::Clamp(Direction, -1.0f, 1.0f);
+	if (FMath::IsNearlyZero(ClampedDirection))
+	{
+		StopVerticalMove();
+		return;
+	}
+
+	if (bInAssemblyMode || bIsPaused)
+	{
+		return;
+	}
+
+	if (!bVerticalMoveActive)
+	{
+		bVerticalMoveActive = true;
+		bFollowingMirror = false;
+		VerticalCommandTargetLocation = bSendClickTarget ? ClickTargetLocation : GetActorLocation();
+		VerticalCommandTargetLocation.Z = GetActorLocation().Z;
+
+		// Make the first updated height eligible for sending on the next Actor Tick.
+		WsSendTimer = FMath::Max(WebSocketTargetSendIntervalSec, 0.05f);
+	}
+
+	VerticalMoveDirection = ClampedDirection;
+}
+
+void AMultiDroneCharacter::StopVerticalMove(bool bSendFinalCommand)
+{
+	if (!bVerticalMoveActive)
+	{
+		return;
+	}
+
+	RefreshVerticalCommandTarget();
+	if (bSendFinalCommand && !bIsPaused)
+	{
+		SendWebSocketMoveCommand();
+	}
+
+	// If XY click movement is still active, keep its future commands at the
+	// final Q/E height rather than reverting to the original map-click Z.
+	if (bSendClickTarget)
+	{
+		ClickTargetLocation.Z = VerticalCommandTargetLocation.Z;
+	}
+
+	bVerticalMoveActive = false;
+	VerticalMoveDirection = 0.0f;
+	WsSendTimer = 0.0f;
+}
+
+void AMultiDroneCharacter::RefreshVerticalCommandTarget()
+{
+	if (!bVerticalMoveActive)
+	{
+		return;
+	}
+
+	if (bSendClickTarget)
+	{
+		VerticalCommandTargetLocation.X = ClickTargetLocation.X;
+		VerticalCommandTargetLocation.Y = ClickTargetLocation.Y;
+	}
+	VerticalCommandTargetLocation.Z = GetActorLocation().Z;
+}
+
+float AMultiDroneCharacter::GetVerticalAnchorWorldZ() const
+{
+	if (Registry)
+	{
+		if (const ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(Registry->GetReceiverActor(DroneId)))
+		{
+			if (Receiver->bHasGpsAnchor)
+			{
+				return Receiver->AnchorWorldLocation.Z;
+			}
+		}
+	}
+
+	return 0.0f;
 }
 
 void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt)
@@ -446,6 +575,9 @@ void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event,
 	// Reset to mirror-following mode; Tick will continuously sync position from now on.
 	bFollowingMirror = true;
 	bSendClickTarget = false;
+	bVerticalMoveActive = false;
+	VerticalMoveDirection = 0.0f;
+	WsSendTimer = 0.0f;
 
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: '%s' event — now following mirror drone"), *DroneName, *Event);
 }
