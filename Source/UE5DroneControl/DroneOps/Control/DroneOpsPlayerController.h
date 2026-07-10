@@ -11,6 +11,8 @@
 
 class UDroneRegistrySubsystem;
 class ADronePathActor;
+class AMultiDroneCharacter;
+class UUserWidget;
 
 /**
  * Delegate for when drone info panel is requested by middle click.
@@ -35,6 +37,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
 	virtual void Tick(float DeltaTime) override;
 
@@ -151,6 +154,18 @@ private:
 	UPROPERTY()
 	UUserWidget* CurrentDroneInfoPanel = nullptr;
 
+	/** Drone currently bound to the open information panel. */
+	int32 CurrentDroneInfoDroneId = 0;
+
+	/** Information panel refresh period. Default 0.2 seconds = 5 Hz. */
+	UPROPERTY(EditAnywhere, Category = "HUD", meta = (ClampMin = "0.05"))
+	float DroneInfoPanelRefreshIntervalSec = 0.2f;
+
+	FTimerHandle DroneInfoRefreshTimerHandle;
+
+	/** Shadow drones that received vertical input on the previous controller tick. */
+	TArray<TWeakObjectPtr<AMultiDroneCharacter>> VerticallyControlledDrones;
+
 	/** Last non-free camera target so F can restore it */
 	UPROPERTY()
 	TObjectPtr<AActor> LastFollowViewTarget = nullptr;
@@ -186,6 +201,10 @@ private:
 
 	/** Open drone info panel for given DroneId (C++ implementation) */
 	void OpenDroneInfoPanel(int32 DroneId);
+	void RefreshDroneInfoPanel();
+	void CloseCurrentDroneInfoPanel();
+	void UpdateSelectedDroneVerticalControl();
+	void StopSelectedDroneVerticalControl(bool bSendFinalCommand = true);
 
 	UFUNCTION(Exec)
 	void TestSendArrayTask();

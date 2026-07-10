@@ -31,6 +31,12 @@
 
 namespace
 {
+	struct FDroneInfoPanelUpdateParams
+	{
+		FDroneTelemetrySnapshot Snapshot;
+		FString DroneName;
+	};
+
 	bool IsFr2ControllableDroneActor(const AActor* Actor)
 	{
 		return IsValid(Actor) && Actor->IsA(AMultiDroneCharacter::StaticClass());
@@ -166,6 +172,15 @@ ADroneOpsPlayerController::ADroneOpsPlayerController()
 	bEnableMouseOverEvents = true;
 
 	PrimaryActorTick.bCanEverTick = true;
+
+	// Keep the Blueprint property overridable, but provide the project panel as
+	// the C++ fallback so middle-click works when a controller BP has no value.
+	static ConstructorHelpers::FClassFinder<UUserWidget> DroneInfoPanelClass(
+		TEXT("/Game/DroneOps/UI/WBP_DroneInfoPanel"));
+	if (DroneInfoPanelClass.Succeeded())
+	{
+		DroneInfoPanelWidgetClass = DroneInfoPanelClass.Class;
+	}
 }
 
 void ADroneOpsPlayerController::BeginPlay()
@@ -225,6 +240,13 @@ void ADroneOpsPlayerController::BeginPlay()
 		},
 		0.2f,
 		false);
+}
+
+void ADroneOpsPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	StopSelectedDroneVerticalControl(false);
+	CloseCurrentDroneInfoPanel();
+	Super::EndPlay(EndPlayReason);
 }
 
 void ADroneOpsPlayerController::SetupInputComponent()
@@ -329,6 +351,17 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 		}
 	}
 
+	// Q/E is reserved for the free camera in Free mode. In preview camera modes
+	// it controls the local shadow drones represented by the registry selection.
+	if (CameraModeState.CameraMode == EDroneCameraMode::Free)
+	{
+		StopSelectedDroneVerticalControl();
+	}
+	else
+	{
+		UpdateSelectedDroneVerticalControl();
+	}
+
 	// Top-down camera: lock XY to the drone we entered TopDown on, fixed height, looking straight down
 	if (CameraModeState.CameraMode == EDroneCameraMode::TopDown && TopDownCamActor && IsValid(TopDownCamActor))
 	{
@@ -371,6 +404,70 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 	{
 		HoveredDroneId = 0;
 	}
+}
+
+void ADroneOpsPlayerController::UpdateSelectedDroneVerticalControl()
+{
+	if (!DroneRegistry || USequenceDispatchPanelWidget::IsPanelInteractive())
+	{
+		StopSelectedDroneVerticalControl();
+		return;
+	}
+
+	const float Direction = (IsInputKeyDown(EKeys::E) ? 1.0f : 0.0f)
+		- (IsInputKeyDown(EKeys::Q) ? 1.0f : 0.0f);
+	if (FMath::IsNearlyZero(Direction))
+	{
+		StopSelectedDroneVerticalControl();
+		return;
+	}
+
+	TArray<TWeakObjectPtr<AMultiDroneCharacter>> CurrentControlledDrones;
+	const TArray<int32> SelectedDroneIds = DroneRegistry->GetMultiSelectedDrones();
+	for (const int32 DroneId : SelectedDroneIds)
+	{
+		EDroneControlLockReason LockReason = EDroneControlLockReason::None;
+		if (DroneRegistry->IsControlLocked(DroneId, LockReason))
+		{
+			continue;
+		}
+
+		AMultiDroneCharacter* ShadowDrone = Cast<AMultiDroneCharacter>(DroneRegistry->GetSenderPawn(DroneId));
+		if (!IsValid(ShadowDrone))
+		{
+			continue;
+		}
+
+		ShadowDrone->SetVerticalMoveInput(Direction);
+		CurrentControlledDrones.AddUnique(TWeakObjectPtr<AMultiDroneCharacter>(ShadowDrone));
+	}
+
+	// Selection or lock state may change while a key is held. Stop actors that
+	// are no longer part of the canonical registry selection.
+	for (const TWeakObjectPtr<AMultiDroneCharacter>& PreviousDrone : VerticallyControlledDrones)
+	{
+		if (AMultiDroneCharacter* ShadowDrone = PreviousDrone.Get())
+		{
+			if (!CurrentControlledDrones.Contains(PreviousDrone))
+			{
+				ShadowDrone->StopVerticalMove(false);
+			}
+		}
+	}
+
+	VerticallyControlledDrones = MoveTemp(CurrentControlledDrones);
+}
+
+void ADroneOpsPlayerController::StopSelectedDroneVerticalControl(bool bSendFinalCommand)
+{
+	for (const TWeakObjectPtr<AMultiDroneCharacter>& ControlledDrone : VerticallyControlledDrones)
+	{
+		if (AMultiDroneCharacter* ShadowDrone = ControlledDrone.Get())
+		{
+			ShadowDrone->StopVerticalMove(bSendFinalCommand);
+		}
+	}
+	VerticallyControlledDrones.Empty();
 }
 
 void ADroneOpsPlayerController::OnPrimaryClick()
@@ -461,33 +558,15 @@ void ADroneOpsPlayerController::OnShowInfo()
 
 void ADroneOpsPlayerController::OpenDroneInfoPanel(int32 DroneId)
 {
-	if (!DroneRegistry || !DroneInfoPanelWidgetClass)
+	if (!DroneRegistry || !DroneInfoPanelWidgetClass || DroneId <= 0)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[FR-03] OpenDroneInfoPanel: DroneRegistry=%p, WidgetClass=%p"),
 			DroneRegistry.Get(), DroneInfoPanelWidgetClass.Get());
 		return;
 	}
 
-	// Close existing panel if any
-	if (CurrentDroneInfoPanel && CurrentDroneInfoPanel->IsValidLowLevel())
-	{
-		CurrentDroneInfoPanel->RemoveFromParent();
-		CurrentDroneInfoPanel = nullptr;
-	}
+	CloseCurrentDroneInfoPanel();
 
-	// Get telemetry snapshot
-	FDroneTelemetrySnapshot Snapshot;
-	bool bGotTelemetry = DroneRegistry->GetTelemetry(DroneId, Snapshot);
-	Snapshot.DroneId = DroneId;
-	UE_LOG(LogTemp, Log, TEXT("[FR-03] GetTelemetry for DroneId=%d, result=%d"), DroneId, bGotTelemetry);
-
-	// Get drone descriptor
-	FDroneDescriptor Descriptor;
-	bool bGotDescriptor = DroneRegistry->GetDroneDescriptor(DroneId, Descriptor);
-	UE_LOG(LogTemp, Log, TEXT("[FR-03] GetDroneDescriptor for DroneId=%d, name=%s, result=%d"),
-		DroneId, *Descriptor.Name, bGotDescriptor);
-
-	// Create widget instance
 	UUserWidget* NewPanel = CreateWidget(this, DroneInfoPanelWidgetClass);
 	if (!NewPanel)
 	{
@@ -495,39 +574,79 @@ void ADroneOpsPlayerController::OpenDroneInfoPanel(int32 DroneId)
 		return;
 	}
 
-	// Call UpdateFromSnapshot on the widget
-	// The function is BlueprintCallable, so we can call it via reflection
-	UFunction* Func = NewPanel->FindFunction(FName("UpdateFromSnapshot"));
-	if (Func)
-	{
-		// Prepare parameters: struct Snapshot + string DroneName
-		TArray<uint8> ParamsBuffer;
-		ParamsBuffer.SetNum(Func->ParmsSize);
-
-		// First parameter is Snapshot
-		FDroneTelemetrySnapshot* pSnapshot = reinterpret_cast<FDroneTelemetrySnapshot*>(ParamsBuffer.GetData());
-		*pSnapshot = Snapshot;
-
-		// Second parameter is DroneName (FString)
-		FString* pName = reinterpret_cast<FString*>(ParamsBuffer.GetData() + sizeof(FDroneTelemetrySnapshot));
-		*pName = Descriptor.Name;
-
-		// Call the function
-		NewPanel->ProcessEvent(Func, ParamsBuffer.GetData());
-		UE_LOG(LogTemp, Log, TEXT("[FR-03] Called UpdateFromSnapshot with DroneId=%d, name=%s"), DroneId, *Descriptor.Name);
-	}
-	else
+	if (!NewPanel->FindFunction(FName("UpdateFromSnapshot")))
 	{
 		UE_LOG(LogTemp, Error, TEXT("[FR-03] UpdateFromSnapshot function not found on widget"));
+		return;
 	}
 
-	// Add to viewport at top-left
 	NewPanel->AddToViewport();
 	NewPanel->SetPositionInViewport(FVector2D(10, 10));
-
-	// Save reference
 	CurrentDroneInfoPanel = NewPanel;
+	CurrentDroneInfoDroneId = DroneId;
+
+	RefreshDroneInfoPanel();
+	if (!IsValid(CurrentDroneInfoPanel) || CurrentDroneInfoDroneId != DroneId)
+	{
+		return;
+	}
+	GetWorldTimerManager().SetTimer(
+		DroneInfoRefreshTimerHandle,
+		this,
+		&ADroneOpsPlayerController::RefreshDroneInfoPanel,
+		FMath::Max(DroneInfoPanelRefreshIntervalSec, 0.05f),
+		true);
+
 	UE_LOG(LogTemp, Log, TEXT("[FR-03] Info panel opened successfully for DroneId=%d"), DroneId);
+}
+
+void ADroneOpsPlayerController::RefreshDroneInfoPanel()
+{
+	if (!DroneRegistry || CurrentDroneInfoDroneId <= 0 ||
+		!IsValid(CurrentDroneInfoPanel) || !CurrentDroneInfoPanel->IsInViewport())
+	{
+		CloseCurrentDroneInfoPanel();
+		return;
+	}
+
+	FDroneTelemetrySnapshot Snapshot;
+	DroneRegistry->GetTelemetry(CurrentDroneInfoDroneId, Snapshot);
+	Snapshot.DroneId = CurrentDroneInfoDroneId;
+
+	FString DroneName = FString::Printf(TEXT("Drone-%d"), CurrentDroneInfoDroneId);
+	FDroneDescriptor Descriptor;
+	if (DroneRegistry->GetDroneDescriptor(CurrentDroneInfoDroneId, Descriptor) && !Descriptor.Name.IsEmpty())
+	{
+		DroneName = Descriptor.Name;
+	}
+
+	UFunction* UpdateFunction = CurrentDroneInfoPanel->FindFunction(FName("UpdateFromSnapshot"));
+	if (!UpdateFunction || UpdateFunction->ParmsSize != sizeof(FDroneInfoPanelUpdateParams))
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("[FR-03] UpdateFromSnapshot signature mismatch: function=%p, expected=%d, actual=%d"),
+			UpdateFunction,
+			static_cast<int32>(sizeof(FDroneInfoPanelUpdateParams)),
+			UpdateFunction ? UpdateFunction->ParmsSize : 0);
+		CloseCurrentDroneInfoPanel();
+		return;
+	}
+
+	FDroneInfoPanelUpdateParams Params;
+	Params.Snapshot = Snapshot;
+	Params.DroneName = MoveTemp(DroneName);
+	CurrentDroneInfoPanel->ProcessEvent(UpdateFunction, &Params);
+}
+
+void ADroneOpsPlayerController::CloseCurrentDroneInfoPanel()
+{
+	GetWorldTimerManager().ClearTimer(DroneInfoRefreshTimerHandle);
+	if (IsValid(CurrentDroneInfoPanel) && CurrentDroneInfoPanel->IsInViewport())
+	{
+		CurrentDroneInfoPanel->RemoveFromParent();
+	}
+	CurrentDroneInfoPanel = nullptr;
+	CurrentDroneInfoDroneId = 0;
 }
 
 void ADroneOpsPlayerController::OnFreeCamToggle()
