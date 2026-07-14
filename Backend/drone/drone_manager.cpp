@@ -63,13 +63,14 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
     }
 
     auto ctx = std::make_unique<DroneContext>(drone_id, slot, name);
+    CommandQueue* command_queue = ctx->command_queue.get();
     if (!jetson_ip.empty()) {
         ctx->jetson_ip = jetson_ip;
     }
     ctx->send_port = send_port > 0 ? send_port : 8889 + (slot - 1) * 2;
 
     ctx->state_machine = std::make_unique<StateMachine>(
-        [this, drone_id](StateEvent event) {
+        [this, drone_id, command_queue](StateEvent event) {
             // NOTE: 此回调在持有 drones_mutex_ 的线程上被触发，
             //       必须用 GetContextUnsafe（不加锁）而非 GetContext。
             auto* ctx = GetContextUnsafe(drone_id);
@@ -82,9 +83,13 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
                         state_change_cb_(drone_id, event, anchor_manager_.GetAnchor(drone_id));
                     }
                     hb_manager_.Start(drone_id, ctx->jetson_ip, ctx->send_port,
-                        [this, drone_id](DroneControlPacket& cmd) -> bool {
-                            auto* q_ctx = GetContext(drone_id);
-                            return q_ctx && q_ctx->command_queue->Pop(cmd);
+                        [command_queue](DroneControlPacket& cmd) -> bool {
+                            // The queue owns its own mutex and remains alive until
+                            // RemoveDrone stops and joins this heartbeat thread.
+                            // Avoid taking drones_mutex_ here: LostConnection is
+                            // emitted while that mutex is held and synchronously
+                            // stops the heartbeat, so reacquiring it would deadlock.
+                            return command_queue && command_queue->Pop(cmd);
                         });
                     break;
 

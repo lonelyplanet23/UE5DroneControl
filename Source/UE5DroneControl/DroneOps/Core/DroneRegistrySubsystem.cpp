@@ -346,9 +346,19 @@ void UDroneRegistrySubsystem::SetPrimarySelectedDrone(int32 DroneId)
 void UDroneRegistrySubsystem::SetMultiSelectedDrones(const TArray<int32>& DroneIds)
 {
 	MultiSelectedDroneIds = DroneIds;
+	if (DroneIds.IsEmpty())
+	{
+		// Keep the selection invariant explicit: an empty multi-selection has no primary.
+		// This is important when Shift-click toggles the final selected drone off.
+		if (PrimarySelectedDroneId > 0)
+		{
+			SetPrimarySelectedDrone(0);
+		}
+		return;
+	}
 
 	// Update primary to first in list if not already selected
-	if (DroneIds.Num() > 0 && !DroneIds.Contains(PrimarySelectedDroneId))
+	if (!DroneIds.Contains(PrimarySelectedDroneId))
 	{
 		SetPrimarySelectedDrone(DroneIds[0]);
 	}
