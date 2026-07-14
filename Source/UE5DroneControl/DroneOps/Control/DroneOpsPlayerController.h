@@ -276,6 +276,21 @@ private:
 	/** Whether Shift is held — used for multi-select on click */
 	bool bShiftHeld = false;
 
+	// ---- 框选状态 ----
+	/** Shift+左键按下时记录起始屏幕坐标，等待 OnPrimaryReleased 决定是框选还是短点击 */
+	bool bIsBoxSelecting = false;
+	FVector2D BoxSelectStartScreen = FVector2D::ZeroVector;
+	/** 框选拖拽期间每帧更新的当前鼠标位置，提交时用此值而非释放后重新读取 */
+	FVector2D BoxSelectCurrentScreen = FVector2D::ZeroVector;
+	/** 拖拽超过此像素距离后才触发框选，否则视为短点击 */
+	static constexpr float BoxSelectThresholdPx = 5.0f;
+
+	/** 根据起止屏幕矩形对场景中所有影子机做一次切换并提交最终选中集合 */
+	void CommitBoxSelect(FVector2D StartScreen, FVector2D EndScreen);
+
+	/** 框选完成逻辑（由 OnPrimaryReleased 和 Tick 共同调用，内置幂等保护） */
+	void FinishBoxSelectIfPending();
+
 	/** Last drone ID the user explicitly switched to (key 0/1 or click). F restores this. -1 = never set. */
 	int32 LastFollowedDroneId = -1;
 

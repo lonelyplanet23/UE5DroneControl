@@ -22,6 +22,7 @@
 #include "Engine/OverlapResult.h"
 #include "UI/UIManagerBlueprintLibrary.h"
 #include "UI/SequenceDispatchPanelWidget.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Blueprint/UserWidget.h"
@@ -435,6 +436,21 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 	{
 		HoveredDroneId = 0;
 	}
+
+	// 自由视角下 IE_Released 事件可能不稳定，用轮询兜底：左键已抬起但框选未提交时主动完成
+	if (bIsBoxSelecting)
+	{
+		// 每帧持续记录鼠标位置——GetMousePositionOnViewport 返回 viewport-relative 逻辑像素，
+		// 乘以 DPI scale 转为物理像素，与 ProjectWorldLocationToScreen(true) 坐标系一致
+		const float DPI = UWidgetLayoutLibrary::GetViewportScale(this);
+		FVector2D LogicalPos = UWidgetLayoutLibrary::GetMousePositionOnViewport(this);
+		BoxSelectCurrentScreen = LogicalPos * DPI;
+
+		if (!IsInputKeyDown(EKeys::LeftMouseButton))
+		{
+			FinishBoxSelectIfPending();
+		}
+	}
 }
 
 void ADroneOpsPlayerController::UpdateSelectedDroneVerticalControl()
@@ -516,6 +532,20 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 		return;
 	}
 
+	// Shift 按下：记录起始坐标，推迟到 OnPrimaryReleased 决定是框选还是短点击；
+	// 此时不立即执行选中或派发，避免误触发。
+	if (bShiftHeld)
+	{
+		// GetMousePositionOnViewport 返回 viewport-relative 逻辑像素，乘以 DPI = 物理像素，
+		// 与 ProjectWorldLocationToScreen(true) 坐标系一致
+		const float DPI = UWidgetLayoutLibrary::GetViewportScale(this);
+		FVector2D LogicalPos = UWidgetLayoutLibrary::GetMousePositionOnViewport(this);
+		BoxSelectStartScreen = LogicalPos * DPI;
+		BoxSelectCurrentScreen = BoxSelectStartScreen;
+		bIsBoxSelecting = true;
+		return;
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: OnPrimaryClick"));
 	FVector WorldLocation = FVector::ZeroVector;
 
@@ -567,8 +597,167 @@ void ADroneOpsPlayerController::OnPrimaryReleased()
 {
 	if (bPathEditMode)
 	{
+		bIsBoxSelecting = false;
 		HandleEditModeReleased();
+		return;
 	}
+
+	FinishBoxSelectIfPending();
+}
+
+void ADroneOpsPlayerController::FinishBoxSelectIfPending()
+{
+	if (!bIsBoxSelecting)
+	{
+		return;
+	}
+
+	bIsBoxSelecting = false; // 先清标志，防止 Tick 与本函数同帧重复处理
+
+	if (USequenceDispatchPanelWidget::IsPanelInteractive())
+	{
+		return;
+	}
+
+	// 用拖拽期间持续记录的位置（不在释放后重新读，避免鼠标移动导致坐标偏差）
+	const FVector2D EndScreen = BoxSelectCurrentScreen;
+	const float Dist = FVector2D::Distance(BoxSelectStartScreen, EndScreen);
+
+	if (Dist <= BoxSelectThresholdPx)
+	{
+		// 短点击：按单机切换规则处理；不派发地图目标点
+		AActor* DroneActor = GetSelectableDroneUnderCursor();
+		if (DroneActor)
+		{
+			HandleDroneClick(DroneActor);
+		}
+	}
+	else
+	{
+		CommitBoxSelect(BoxSelectStartScreen, EndScreen);
+	}
+}
+
+void ADroneOpsPlayerController::CommitBoxSelect(FVector2D StartScreen, FVector2D EndScreen)
+{
+	if (!DroneRegistry)
+	{
+		return;
+	}
+
+	// 获取视口尺寸（用于 debug 输出）
+	int32 ViewportSizeX = 0, ViewportSizeY = 0;
+	GetViewportSize(ViewportSizeX, ViewportSizeY);
+
+	// 鼠标坐标已在 OnPrimaryClick/Tick 中转换为 viewport-relative 物理像素
+	// （GetMousePositionOnViewport × DPI），直接规范化为左上/右下即可。
+	const FVector2D BoxMin(FMath::Min(StartScreen.X, EndScreen.X), FMath::Min(StartScreen.Y, EndScreen.Y));
+	const FVector2D BoxMax(FMath::Max(StartScreen.X, EndScreen.X), FMath::Max(StartScreen.Y, EndScreen.Y));
+
+	const float DPIScale = UWidgetLayoutLibrary::GetViewportScale(this);
+	UE_LOG(LogTemp, Log, TEXT("CommitBoxSelect: Viewport=(%d,%d) DPI=%.2f Box=(%.0f,%.0f)-(%.0f,%.0f)"),
+		ViewportSizeX, ViewportSizeY, DPIScale, BoxMin.X, BoxMin.Y, BoxMax.X, BoxMax.Y);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan,
+			FString::Printf(TEXT("BoxSelect rect: (%.0f,%.0f)-(%.0f,%.0f) vp=(%d,%d) dpi=%.2f"),
+				BoxMin.X, BoxMin.Y, BoxMax.X, BoxMax.Y, ViewportSizeX, ViewportSizeY, DPIScale));
+	}
+
+	// 在当前选中集合基础上切换框内无人机
+	TArray<int32> NewSelection = DroneRegistry->GetMultiSelectedDrones();
+	bool bAnyToggled = false;
+
+	// 遍历所有影子机（离线与在线均参与框选）
+	for (TActorIterator<AMultiDroneCharacter> It(GetWorld()); It; ++It)
+	{
+		AMultiDroneCharacter* ShadowDrone = *It;
+		if (!IsValid(ShadowDrone) || ShadowDrone->DroneId <= 0)
+		{
+			continue;
+		}
+
+		// bPlayerViewportRelative=true：返回相对于游戏视口左上角的物理像素坐标，
+		// 与 GetMousePositionOnViewport * DPI 的坐标系一致
+		FVector2D ScreenPos;
+		if (!ProjectWorldLocationToScreen(ShadowDrone->GetActorLocation(), ScreenPos, true))
+		{
+			UE_LOG(LogTemp, Log, TEXT("CommitBoxSelect: Drone %d project failed (behind camera?)"), ShadowDrone->DroneId);
+			continue;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("CommitBoxSelect: Drone %d screen=(%.0f,%.0f)"),
+			ShadowDrone->DroneId, ScreenPos.X, ScreenPos.Y);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow,
+				FString::Printf(TEXT("Drone %d screen=(%.0f,%.0f)"),
+					ShadowDrone->DroneId, ScreenPos.X, ScreenPos.Y));
+		}
+
+		// 直接像素坐标边界判定
+		if (ScreenPos.X < BoxMin.X || ScreenPos.X > BoxMax.X ||
+			ScreenPos.Y < BoxMin.Y || ScreenPos.Y > BoxMax.Y)
+		{
+			continue;
+		}
+
+		// 切换选中状态
+		if (NewSelection.Contains(ShadowDrone->DroneId))
+		{
+			NewSelection.Remove(ShadowDrone->DroneId);
+		}
+		else
+		{
+			NewSelection.AddUnique(ShadowDrone->DroneId);
+		}
+		bAnyToggled = true;
+	}
+
+	if (!bAnyToggled)
+	{
+		// 框内无可选影子机，保留原选中集合不变
+		UE_LOG(LogTemp, Log, TEXT("CommitBoxSelect: no drones in box, selection unchanged"));
+		return;
+	}
+
+	// 提交最终选中集合
+	if (NewSelection.IsEmpty())
+	{
+		DroneRegistry->ClearSelection();
+		SelectedDroneId = 0;
+		SelectedDroneActor = nullptr;
+	}
+	else
+	{
+		// 优先保留当前主选中机；若不在新集合中则使用集合首项
+		const int32 CurrentPrimary = DroneRegistry->GetPrimarySelectedDrone();
+		const int32 NewPrimary = NewSelection.Contains(CurrentPrimary) ? CurrentPrimary : NewSelection[0];
+
+		// 先设置主选中（会把 multi 临时清为 [NewPrimary]），再设置完整多选集合
+		// （此时 NewPrimary 已在列表中，SetMultiSelectedDrones 不会再次调用 SetPrimarySelectedDrone，
+		//  从而保留完整的多选集合。）
+		DroneRegistry->SetPrimarySelectedDrone(NewPrimary);
+		DroneRegistry->SetMultiSelectedDrones(NewSelection);
+
+		SelectedDroneId = NewPrimary;
+		SelectedDroneActor = FindShadowDroneById(GetWorld(), NewPrimary);
+	}
+
+	// 同步所有影子机的高亮显示
+	for (TActorIterator<AMultiDroneCharacter> It(GetWorld()); It; ++It)
+	{
+		AMultiDroneCharacter* ShadowDrone = *It;
+		if (!IsValid(ShadowDrone))
+		{
+			continue;
+		}
+		const bool bSelected = NewSelection.Contains(ShadowDrone->DroneId);
+		SetDronePrimarySelectedState(ShadowDrone, bSelected);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("CommitBoxSelect: %d drone(s) selected, primary=%d"),
+		NewSelection.Num(), SelectedDroneId);
 }
 
 void ADroneOpsPlayerController::OnShowInfo()
@@ -770,12 +959,13 @@ void ADroneOpsPlayerController::OnShiftPressed()
 	if (CameraModeState.CameraMode == EDroneCameraMode::Free)
 	{
 		bShowMouseCursor = true;
-
-		FInputModeGameAndUI InputMode;
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		InputMode.SetHideCursorDuringCapture(false);
-		SetInputMode(InputMode);
 	}
+
+	// 无论何种相机模式，Shift 按住期间左键按下（框选拖拽）不得触发鼠标捕获隐藏光标
+	FInputModeGameAndUI InputMode;
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+	SetInputMode(InputMode);
 }
 
 void ADroneOpsPlayerController::OnShiftReleased()
@@ -787,12 +977,25 @@ void ADroneOpsPlayerController::OnShiftReleased()
 		bShowMouseCursor = false;
 		SetInputMode(FInputModeGameOnly());
 	}
+	else
+	{
+		// 恢复默认的 GameAndUI 输入模式（允许鼠标捕获时隐藏光标）
+		SetInputMode(FInputModeGameAndUI());
+	}
 }
 
 void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
 {
-	if (!SelectedDroneActor || SelectedDroneId <= 0)
+	if (!DroneRegistry)
 	{
+		return;
+	}
+
+	// 派发必须读取 Registry 选中集合，不依赖可能过时的 SelectedDroneActor 缓存（需求 1.1.3）
+	const TArray<int32> MultiIds = DroneRegistry->GetMultiSelectedDrones();
+	if (MultiIds.IsEmpty())
+	{
+		UE_LOG(LogTemp, Log, TEXT("HandleMapClick: 选中集合为空，跳过派发"));
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange, TEXT("未选中无人机，无法派发目标点"));
@@ -800,188 +1003,149 @@ void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
 		return;
 	}
 
-	if (DroneRegistry)
+	constexpr float SpacingCm = 100.0f;
+	int32 DispatchIndex = 0;
+	int32 DispatchCount = 0;
+
+	for (const int32 Id : MultiIds)
 	{
 		EDroneControlLockReason LockReason = EDroneControlLockReason::None;
-		if (DroneRegistry->IsControlLocked(SelectedDroneId, LockReason))
+		if (DroneRegistry->IsControlLocked(Id, LockReason))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Drone %d is locked, map target ignored"), SelectedDroneId);
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("当前无人机不可控，目标点派发失败"));
-			}
-			return;
+			UE_LOG(LogTemp, Warning, TEXT("HandleMapClick: 跳过 Drone %d (locked, reason=%d)"), Id, (int32)LockReason);
+			continue;
+		}
+
+		AActor* TargetActor = ResolveDroneActorById(Id);
+		if (!IsValid(TargetActor))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("HandleMapClick: 跳过 Drone %d (actor not found)"), Id);
+			continue;
+		}
+
+		const FVector SlotLocation = WorldLocation + ComputeMultiDispatchOffset(DispatchIndex, SpacingCm);
+		++DispatchIndex;
+
+		if (AUE5DroneControlCharacter* DroneChar = Cast<AUE5DroneControlCharacter>(TargetActor))
+		{
+			DroneChar->SetClickTargetLocation(SlotLocation, 1);
+			++DispatchCount;
 		}
 	}
 
-	AActor* TargetActor = SelectedDroneActor.Get();
-	if (!IsValid(TargetActor))
+	if (DispatchCount > 0)
 	{
-		TargetActor = ResolveDroneActorById(SelectedDroneId);
-		SelectedDroneActor = TargetActor;
-	}
-
-	int32 EffectiveDroneId = SelectedDroneId;
-	if (TargetActor)
-	{
-		const int32 ActorDroneId = ResolveDroneIdFromActor(TargetActor);
-		if (ActorDroneId > 0)
+		UE_LOG(LogTemp, Log, TEXT("HandleMapClick: 派发到 %d 架无人机 -> (%.0f, %.0f, %.0f)"),
+			DispatchCount, WorldLocation.X, WorldLocation.Y, WorldLocation.Z);
+		if (GEngine)
 		{
-			EffectiveDroneId = ActorDroneId;
-			SelectedDroneId = ActorDroneId;
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
+				FString::Printf(TEXT("目标点已派发 -> %d 架 (%.0f, %.0f, %.0f)"),
+					DispatchCount, WorldLocation.X, WorldLocation.Y, WorldLocation.Z));
 		}
+		DrawDebugSphere(GetWorld(), WorldLocation, 50.0f, 12, FColor::Green, false, 3.0f);
 	}
-
-	// SetClickTargetLocation 内部（AMultiDroneCharacter 重写版本）已驱动 WebSocket 发送
-	if (AUE5DroneControlCharacter* SelectedChar = Cast<AUE5DroneControlCharacter>(TargetActor))
-	{
-		SelectedChar->SetClickTargetLocation(WorldLocation, 1);
-	}
-
-	const FString ActorName = TargetActor ? TargetActor->GetName() : FString::Printf(TEXT("Drone-%d"), EffectiveDroneId);
-	UE_LOG(LogTemp, Log, TEXT("FR2 Dispatch: Actor=%s SelectedDroneId=%d EffectiveDroneId=%d"),
-		*ActorName, SelectedDroneId, EffectiveDroneId);
-
-	// Dispatch to all other multi-selected drones
-	if (DroneRegistry)
-	{
-		TArray<int32> MultiIds = DroneRegistry->GetMultiSelectedDrones();
-		constexpr float SpacingCm = 100.0f;
-		int32 NextIndex = 1;
-		for (int32 Id : MultiIds)
-		{
-			if (Id == EffectiveDroneId) continue;
-
-			EDroneControlLockReason LockReason = EDroneControlLockReason::None;
-			if (DroneRegistry->IsControlLocked(Id, LockReason)) continue;
-
-			const FVector SlotLocation = WorldLocation + ComputeMultiDispatchOffset(NextIndex, SpacingCm);
-			++NextIndex;
-
-			if (AActor* OtherActor = ResolveDroneActorById(Id))
-			{
-				if (AUE5DroneControlCharacter* OtherChar = Cast<AUE5DroneControlCharacter>(OtherActor))
-				{
-					OtherChar->SetClickTargetLocation(SlotLocation, 1);
-				}
-			}
-		}
-		if (MultiIds.Num() > 1)
-		{
-			const int32 Count = MultiIds.Num();
-			UE_LOG(LogTemp, Log, TEXT("Multi-dispatch to %d drones -> (%.0f, %.0f, %.0f)"),
-				Count, WorldLocation.X, WorldLocation.Y, WorldLocation.Z);
-		}
-	}
-
-	const FString TargetName = ActorName;
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
-			FString::Printf(TEXT("目标点已派发 -> %s (%.0f, %.0f, %.0f)"),
-				*TargetName, WorldLocation.X, WorldLocation.Y, WorldLocation.Z));
-	}
-
-	DrawDebugSphere(GetWorld(), WorldLocation, 50.0f, 12, FColor::Green, false, 3.0f);
 }
 
 void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
 {
-	if (!ClickedActor)
+	if (!ClickedActor || !IsFr2ControllableDroneActor(ClickedActor))
 	{
 		return;
-	}
-
-	if (!IsFr2ControllableDroneActor(ClickedActor))
-	{
-		return;
-	}
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
-			FString::Printf(TEXT("Selected: %s - click map to assign target"), *ClickedActor->GetName()));
 	}
 
 	if (!DroneRegistry)
 	{
-		SelectedDroneId = 0;
-		SelectedDroneActor = ClickedActor;
 		return;
 	}
 
 	const int32 ClickedDroneId = ResolveDroneIdFromActor(ClickedActor);
 	if (ClickedDroneId <= 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Clicked drone has invalid DroneId: %s"), *ClickedActor->GetName());
+		UE_LOG(LogTemp, Warning, TEXT("HandleDroneClick: invalid DroneId for %s"), *ClickedActor->GetName());
 		return;
 	}
 
-	EDroneControlLockReason LockReason = EDroneControlLockReason::None;
-	if (DroneRegistry->IsControlLocked(ClickedDroneId, LockReason) &&
-		LockReason == EDroneControlLockReason::Offline)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Drone %d is offline, cannot select"), ClickedDroneId);
-		return;
-	}
+	TArray<int32> CurrentMulti = DroneRegistry->GetMultiSelectedDrones();
 
-	if (SelectedDroneActor && SelectedDroneActor != ClickedActor && !bShiftHeld)
+	if (CurrentMulti.Contains(ClickedDroneId))
 	{
-		SetDronePrimarySelectedState(SelectedDroneActor.Get(), false);
-	}
+		// 已选中 → 取消选中
+		CurrentMulti.Remove(ClickedDroneId);
+		SetDronePrimarySelectedState(ClickedActor, false);
 
-	SelectedDroneId = ClickedDroneId;
-	SelectedDroneActor = ClickedActor;
-
-	if (bShiftHeld && DroneRegistry)
-	{
-		// Shift+click: toggle this drone in the multi-selection
-		TArray<int32> CurrentMulti = DroneRegistry->GetMultiSelectedDrones();
-		if (CurrentMulti.Contains(ClickedDroneId))
+		if (CurrentMulti.IsEmpty())
 		{
-			CurrentMulti.Remove(ClickedDroneId);
-			SetDronePrimarySelectedState(ClickedActor, false);
+			// 集合清空
+			DroneRegistry->ClearSelection();
+			SelectedDroneId = 0;
+			SelectedDroneActor = nullptr;
+			UE_LOG(LogTemp, Log, TEXT("HandleDroneClick: deselected drone %d, selection empty"), ClickedDroneId);
 		}
 		else
 		{
-			CurrentMulti.Add(ClickedDroneId);
-			SetDronePrimarySelectedState(ClickedActor, true);
-		}
-		DroneRegistry->SetMultiSelectedDrones(CurrentMulti);
-
-		// Keep primary on the last clicked drone (or first remaining)
-		if (!CurrentMulti.IsEmpty())
-		{
-			DroneRegistry->SetPrimarySelectedDrone(CurrentMulti.Last());
+			// 若取消的是主选中机，把集合首项设为新主选中机
+			const int32 CurrentPrimary = DroneRegistry->GetPrimarySelectedDrone();
+			const int32 NewPrimary = (CurrentPrimary == ClickedDroneId) ? CurrentMulti[0] : CurrentPrimary;
+			// 先设主选中（primary 仍在旧 multi 中，不会触发 multi 清空），再更新 multi
+			DroneRegistry->SetPrimarySelectedDrone(NewPrimary);
+			DroneRegistry->SetMultiSelectedDrones(CurrentMulti);
+			SelectedDroneId = NewPrimary;
+			SelectedDroneActor = FindShadowDroneById(GetWorld(), NewPrimary);
+			UE_LOG(LogTemp, Log, TEXT("HandleDroneClick: deselected drone %d, new primary=%d, remaining=%d"),
+				ClickedDroneId, NewPrimary, CurrentMulti.Num());
 		}
 	}
 	else
 	{
-		// Normal click: clear multi-selection, select only this drone
-		DroneRegistry->SetPrimarySelectedDrone(ClickedDroneId);
+		// 未选中 → 加入选中集合（离线无人机不可选中）
+		EDroneControlLockReason LockReason = EDroneControlLockReason::None;
+		if (DroneRegistry->IsControlLocked(ClickedDroneId, LockReason) &&
+			LockReason == EDroneControlLockReason::Offline)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("HandleDroneClick: drone %d is offline, cannot select"), ClickedDroneId);
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
+					FString::Printf(TEXT("Drone %d 离线，无法选中"), ClickedDroneId));
+			}
+			return;
+		}
+
+		CurrentMulti.AddUnique(ClickedDroneId);
 		SetDronePrimarySelectedState(ClickedActor, true);
+
+		// 新加入的无人机成为主选中机；先设主选中再设完整 multi，避免 multi 被清空
+		DroneRegistry->SetPrimarySelectedDrone(ClickedDroneId);
+		DroneRegistry->SetMultiSelectedDrones(CurrentMulti);
+		SelectedDroneId = ClickedDroneId;
+		SelectedDroneActor = ClickedActor;
+
+		// 跟随视角切换到刚点击的无人机
+		if (CameraModeState.CameraMode == EDroneCameraMode::Follow)
+		{
+			LastFollowViewTarget = ClickedActor;
+			CameraModeState.FollowDroneId = ClickedDroneId;
+			LastFollowedDroneId = ClickedDroneId;
+			CameraModeState.LastFollowLocation = ClickedActor->GetActorLocation();
+			CameraModeState.LastFollowRotation = ClickedActor->GetActorRotation();
+			SetViewTargetWithBlend(ClickedActor, 0.35f);
+		}
+
+		FDroneDescriptor Desc;
+		FString DisplayName = FString::Printf(TEXT("Drone-%d"), ClickedDroneId);
+		if (DroneRegistry->GetDroneDescriptor(ClickedDroneId, Desc))
+		{
+			DisplayName = Desc.Name;
+		}
+		UE_LOG(LogTemp, Log, TEXT("HandleDroneClick: selected %s (ID=%d), total=%d"),
+			*DisplayName, ClickedDroneId, CurrentMulti.Num());
 	}
 
-	FDroneDescriptor Desc;
-	FString DisplayName = FString::Printf(TEXT("Drone-%d"), ClickedDroneId);
-	if (DroneRegistry->GetDroneDescriptor(ClickedDroneId, Desc))
+	if (GEngine)
 	{
-		DisplayName = Desc.Name;
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("Primary selected: %s (ID=%d)"), *DisplayName, ClickedDroneId);
-
-	// 跟随模式下，直接切换到点击的无人机Actor，不经过Registry查找（避免DroneId冲突导致视角错位）
-	if (CameraModeState.CameraMode == EDroneCameraMode::Follow)
-	{
-		LastFollowViewTarget = ClickedActor;
-		CameraModeState.FollowDroneId = ClickedDroneId;
-		LastFollowedDroneId = ClickedDroneId;
-		CameraModeState.LastFollowLocation = ClickedActor->GetActorLocation();
-		CameraModeState.LastFollowRotation = ClickedActor->GetActorRotation();
-		SetViewTargetWithBlend(ClickedActor, 0.35f);
-		UE_LOG(LogTemp, Log, TEXT("Switched to Follow Camera (FollowDroneId=%d, Target=%s)"),
-			ClickedDroneId, *ClickedActor->GetName());
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
+			FString::Printf(TEXT("选中: %d 架  主选中: %d"), DroneRegistry->GetMultiSelectedDrones().Num(), SelectedDroneId));
 	}
 }
 
