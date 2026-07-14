@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -83,6 +84,14 @@ bool is_array_mode(const std::string& mode)
     return mode == "scout" || mode == "patrol" || mode == "attack";
 }
 
+double current_unix_seconds()
+{
+    return static_cast<double>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count())
+        / 1000000.0;
+}
+
 } // namespace
 
 // ============================================================
@@ -121,6 +130,10 @@ HttpServer::HttpServer(const AppConfig& config,
             {"battery",  tel.battery},
             {"armed",    tel.IsArmed()},
             {"offboard", tel.IsOffboard()},
+            {"gps_lat",  tel.gps_lat},
+            {"gps_lon",  tel.gps_lon},
+            {"gps_alt",  tel.gps_alt},
+            {"gps_fix",  tel.gps_fix},
         };
         double roll, pitch, yaw;
         QuaternionUtils::QuatToEuler(
@@ -204,9 +217,39 @@ HttpServer::HttpServer(const AppConfig& config,
         spdlog::debug("[WS Push] assembly_timeout array={} {}/{}",
                       progress.array_id, progress.ready_count, progress.total_count);
         ws_manager_.broadcast(json_stringify(msg));
+
+        for (const auto& path : assembly_ctrl_.GetConfig().paths) {
+            int drone_id = 0;
+            try {
+                std::string raw = path.drone_id;
+                if (!raw.empty() && (raw[0] == 'd' || raw[0] == 'D')) raw = raw.substr(1);
+                drone_id = std::stoi(raw);
+            } catch (...) {
+                drone_id = 0;
+            }
+            if (drone_id <= 0) continue;
+
+            DroneTaskState state;
+            state.drone_id = drone_id;
+            state.array_id = assembly_ctrl_.GetConfig().array_id;
+            state.mode = assembly_ctrl_.GetConfig().mode;
+            state.state = "error";
+            state.waypoint_count = static_cast<int>(path.waypoints.size());
+            state.detail = "assembly_timeout";
+            PublishTaskState(state);
+        }
+    });
+
+    exec_engine_.SetTaskStateCallback([this](const DroneTaskState& state) {
+        PublishTaskState(state);
     });
 
     LoadDrones();
+}
+
+HttpServer::~HttpServer()
+{
+    exec_engine_.SetTaskStateCallback(nullptr);
 }
 
 // ============================================================
@@ -381,11 +424,23 @@ boost::json::value HttpServer::ApiListDrones() {
     for (const auto& rec : drone_records_) {
         int numeric_id = drone_id_from_string(rec.id);
         auto status = drone_mgr_.GetStatus(numeric_id);
+        const auto telemetry = drone_mgr_.GetLatestTelemetry(numeric_id);
         auto mapping = config_.port_map.find(rec.slot);
         const int recv_port = mapping != config_.port_map.end() ? mapping->second.recv_port : 0;
         const std::string topic_prefix = mapping != config_.port_map.end()
             ? mapping->second.ros_topic_prefix
             : "/px4_" + std::to_string(rec.slot);
+        DroneTaskState task_state;
+        {
+            std::lock_guard<std::mutex> task_lock(task_state_mutex_);
+            auto task_it = task_states_.find(numeric_id);
+            if (task_it != task_states_.end()) {
+                task_state = task_it->second;
+            } else {
+                task_state.drone_id = numeric_id;
+            }
+        }
+
         arr.push_back(boost::json::object{
             {"id", numeric_id},
             {"id_str", rec.id},
@@ -403,6 +458,19 @@ boost::json::value HttpServer::ApiListDrones() {
             {"z", status.pos_z},
             {"yaw", status.yaw},
             {"speed", status.speed},
+            {"gps_lat", telemetry.gps_lat},
+            {"gps_lon", telemetry.gps_lon},
+            {"gps_alt", telemetry.gps_alt},
+            {"gps_fix", telemetry.gps_fix},
+            {"armed", telemetry.IsArmed()},
+            {"offboard", telemetry.IsOffboard()},
+            {"task_mode", task_state.mode},
+            {"task_state", task_state.state},
+            {"task_array_id", task_state.array_id},
+            {"task_current_wp", task_state.current_wp},
+            {"task_waypoint_count", task_state.waypoint_count},
+            {"task_detail", task_state.detail},
+            {"task_updated_at", task_state.updated_at},
             {"ue_receive_port", recv_port},
             {"topic_prefix", topic_prefix},
             {"bit_index", rec.slot > 0 ? rec.slot - 1 : 0},
@@ -559,6 +627,20 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
     if (!assembly_ctrl_.Start(cfg, config_.assembly_safety_cylinder_m))
         throw ApiError(409, "assembly already in progress");
 
+    for (const auto& path : cfg.paths) {
+        int drone_id = 0;
+        try { drone_id = drone_id_from_string(path.drone_id); } catch (...) { drone_id = 0; }
+        if (drone_id <= 0) continue;
+
+        DroneTaskState state;
+        state.drone_id = drone_id;
+        state.array_id = cfg.array_id;
+        state.mode = cfg.mode;
+        state.state = "assembling";
+        state.waypoint_count = static_cast<int>(path.waypoints.size());
+        PublishTaskState(state);
+    }
+
     return boost::json::object{{"array_id", cfg.array_id}, {"status", "assembling"}};
 }
 
@@ -636,9 +718,50 @@ void HttpServer::AutoAssignDrones(AssemblyConfig& cfg) {
 }
 
 boost::json::value HttpServer::ApiStopArray(const std::string& id) {
+    const AssemblyConfig config = assembly_ctrl_.GetConfig();
     exec_engine_.StopAll();
     assembly_ctrl_.Stop();
+    for (const auto& path : config.paths) {
+        int drone_id = 0;
+        try { drone_id = drone_id_from_string(path.drone_id); } catch (...) { drone_id = 0; }
+        if (drone_id <= 0) continue;
+
+        DroneTaskState state;
+        state.drone_id = drone_id;
+        state.array_id = config.array_id;
+        state.mode = config.mode;
+        state.state = "standby";
+        state.waypoint_count = static_cast<int>(path.waypoints.size());
+        state.detail = "array_stopped";
+        PublishTaskState(state);
+    }
     return boost::json::object{{"array_id", id}, {"status", "stopped"}};
+}
+
+void HttpServer::PublishTaskState(const DroneTaskState& input)
+{
+    if (input.drone_id <= 0) return;
+
+    DroneTaskState state = input;
+    if (state.updated_at <= 0.0) state.updated_at = current_unix_seconds();
+
+    {
+        std::lock_guard<std::mutex> lock(task_state_mutex_);
+        task_states_[state.drone_id] = state;
+    }
+
+    ws_manager_.broadcast(json_stringify(boost::json::object{
+        {"type", "drone_task_state"},
+        {"drone_id", state.drone_id},
+        {"drone_id_str", drone_id_string(state.drone_id)},
+        {"array_id", state.array_id},
+        {"mode", state.mode},
+        {"state", state.state},
+        {"current_wp", state.current_wp},
+        {"waypoint_count", state.waypoint_count},
+        {"detail", state.detail},
+        {"updated_at", state.updated_at},
+    }));
 }
 
 // ============================================================
@@ -666,6 +789,8 @@ boost::json::value HttpServer::DebugDroneState(const std::string& id) {
         {"gps_lat", status.anchor.latitude},
         {"gps_lon", status.anchor.longitude},
         {"gps_alt", status.anchor.altitude},
+        {"control_ack_command_id", status.control_ack_command_id},
+        {"control_ack_sequence", static_cast<int64_t>(status.control_ack_sequence)},
     };
 }
 
@@ -675,11 +800,16 @@ boost::json::value HttpServer::DebugDroneQueue(const std::string& id) {
     boost::json::array items;
     for (const auto& cmd : drone_mgr_.GetCommandQueueSnapshot(drone_id)) {
         items.push_back(boost::json::object{
+            {"sequence", static_cast<int64_t>(cmd.sequence)},
             {"timestamp", cmd.timestamp},
+            {"slot", cmd.slot},
             {"x", cmd.x},
             {"y", cmd.y},
             {"z", cmd.z},
             {"mode", cmd.mode},
+            {"coordinate_frame", "NED"},
+            {"reference", "power_on_origin"},
+            {"unit", "m"},
         });
     }
     return boost::json::object{
@@ -701,9 +831,14 @@ boost::json::value HttpServer::DebugHeartbeat(const std::string& id) {
         {"running", hb.running},
         {"last_sent_time", hb.last_sent_time},
         {"sent_count", static_cast<int64_t>(hb.sent_count)},
+        {"send_failed_count", static_cast<int64_t>(hb.send_failed_count)},
         {"last_ned_x", hb.last_ned_x},
         {"last_ned_y", hb.last_ned_y},
         {"last_ned_z", hb.last_ned_z},
+        {"active_sequence", static_cast<int64_t>(hb.active_sequence)},
+        {"active_mode", hb.active_mode},
+        {"repeat_index", hb.repeat_index},
+        {"repeat_total", hb.repeat_total},
     };
 }
 
@@ -784,7 +919,7 @@ boost::json::value HttpServer::DebugTarget(const std::string& id, const boost::j
     double x = get_number(body, "x", 0.0);
     double y = get_number(body, "y", 0.0);
     double z = get_number(body, "z", 0.0);
-    exec_engine_.InjectTarget(drone_id, x, y, z);
+        exec_engine_.InjectTarget(drone_id, x, y, z);
     return boost::json::object{{"target_injected", id}, {"x", x}, {"y", y}, {"z", z}};
 }
 
@@ -895,6 +1030,14 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
                 {"drone_id_str", drone_id_string(drone_id)},
             }));
         }
+        if (drone_mgr_.HasDrone(drone_id)) {
+            DroneTaskState state;
+            state.drone_id = drone_id;
+            state.mode = mode;
+            state.state = mode == "attack" ? "attacking" : "moving";
+            state.detail = "point_target_received";
+            PublishTaskState(state);
+        }
         return;
     }
 
@@ -914,14 +1057,32 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
 
     if (type == "pause") {
         bool any_ok = false;
+        std::vector<int> affected_ids;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
-                any_ok = drone_mgr_.ProcessPauseCommand(
-                    drone_id_from_string(value_to_string(id_value))) || any_ok;
+                const int drone_id = drone_id_from_string(value_to_string(id_value));
+                const bool ok = drone_mgr_.ProcessPauseCommand(drone_id);
+                if (ok) affected_ids.push_back(drone_id);
+                any_ok = ok || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
-            any_ok = drone_mgr_.ProcessPauseCommand(drone_id_from_string(drone_id_str));
+            const int drone_id = drone_id_from_string(drone_id_str);
+            any_ok = drone_mgr_.ProcessPauseCommand(drone_id);
+            if (any_ok) affected_ids.push_back(drone_id);
+        }
+        for (int drone_id : affected_ids) {
+            DroneTaskState state;
+            {
+                std::lock_guard<std::mutex> lock(task_state_mutex_);
+                auto it = task_states_.find(drone_id);
+                if (it != task_states_.end()) state = it->second;
+                paused_previous_states_[drone_id] = state.state.empty() ? "standby" : state.state;
+            }
+            state.drone_id = drone_id;
+            state.state = "paused";
+            state.detail = "operator_pause";
+            PublishTaskState(state);
         }
         if (!any_ok) {
             ws_manager_.send(session, json_stringify(boost::json::object{
@@ -938,14 +1099,33 @@ void HttpServer::HandleWsCommand(const boost::json::object& msg,
 
     if (type == "resume") {
         bool any_ok = false;
+        std::vector<int> affected_ids;
         if (msg.contains("drone_ids") && msg.at("drone_ids").is_array()) {
             for (const auto& id_value : msg.at("drone_ids").as_array()) {
-                any_ok = drone_mgr_.ProcessResumeCommand(
-                    drone_id_from_string(value_to_string(id_value))) || any_ok;
+                const int drone_id = drone_id_from_string(value_to_string(id_value));
+                const bool ok = drone_mgr_.ProcessResumeCommand(drone_id);
+                if (ok) affected_ids.push_back(drone_id);
+                any_ok = ok || any_ok;
             }
         } else {
             std::string drone_id_str = msg.contains("drone_id") ? value_to_string(msg.at("drone_id")) : "";
-            any_ok = drone_mgr_.ProcessResumeCommand(drone_id_from_string(drone_id_str));
+            const int drone_id = drone_id_from_string(drone_id_str);
+            any_ok = drone_mgr_.ProcessResumeCommand(drone_id);
+            if (any_ok) affected_ids.push_back(drone_id);
+        }
+        for (int drone_id : affected_ids) {
+            DroneTaskState state;
+            {
+                std::lock_guard<std::mutex> lock(task_state_mutex_);
+                auto it = task_states_.find(drone_id);
+                if (it != task_states_.end()) state = it->second;
+                auto previous = paused_previous_states_.find(drone_id);
+                state.state = previous != paused_previous_states_.end() ? previous->second : "standby";
+                if (previous != paused_previous_states_.end()) paused_previous_states_.erase(previous);
+            }
+            state.drone_id = drone_id;
+            state.detail = "operator_resume";
+            PublishTaskState(state);
         }
         if (!any_ok) {
             ws_manager_.send(session, json_stringify(boost::json::object{

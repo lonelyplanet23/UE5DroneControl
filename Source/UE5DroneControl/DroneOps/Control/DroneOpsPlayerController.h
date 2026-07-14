@@ -8,10 +8,13 @@
 #include "DroneOps/Core/GeographicTypes.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraActor.h"
+#include "PathEditor/DroneWaypointActor.h"
+#include "PathEditor/DronePathSaveLibrary.h"
 #include "DroneOpsPlayerController.generated.h"
 
 class UDroneRegistrySubsystem;
 class ADronePathActor;
+class ADroneWaypointActor;
 class AMultiDroneCharacter;
 class UUserWidget;
 
@@ -79,6 +82,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	int32 GetSelectedDroneCountForDispatch() const;
 
+	// ---- 预演关卡路径编辑模式（供 SequenceDispatchPanelWidget 调用）----
+
+	/**
+	 * 进入路径编辑模式：为每个选中的影子机各 spawn 一条临时 ADronePathActor，
+	 * 以影子机当前世界位置为第一航点。无有效选中时返回 false。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	bool BeginPathEditMode(const TArray<int32>& DroneIds);
+
+	/** 退出编辑交互（清 gizmo 选中/拖拽状态），不销毁临时路径。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	void EndPathEditMode();
+
+	/** 把当前临时路径打包成 DroneId -> FDronePathSaveData（世界坐标）。 */
+	TMap<int32, FDronePathSaveData> BuildEditingPathsData() const;
+
+	/** 销毁全部临时路径 Actor（含航点句柄）并清空编辑状态。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	void ClearEditingPaths();
+
+	UFUNCTION(BlueprintPure, Category = "DroneOps|PathEdit")
+	bool IsPathEditMode() const { return bPathEditMode; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -87,6 +113,7 @@ protected:
 
 	// Input handlers
 	void OnPrimaryClick();
+	void OnPrimaryReleased();
 	void OnShowInfo();
 	void OnFreeCamToggle();
 	void OnPauseToggle();
@@ -97,6 +124,10 @@ protected:
 	void OnShiftPressed();
 	void OnShiftReleased();
 	void OnTestToast();
+
+	// 编辑模式：按住右键旋转视角
+	void OnEditLookPressed();
+	void OnEditLookReleased();
 
 	/** B 键：返回主菜单关卡 */
 	void OnReturnToMainMenu();
@@ -185,6 +216,65 @@ private:
 	AActor* ResolveDroneActorById(int32 DroneId) const;
 	AActor* ResolveFollowViewTargetByDroneId(int32 DroneId) const;
 	void ApplyFollowViewTarget(int32 DroneId);
+
+	// ---- 路径编辑模式内部实现（移植自 ADroneRuntimeInteractionPlayerController）----
+	void HandleEditModePressed();
+	void HandleEditModeReleased();
+	void UpdateDraggedEditWaypoint();
+	float ResolveEditAxisDragDelta();
+	void SetEditSelectedWaypoint(ADroneWaypointActor* NewWaypoint);
+	void SetEditActiveAxis(EGizmoAxis NewAxis);
+	bool CanInteractWithEditWaypoint(const ADroneWaypointActor* WaypointActor) const;
+	void AddWaypointToAllEditingPaths(const FVector& WorldLocation);
+
+	// 编辑模式相机：进入时切自由相机（WASD 移动 + 按住右键转视角），退出时恢复
+	void EnterEditCamera();
+	void ExitEditCamera();
+	void TickEditCamera(float DeltaTime);
+
+	// 编辑模式航点增删
+	void RemoveSelectedEditWaypoint();   // Delete：删除选中航点（首航点禁止）
+	void UndoLastEditWaypoint();         // Ctrl+Z：移除最近一次添加的航点
+	void HandleDeleteWaypointKey();
+	void HandleUndoWaypointKey();
+
+	// 编辑模式状态
+	bool bPathEditMode = false;
+
+	// 进入编辑相机前的相机/视角状态，退出时还原
+	EDroneCameraMode EditPrevCameraMode = EDroneCameraMode::Follow;
+	UPROPERTY()
+	TObjectPtr<AActor> EditPrevViewTarget = nullptr;
+	// 按住右键才旋转视角，避免与左键点选/拖拽冲突
+	bool bEditCameraLooking = false;
+	// 编辑相机当前是否已启用（保证 Enter/Exit 幂等）
+	bool bEditCameraActive = false;
+
+	UPROPERTY()
+	TArray<TObjectPtr<ADronePathActor>> EditingPaths;
+
+	TArray<int32> EditingDroneIds;
+
+	// 每条路径首航点的世界坐标（编队平移基准），与 EditingPaths 同序
+	TArray<FVector> EditingPathOrigins;
+
+	// 编队参考原点（第一架影子机的首航点世界坐标）
+	FVector EditFormationRefOrigin = FVector::ZeroVector;
+
+	UPROPERTY()
+	TObjectPtr<ADroneWaypointActor> EditSelectedWaypoint = nullptr;
+
+	EGizmoAxis EditActiveAxis = EGizmoAxis::None;
+	bool bEditDraggingWaypoint = false;
+	FVector2D EditLastMouseScreenPos = FVector2D::ZeroVector;
+
+	// 编辑时地图点击加点的默认段速度（m/s）
+	UPROPERTY(EditAnywhere, Category = "PathEdit")
+	float EditDefaultSegmentSpeed = 5.0f;
+
+	// gizmo 拖拽灵敏度
+	UPROPERTY(EditAnywhere, Category = "PathEdit")
+	float EditGizmoDragSensitivity = 1.0f;
 
 	// FR-04: Free camera actor (spawned at runtime)
 	UPROPERTY()

@@ -273,6 +273,21 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 
 		Registry->RegisterDrone(Desc);
 
+		FString TaskStateText;
+		if (Obj->TryGetStringField(TEXT("task_state"), TaskStateText))
+		{
+			FDroneTaskStateSnapshot TaskState;
+			TaskState.DroneId = Id;
+			TaskState.State = DroneTaskStateFromProtocolString(TaskStateText);
+			FString TaskModeText;
+			if (Obj->TryGetStringField(TEXT("task_mode"), TaskModeText))
+			{
+				TaskState.Mode = DroneCommandModeFromProtocolString(TaskModeText);
+			}
+			Obj->TryGetStringField(TEXT("task_array_id"), TaskState.ArrayId);
+			Registry->UpdateTaskState(Id, TaskState);
+		}
+
 		FString Status;
 		if (Obj->TryGetStringField(TEXT("status"), Status))
 		{
@@ -339,6 +354,36 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] WS non-telemetry: type=%s"), *MsgType);
 	}
 
+	if (MsgType == TEXT("drone_task_state"))
+	{
+		UDroneRegistrySubsystem* Registry = GetGameInstance()
+			? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+			: nullptr;
+		if (!Registry)
+		{
+			return;
+		}
+
+		FDroneTaskStateSnapshot TaskState;
+		Root->TryGetNumberField(TEXT("drone_id"), TaskState.DroneId);
+		Root->TryGetStringField(TEXT("array_id"), TaskState.ArrayId);
+		Root->TryGetNumberField(TEXT("current_wp"), TaskState.CurrentWaypoint);
+		Root->TryGetNumberField(TEXT("waypoint_count"), TaskState.WaypointCount);
+		Root->TryGetStringField(TEXT("detail"), TaskState.Detail);
+		Root->TryGetNumberField(TEXT("updated_at"), TaskState.UpdatedAt);
+
+		FString ModeText;
+		Root->TryGetStringField(TEXT("mode"), ModeText);
+		TaskState.Mode = DroneCommandModeFromProtocolString(ModeText);
+
+		FString StateText;
+		Root->TryGetStringField(TEXT("state"), StateText);
+		TaskState.State = DroneTaskStateFromProtocolString(StateText);
+
+		Registry->UpdateTaskState(TaskState.DroneId, TaskState);
+		return;
+	}
+
 	// Telemetry push (flat): { "type": "telemetry", "drone_id": N, "x":..., "y":..., "z":...,
 	//                          "yaw":..., "pitch":..., "roll":..., "speed":..., "battery":... }
 	if (MsgType == TEXT("telemetry"))
@@ -376,8 +421,17 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 
 		int32 Battery = -1;
 		Root->TryGetNumberField(TEXT("battery"), Battery);
-		// Battery stored in GeographicLocation.Z as a convenient spare float field
-		Snap.GeographicLocation.Z = static_cast<double>(Battery);
+		Snap.Battery = Battery;
+
+		Root->TryGetBoolField(TEXT("armed"), Snap.bArmed);
+		Root->TryGetBoolField(TEXT("offboard"), Snap.bOffboard);
+		Root->TryGetBoolField(TEXT("gps_fix"), Snap.bGpsFix);
+		double GpsLat = 0.0, GpsLon = 0.0, GpsAlt = 0.0;
+		Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
+		Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
+		Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+		Snap.GeographicLocation = FVector(GpsLat, GpsLon, GpsAlt);
+		Snap.Altitude = static_cast<float>(GpsAlt);
 
 		Snap.LastUpdateTime = FPlatformTime::Seconds();
 		Snap.Availability = EDroneAvailability::Online;

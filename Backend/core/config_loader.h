@@ -14,7 +14,8 @@ struct AppConfig {
 
     // Drone
     int max_count = 6;
-    int heartbeat_hz = 2;
+    int heartbeat_hz = 5;
+    int command_repeat_count = 5;
     int lost_timeout_sec = 10;
     double arrival_threshold_m = 1.0;
     int assembly_timeout_sec = 60;

@@ -15,6 +15,7 @@ Saved
 # Visual Studio / Jetbrains Rider 生成的文件
 .vs/
 .idea/
+.codex-artifacts/
 *.sln
 *.suo
 *.opensdf

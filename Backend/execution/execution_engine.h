@@ -16,7 +16,9 @@
 /// 单机执行任务
 struct DroneTask {
     int drone_id = 0;
+    std::string array_id;
     std::string mode;       // "scout" / "patrol" / "attack"
+    std::string state = "standby";
     bool closed_loop = false;
     std::vector<AssemblyConfig::Path::Waypoint> waypoints;
     int current_wp = 0;
@@ -55,7 +57,9 @@ struct AvoidanceStats {
 
 struct ExecutionTaskSnapshot {
     int drone_id = 0;
+    std::string array_id;
     std::string mode;
+    std::string state;
     bool closed_loop = false;
     int current_wp = 0;
     int waypoint_count = 0;
@@ -93,6 +97,7 @@ public:
     void SetTelemetryGetter(TelemetryGetter cb);
     void SetStateGetter(StateGetter cb);
     void SetAvoidanceCallback(AvoidanceCallback cb);
+    void SetTaskStateCallback(TaskStateCallback cb);
 
     /// 启动所有任务（集结完成后调用）
     void StartTasks(const AssemblyConfig& config);
@@ -116,6 +121,9 @@ private:
     void CheckAvoidance();
     void CheckAvoidanceLoop();
     void RestoreExpiredAvoidanceTargets(const std::chrono::steady_clock::time_point& now);
+    void EmitTaskState(int drone_id, const std::string& state,
+                       const std::string& detail = "");
+    static std::string RunningStateForMode(const std::string& mode);
 
     double arrival_threshold_m_;
     double avoidance_radius_m_;
@@ -125,6 +133,7 @@ private:
     TelemetryGetter telemetry_getter_;
     StateGetter state_getter_;
     AvoidanceCallback avoidance_cb_;
+    TaskStateCallback task_state_cb_;
 
     std::atomic<bool> running_{false};
 
