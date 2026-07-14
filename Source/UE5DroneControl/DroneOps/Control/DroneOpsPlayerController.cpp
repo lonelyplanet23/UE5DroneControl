@@ -22,6 +22,7 @@
 #include "Engine/OverlapResult.h"
 #include "UI/UIManagerBlueprintLibrary.h"
 #include "UI/SequenceDispatchPanelWidget.h"
+#include "UI/DroneInfoPanelWidget.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Blueprint/UserWidget.h"
@@ -33,12 +34,6 @@
 
 namespace
 {
-	struct FDroneInfoPanelUpdateParams
-	{
-		FDroneTelemetrySnapshot Snapshot;
-		FString DroneName;
-	};
-
 	bool IsFr2ControllableDroneActor(const AActor* Actor)
 	{
 		return IsValid(Actor) && Actor->IsA(AMultiDroneCharacter::StaticClass());
@@ -177,7 +172,7 @@ ADroneOpsPlayerController::ADroneOpsPlayerController()
 
 	// Keep the Blueprint property overridable, but provide the project panel as
 	// the C++ fallback so middle-click works when a controller BP has no value.
-	static ConstructorHelpers::FClassFinder<UUserWidget> DroneInfoPanelClass(
+	static ConstructorHelpers::FClassFinder<UDroneInfoPanelWidget> DroneInfoPanelClass(
 		TEXT("/Game/DroneOps/UI/WBP_DroneInfoPanel"));
 	if (DroneInfoPanelClass.Succeeded())
 	{
@@ -613,16 +608,10 @@ void ADroneOpsPlayerController::OpenDroneInfoPanel(int32 DroneId)
 
 	CloseCurrentDroneInfoPanel();
 
-	UUserWidget* NewPanel = CreateWidget(this, DroneInfoPanelWidgetClass);
+	UDroneInfoPanelWidget* NewPanel = CreateWidget<UDroneInfoPanelWidget>(this, DroneInfoPanelWidgetClass);
 	if (!NewPanel)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[FR-03] Failed to create info panel widget"));
-		return;
-	}
-
-	if (!NewPanel->FindFunction(FName("UpdateFromSnapshot")))
-	{
-		UE_LOG(LogTemp, Error, TEXT("[FR-03] UpdateFromSnapshot function not found on widget"));
 		return;
 	}
 
@@ -630,6 +619,11 @@ void ADroneOpsPlayerController::OpenDroneInfoPanel(int32 DroneId)
 	NewPanel->SetPositionInViewport(FVector2D(10, 10));
 	CurrentDroneInfoPanel = NewPanel;
 	CurrentDroneInfoDroneId = DroneId;
+	NewPanel->OnPanelClosed.AddUObject(this, &ADroneOpsPlayerController::OnDroneInfoPanelClosed);
+
+	FDroneDescriptor Descriptor;
+	DroneRegistry->GetDroneDescriptor(DroneId, Descriptor);
+	NewPanel->SetDroneContext(DroneId, Descriptor.VideoUrl);
 
 	RefreshDroneInfoPanel();
 	if (!IsValid(CurrentDroneInfoPanel) || CurrentDroneInfoDroneId != DroneId)
@@ -656,7 +650,12 @@ void ADroneOpsPlayerController::RefreshDroneInfoPanel()
 	}
 
 	FDroneTelemetrySnapshot Snapshot;
-	DroneRegistry->GetTelemetry(CurrentDroneInfoDroneId, Snapshot);
+	if (!DroneRegistry->GetTelemetry(CurrentDroneInfoDroneId, Snapshot))
+	{
+		// Do not manufacture zero values. The widget retains its last valid
+		// snapshot and presents an explicit offline/no-data state instead.
+		Snapshot.Availability = EDroneAvailability::Offline;
+	}
 	Snapshot.DroneId = CurrentDroneInfoDroneId;
 
 	FString DroneName = FString::Printf(TEXT("Drone-%d"), CurrentDroneInfoDroneId);
@@ -666,31 +665,30 @@ void ADroneOpsPlayerController::RefreshDroneInfoPanel()
 		DroneName = Descriptor.Name;
 	}
 
-	UFunction* UpdateFunction = CurrentDroneInfoPanel->FindFunction(FName("UpdateFromSnapshot"));
-	if (!UpdateFunction || UpdateFunction->ParmsSize != sizeof(FDroneInfoPanelUpdateParams))
-	{
-		UE_LOG(LogTemp, Error,
-			TEXT("[FR-03] UpdateFromSnapshot signature mismatch: function=%p, expected=%d, actual=%d"),
-			UpdateFunction,
-			static_cast<int32>(sizeof(FDroneInfoPanelUpdateParams)),
-			UpdateFunction ? UpdateFunction->ParmsSize : 0);
-		CloseCurrentDroneInfoPanel();
-		return;
-	}
-
-	FDroneInfoPanelUpdateParams Params;
-	Params.Snapshot = Snapshot;
-	Params.DroneName = MoveTemp(DroneName);
-	CurrentDroneInfoPanel->ProcessEvent(UpdateFunction, &Params);
+	FDroneTaskStateSnapshot TaskState;
+	DroneRegistry->GetTaskState(CurrentDroneInfoDroneId, TaskState);
+	CurrentDroneInfoPanel->UpdateFromSnapshot(Snapshot, DroneName, TaskState);
 }
 
 void ADroneOpsPlayerController::CloseCurrentDroneInfoPanel()
 {
 	GetWorldTimerManager().ClearTimer(DroneInfoRefreshTimerHandle);
-	if (IsValid(CurrentDroneInfoPanel) && CurrentDroneInfoPanel->IsInViewport())
+	UDroneInfoPanelWidget* PanelToClose = CurrentDroneInfoPanel;
+	CurrentDroneInfoPanel = nullptr;
+	CurrentDroneInfoDroneId = 0;
+	if (IsValid(PanelToClose))
 	{
-		CurrentDroneInfoPanel->RemoveFromParent();
+		PanelToClose->ShutdownPanel();
+		if (PanelToClose->IsInViewport())
+		{
+			PanelToClose->RemoveFromParent();
+		}
 	}
+}
+
+void ADroneOpsPlayerController::OnDroneInfoPanelClosed()
+{
+	GetWorldTimerManager().ClearTimer(DroneInfoRefreshTimerHandle);
 	CurrentDroneInfoPanel = nullptr;
 	CurrentDroneInfoDroneId = 0;
 }

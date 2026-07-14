@@ -50,6 +50,10 @@ public:
 
     void CheckTimeouts(int timeout_sec);
 
+    // UDP 是无连接协议。对 Offline/Lost 设备重新发送安全 hold 心跳，
+    // 让 Jetson 能重新发现后端；真正恢复 Online 仍以收到遥测为准。
+    std::vector<int> RefreshDisconnectedConnections();
+
     GpsAnchorManager& GetAnchorManager() { return anchor_manager_; }
 
 private:

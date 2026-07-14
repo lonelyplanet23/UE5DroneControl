@@ -440,6 +440,17 @@ void ADroneOpsGameMode::BeginPlay()
 	// Initialize drone registry
 	InitializeDroneRegistry();
 
+	// The backend drone list is polled asynchronously.  Without this binding,
+	// drones that arrive after BeginPlay are saved in the registry but do not
+	// get a BP_RealTimeDrone actor until the level is restarted.
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UDroneRegistrySubsystem* Registry = GameInstance->GetSubsystem<UDroneRegistrySubsystem>())
+		{
+			Registry->OnDroneRegistered.AddDynamic(this, &ADroneOpsGameMode::HandleDroneRegistered);
+		}
+	}
+
 	// If a pending origin was applied, defer spawn until Georeference finishes updating.
 	// Otherwise spawn immediately (direct level launch, no origin change).
 	if (!bPendingSpawnAfterGeoreferenceUpdate)
@@ -459,6 +470,31 @@ void ADroneOpsGameMode::BeginPlay()
 			0.1f,
 			true);
 	}
+}
+
+void ADroneOpsGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UDroneRegistrySubsystem* Registry = GameInstance->GetSubsystem<UDroneRegistrySubsystem>())
+		{
+			Registry->OnDroneRegistered.RemoveDynamic(this, &ADroneOpsGameMode::HandleDroneRegistered);
+		}
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+void ADroneOpsGameMode::HandleDroneRegistered(int32 DroneId)
+{
+	if (bPendingSpawnAfterGeoreferenceUpdate)
+	{
+		UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Drone %d registered; waiting for Georeference update before spawning"), DroneId);
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Drone %d registered after level startup; spawning receiver now"), DroneId);
+	SpawnReceiversFromRegistry();
 }
 
 void ADroneOpsGameMode::Tick(float DeltaSeconds)

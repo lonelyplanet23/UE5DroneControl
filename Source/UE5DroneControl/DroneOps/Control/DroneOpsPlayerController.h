@@ -16,6 +16,7 @@ class ADronePathActor;
 class ADroneWaypointActor;
 class AMultiDroneCharacter;
 class UUserWidget;
+class UDroneInfoPanelWidget;
 
 /**
  * Delegate for when drone info panel is requested by middle click.
@@ -138,7 +139,7 @@ public:
 
 	/** Class of the drone info panel widget */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
-	TSubclassOf<UUserWidget> DroneInfoPanelWidgetClass;
+	TSubclassOf<UDroneInfoPanelWidget> DroneInfoPanelWidgetClass;
 
 	/** 主菜单关卡名称，B 键跳转目标 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Navigation")
@@ -242,7 +243,7 @@ private:
 
 	/** Current open info panel, if any */
 	UPROPERTY()
-	UUserWidget* CurrentDroneInfoPanel = nullptr;
+	TObjectPtr<UDroneInfoPanelWidget> CurrentDroneInfoPanel = nullptr;
 
 	/** Drone currently bound to the open information panel. */
 	int32 CurrentDroneInfoDroneId = 0;
@@ -252,6 +253,8 @@ private:
 	float DroneInfoPanelRefreshIntervalSec = 0.2f;
 
 	FTimerHandle DroneInfoRefreshTimerHandle;
+
+	void OnDroneInfoPanelClosed();
 
 	/** Shadow drones that received vertical input on the previous controller tick. */
 	TArray<TWeakObjectPtr<AMultiDroneCharacter>> VerticallyControlledDrones;

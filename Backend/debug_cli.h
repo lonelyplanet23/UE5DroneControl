@@ -17,6 +17,7 @@
 //
 //   help                          — 显示帮助
 //   list                          — 列出已注册无人机
+//   fresh                         — 重新探测所有断联无人机（安全 hold）
 //   inject <id> <n> <e> <d> [bat] [lat] [lon] [alt]
 //                                 — 注入一条遥测（NED 米，可选电量和 GPS）
 //   move <id> <ue_x> <ue_y> <ue_z>
@@ -63,6 +64,7 @@ static void cli_print_help()
         "\n=== Debug CLI ===\n"
         "  help\n"
         "  list\n"
+        "  fresh  (probe all offline/lost drones with safe hold)\n"
         "  inject <id> <N> <E> <D> [battery] [gps_lat] [gps_lon] [gps_alt]\n"
         "    id      : drone id, e.g. 1 or d1\n"
         "    N E D   : NED position (meters), D negative = above origin\n"
@@ -109,6 +111,21 @@ inline void RunDebugCli(DroneManager&       drone_mgr,
             // ---- help ----
             if (cmd == "help") {
                 cli_print_help();
+                continue;
+            }
+
+            // ---- fresh ----
+            if (cmd == "fresh") {
+                const auto refreshed_ids = drone_mgr.RefreshDisconnectedConnections();
+                if (refreshed_ids.empty()) {
+                    std::cout << "  [fresh] no offline/lost drones to probe\n";
+                } else {
+                    std::cout << "  [fresh] safe hold probe sent to:";
+                    for (const int id : refreshed_ids) {
+                        std::cout << " d" << id;
+                    }
+                    std::cout << "\n";
+                }
                 continue;
             }
 

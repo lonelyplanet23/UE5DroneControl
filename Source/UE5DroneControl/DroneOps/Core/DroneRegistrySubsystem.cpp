@@ -262,7 +262,9 @@ void UDroneRegistrySubsystem::MarkDroneAvailability(int32 DroneId, EDroneAvailab
 	}
 	Snapshot.DroneId = DroneId;
 	Snapshot.Availability = Availability;
-	Snapshot.LastUpdateTime = FPlatformTime::Seconds();
+	// Availability is a connection-state transition, not fresh telemetry. Keep
+	// LastUpdateTime intact so a disconnected information panel can truthfully
+	// show when it last received flight data.
 	TelemetryCache.Add(DroneId, Snapshot);
 	OnTelemetryUpdated.Broadcast(DroneId, Snapshot);
 	SaveRegisteredDrones();

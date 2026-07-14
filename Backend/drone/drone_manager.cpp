@@ -354,6 +354,40 @@ void DroneManager::CheckTimeouts(int timeout_sec)
     }
 }
 
+std::vector<int> DroneManager::RefreshDisconnectedConnections()
+{
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    std::vector<int> refreshed_ids;
+
+    for (auto& [id, ctx] : drones_) {
+        const auto state = ctx->state_machine->GetState();
+        if (state == DroneConnectionState::Online) {
+            continue;
+        }
+
+        // 使用最后一份已知位置（首次连接则为 0,0,0）发送 mode=hold，
+        // 这里只做链路探测，不会下发 move/arm/offboard 指令。
+        const double hold_x = ctx->has_telemetry ? ctx->latest_telemetry.position_ned[0] : 0.0;
+        const double hold_y = ctx->has_telemetry ? ctx->latest_telemetry.position_ned[1] : 0.0;
+        const double hold_z = ctx->has_telemetry ? ctx->latest_telemetry.position_ned[2] : 0.0;
+
+        hb_manager_.Start(id, ctx->slot, ctx->jetson_ip, ctx->send_port,
+            [queue = ctx->command_queue.get()](DroneControlPacket& cmd) -> bool {
+                return queue && queue->Pop(cmd);
+            });
+        hb_manager_.RequestHold(id, hold_x, hold_y, hold_z);
+        refreshed_ids.push_back(id);
+
+        spdlog::info(
+            "[ConnectionRefresh] probing drone {} state={} -> {}:{} with safe hold",
+            id,
+            state == DroneConnectionState::Lost ? "lost" : "offline",
+            ctx->jetson_ip, ctx->send_port);
+    }
+
+    return refreshed_ids;
+}
+
 // ========================================================
 // 内部辅助（不加锁）
 // ========================================================

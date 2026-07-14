@@ -43,6 +43,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot) override;
@@ -55,6 +56,10 @@ protected:
 	// Initialize drone registry (can be overridden in blueprints)
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	virtual void InitializeDroneRegistry();
+
+	/** Spawn a receiver/ shadow pair when the backend registers a drone after level startup. */
+	UFUNCTION()
+	void HandleDroneRegistered(int32 DroneId);
 
 	// Use Cesium coordinate service (false = SimpleCoordinateService)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "DroneOps")

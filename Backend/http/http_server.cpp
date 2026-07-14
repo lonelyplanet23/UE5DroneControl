@@ -367,6 +367,8 @@ http::response<http::string_body> HttpServer::HandleHttp(
             return MakeResponse(req, 200, json_stringify(ApiDeleteDrone(id)));
         if (method == "GET"  && PathMatch(path, "/api/drones/", "/anchor", id))
             return MakeResponse(req, 200, json_stringify(ApiGetAnchor(id)));
+        if (method == "POST" && path == "/api/drones/refresh")
+            return MakeResponse(req, 200, json_stringify(ApiRefreshDrones()));
         if (method == "POST" && path == "/api/arrays")
             return MakeResponse(req, 201, json_stringify(ApiCreateArray(require_object(body, "body"))));
         if (method == "POST" && PathMatch(path, "/api/arrays/", "/stop", id))
@@ -478,6 +480,22 @@ boost::json::value HttpServer::ApiListDrones() {
         });
     }
     return arr;
+}
+
+boost::json::value HttpServer::ApiRefreshDrones()
+{
+    const auto refreshed_ids = drone_mgr_.RefreshDisconnectedConnections();
+    boost::json::array ids;
+    for (const int id : refreshed_ids) {
+        ids.push_back(id);
+    }
+    spdlog::info("[HTTP] Connection refresh requested; probing {} disconnected drone(s)",
+                 refreshed_ids.size());
+    return boost::json::object{
+        {"ok", true},
+        {"message", "safe hold probes sent; a drone becomes online only after telemetry is received"},
+        {"refreshed_drone_ids", std::move(ids)},
+    };
 }
 
 boost::json::value HttpServer::ApiRegisterDrone(const boost::json::object& body) {

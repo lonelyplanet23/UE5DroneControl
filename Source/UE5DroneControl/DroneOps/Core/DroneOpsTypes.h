@@ -174,6 +174,10 @@ struct FDroneDescriptor
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone")
 	FString TopicPrefix = TEXT("/px4_1");
 
+	/** Browser-playable MediaMTX WebRTC page for this drone (for example http://mediamtx:8889/drone-1). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Video")
+	FString VideoUrl;
+
 	FDroneDescriptor() = default;
 };
 

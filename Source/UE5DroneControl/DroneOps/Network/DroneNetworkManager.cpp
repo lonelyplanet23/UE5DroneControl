@@ -271,6 +271,10 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 			Desc.TopicPrefix = Prefix;
 		}
 
+		// Video deliberately travels with the REST drone descriptor rather than
+		// with the high-frequency telemetry WebSocket.
+		Obj->TryGetStringField(TEXT("video_url"), Desc.VideoUrl);
+
 		Registry->RegisterDrone(Desc);
 
 		FString TaskStateText;
@@ -285,6 +289,10 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 				TaskState.Mode = DroneCommandModeFromProtocolString(TaskModeText);
 			}
 			Obj->TryGetStringField(TEXT("task_array_id"), TaskState.ArrayId);
+			Obj->TryGetNumberField(TEXT("task_current_wp"), TaskState.CurrentWaypoint);
+			Obj->TryGetNumberField(TEXT("task_waypoint_count"), TaskState.WaypointCount);
+			Obj->TryGetStringField(TEXT("task_detail"), TaskState.Detail);
+			Obj->TryGetNumberField(TEXT("task_updated_at"), TaskState.UpdatedAt);
 			Registry->UpdateTaskState(Id, TaskState);
 		}
 

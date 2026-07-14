@@ -41,14 +41,22 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
     VehicleGlobalPosition,
     BatteryStatus,
-    VehicleCommandAck,
 )
+
+# Some deployed PX4/px4_msgs combinations do not provide VehicleCommandAck.
+# It is only used for diagnostics, so it must not prevent the control bridge
+# from starting on those vehicles.
+try:
+    from px4_msgs.msg import VehicleCommandAck
+except ImportError:
+    VehicleCommandAck = None
 
 
 # ============================================================
 # 配置（可通过环境变量覆盖）
 # ============================================================
-BACKEND_HOST = os.environ.get("BACKEND_HOST", "192.168.30.100").strip()
+# 当前外场局域网默认值。仍建议用 BACKEND_HOST 显式覆盖，避免换网后依赖默认值。
+BACKEND_HOST = os.environ.get("BACKEND_HOST", "192.168.10.30").strip()
 CONTROL_BIND_HOST = os.environ.get("CONTROL_BIND_HOST", "0.0.0.0").strip()
 
 # 默认沿用当前单机实机环境的无前缀 PX4 话题。多机命名空间环境可设置：
@@ -208,10 +216,12 @@ class JetsonBridge(Node):
         if self._topic_prefix and not self._topic_prefix.startswith("/"):
             self._topic_prefix = "/" + self._topic_prefix
 
-        # 项目约定：px4_1 的 MAVLink system ID 是 2，px4_2 是 3，以此类推。
-        # 可通过环境变量覆盖，以便现场核对 QGC 中的 SYSID_THISMAV。
+        # Keep the legacy bridge behaviour by default: slot 1 targets SYSID 1.
+        # The former working script used ``target_system = slot``.  A different
+        # PX4 SYSID must be explicitly provided by MAVLINK_SYSTEM_ID, rather
+        # than silently changing the target to slot + 1.
         self._mavlink_system_id = int(
-            os.environ.get("MAVLINK_SYSTEM_ID", str(slot + 1))
+            os.environ.get("MAVLINK_SYSTEM_ID", str(slot))
         )
         if not 1 <= self._mavlink_system_id <= 255:
             raise ValueError(
@@ -292,11 +302,17 @@ class JetsonBridge(Node):
             f"{self._topic_prefix}/fmu/out/battery_status",
             self._on_battery, sensor_qos,
         )
-        self.create_subscription(
-            VehicleCommandAck,
-            f"{self._topic_prefix}/fmu/out/vehicle_command_ack",
-            self._on_command_ack, sensor_qos,
-        )
+        if VehicleCommandAck is not None:
+            self.create_subscription(
+                VehicleCommandAck,
+                f"{self._topic_prefix}/fmu/out/vehicle_command_ack",
+                self._on_command_ack, sensor_qos,
+            )
+        else:
+            self.get_logger().warning(
+                "[ROS-CHECK] VehicleCommandAck is unavailable in this px4_msgs "
+                "installation; command-ack diagnostics are disabled."
+            )
 
         # -------- 链路诊断状态 --------
         self._started_monotonic = time.monotonic()
@@ -320,6 +336,8 @@ class JetsonBridge(Node):
         self._offboard_publish_count = 0
         self._vehicle_command_count = 0
         self._command_ack_count = 0
+        # None 表示尚未收到 PX4 状态；之后只在解锁/上锁状态切换时输出一次。
+        self._px4_armed = None
         self._ros_rx_counts = {
             "odometry": 0,
             "status": 0,
@@ -424,6 +442,28 @@ class JetsonBridge(Node):
         self._mark_ros_rx("status")
         self._status = msg
         state = (int(msg.arming_state), int(msg.nav_state))
+
+        # VehicleStatus.ARMING_STATE_ARMED 在不同 px4_msgs 版本中均为 2；
+        # 使用 getattr 保持对旧消息包的兼容性。
+        armed_state = int(getattr(VehicleStatus, "ARMING_STATE_ARMED", 2))
+        is_armed = state[0] == armed_state
+        if self._px4_armed is None:
+            self._px4_armed = is_armed
+            if is_armed:
+                self.get_logger().info(
+                    f"[PX4-ARM] Drone is ARMED / 已解锁 (arming_state={state[0]})."
+                )
+        elif is_armed != self._px4_armed:
+            self._px4_armed = is_armed
+            if is_armed:
+                self.get_logger().info(
+                    f"[PX4-ARM] Drone is ARMED / 已解锁 (arming_state={state[0]})."
+                )
+            else:
+                self.get_logger().warning(
+                    f"[PX4-ARM] Drone is DISARMED / 已上锁 (arming_state={state[0]})."
+                )
+
         if state != self._last_vehicle_state:
             self.get_logger().info(
                 f"[PX4-STATE] arming_state={state[0]}, nav_state={state[1]} "
@@ -443,7 +483,7 @@ class JetsonBridge(Node):
         self._mark_ros_rx("battery")
         self._battery = msg
 
-    def _on_command_ack(self, msg: VehicleCommandAck):
+    def _on_command_ack(self, msg):
         self._mark_ros_rx("command_ack")
         self._command_ack_count += 1
         result_names = {
@@ -662,6 +702,23 @@ class JetsonBridge(Node):
                 f"{addr[0]}:{addr[1]}"
             )
         self._last_ctrl_sender = addr
+
+        # UDP sendto() 在错误目标 IP 时通常也会返回成功，单靠
+        # telemetry_sent 不能证明后端收到了包。已通过协议校验的控制包
+        # 来自真实后端时，以其源 IP 自愈遥测回传目标，端口仍固定为本 slot 的
+        # telemetry port（slot 1 为 8888）。这样后端重启或切换局域网后，
+        # 手动执行 fresh 即可让 Jetson 重新发现后端。
+        sender_backend_addr = (addr[0], self._tel_port)
+        if sender_backend_addr != self._backend_addr:
+            previous_backend_addr = self._backend_addr
+            self._backend_addr = sender_backend_addr
+            self._route_local_ip = self._detect_route_local_ip()
+            self.get_logger().warning(
+                f"[UDP-TX] telemetry target corrected from "
+                f"{previous_backend_addr[0]}:{previous_backend_addr[1]} to "
+                f"{self._backend_addr[0]}:{self._backend_addr[1]} based on "
+                f"validated control sender"
+            )
         self._last_ctrl_monotonic = now_monotonic
         self._last_backend_timestamp = parsed["sent_at"]
         self._udp_rx_valid += 1
@@ -898,7 +955,7 @@ class JetsonBridge(Node):
         )
 
     def _get_system_id(self) -> int:
-        """slot → MAVLink system ID（slot 1 → sys_id 2, slot 2 → 3, ...）"""
+        """Return the configured PX4 MAVLink system ID for this bridge."""
         return self._mavlink_system_id
 
     def _detect_route_local_ip(self):
@@ -962,7 +1019,8 @@ class JetsonBridge(Node):
             f"ROS pub_subscribers ocm/traj/cmd={pub_links[0]}/{pub_links[1]}/{pub_links[2]} "
             f"published={self._offboard_publish_count} PX4={status_text} "
             f"ACK={self._command_ack_count} ROS_RX={seen_topics} | "
-            f"telemetry sent/errors/last_bytes="
+            f"telemetry target={self._backend_addr[0]}:{self._backend_addr[1]} "
+            f"sent/errors/last_bytes="
             f"{self._telemetry_sent}/{self._telemetry_send_errors}/{self._telemetry_last_bytes}"
         )
 
