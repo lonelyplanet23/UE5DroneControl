@@ -75,6 +75,18 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UButton* SavePathButton;
 
+	/** 播放按钮：弹出三选弹窗（预演/派发/取消），仅编辑模式可见。 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UButton* PlayEditPathButton;
+
+	/** 停止按钮：终止所有影子机播放并销毁临时路径，仅编辑模式可见。 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UButton* StopEditPathButton;
+
+	/** 循环播放勾选框：勾选=所有临时路径循环，仅作用运行副本，不写回磁盘。仅编辑模式可见。 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UCheckBox* EditLoopCheckBox;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceDispatch")
 	TSubclassOf<UPathFileListItemWidget> FileListItemClass;
 
@@ -166,6 +178,21 @@ private:
 	UFUNCTION()
 	void OnSavePathClicked();
 
+	// 播放按钮：弹出三选弹窗
+	UFUNCTION()
+	void OnPlayEditPathClicked();
+
+	// 停止按钮：终止影子机播放 + 销毁临时路径 + 复位
+	UFUNCTION()
+	void OnStopEditPathClicked();
+
+	// 循环勾选框：设置所有临时路径循环状态（仅运行副本）
+	UFUNCTION()
+	void OnEditLoopCheckChanged(bool bIsChecked);
+
+	// 按编辑模式状态显示/隐藏编辑相关控件（循环框/保存/播放/停止）
+	void SetEditControlsVisible(bool bVisible);
+
 	UFUNCTION()
 	void OnPreviewConfirmChoice(EPreviewConfirmChoice Choice);
 
@@ -190,4 +217,17 @@ private:
 
 	// 自动分配模式下的派发：drone_id 留空，auto_assign=true
 	void DispatchWithAutoAssign(class UDroneNetworkManager* NetMgr, class UDroneRegistrySubsystem* Registry);
+
+	// ---- 编队旋转（JSON 路径）----
+	// 加载 JSON 后：解析源锚点(编辑系原点)并启动运行锚点 + 旋转环 Gizmo 预览。
+	void StartFormationRotatePreview();
+
+	// 停止编队旋转预览（面板关闭/重新加载/预演开始/派发后）。
+	void StopFormationRotatePreview();
+
+	// JSON 中源锚点路径的首航点（编辑系坐标）。缺失时退回第一条有效路径首航点。
+	FVector GetSourceAnchorEditOrigin() const;
+
+	// 把一条原始路径按"运行锚点平移 + 当前编队旋转角"变换成运行副本（不修改原始 JSON）。
+	FDronePathSaveData BuildTransformedPath(const FDronePathSaveData& SourcePath, const FVector& TargetBase, float YawDegrees) const;
 };

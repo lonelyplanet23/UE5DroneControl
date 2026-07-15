@@ -42,6 +42,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Navigation")
 	FName MainMenuLevelName = FName("MainMenu");
 
+	/** 源锚点无人机 ID：该路径的第一个节点被锁定，不允许拖拽修改位置。编辑关卡固定为 1。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Waypoint Editing")
+	int32 AnchorSourceDroneId = 1;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;

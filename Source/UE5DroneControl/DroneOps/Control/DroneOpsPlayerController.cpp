@@ -15,6 +15,7 @@
 #include "PathEditor/DronePathActor.h"
 #include "PathEditor/DroneWaypointActor.h"
 #include "PathEditor/DronePathSaveLibrary.h"
+#include "PathEditor/FormationRotationGizmoActor.h"
 #include "UE5DroneControlCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Engine/EngineTypes.h"
@@ -243,6 +244,7 @@ void ADroneOpsPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason
 {
 	StopSelectedDroneVerticalControl(false);
 	CloseCurrentDroneInfoPanel();
+	EndFormationRotatePreview();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -285,6 +287,14 @@ void ADroneOpsPlayerController::SetupInputComponent()
 void ADroneOpsPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 编队旋转预览：拖拽旋转环时每帧更新角度（跟随光标）。
+	// 结束由 OnPrimaryReleased 驱动；不用 IsInputKeyDown 判断——GameAndUI 输入模式下它读不到
+	// 左键按住状态，会导致每帧误判为松开、拖拽被立刻清掉（yaw 永远为 0）。
+	if (bFormationRotateActive && bDraggingFormationRing)
+	{
+		UpdateFormationRingDrag();
+	}
 
 	// 路径编辑模式下：驱动自由相机 + gizmo 拖拽，跳过常规相机/悬停逻辑
 	if (bPathEditMode)
@@ -498,6 +508,17 @@ void ADroneOpsPlayerController::StopSelectedDroneVerticalControl(bool bSendFinal
 
 void ADroneOpsPlayerController::OnPrimaryClick()
 {
+	// 编队旋转预览：左键落在旋转环附近则进入旋转拖拽，优先处理。
+	// 用"锚点水平面 + 半径"判定命中，比点击细圆柱碰撞体可靠得多。
+	if (bFormationRotateActive && IsValid(FormationGizmoActor))
+	{
+		if (IsCursorOnFormationRing())
+		{
+			HandleFormationRingPressed();
+			return;
+		}
+	}
+
 	// 路径编辑模式：地图点击加点 / gizmo 拖拽，优先于常规选择与派发
 	if (bPathEditMode)
 	{
@@ -560,6 +581,11 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 
 void ADroneOpsPlayerController::OnPrimaryReleased()
 {
+	if (bDraggingFormationRing)
+	{
+		EndFormationRingDrag();
+	}
+
 	if (bPathEditMode)
 	{
 		HandleEditModeReleased();
@@ -1952,6 +1978,353 @@ void ADroneOpsPlayerController::AddWaypointToAllEditingPaths(const FVector& Worl
 		// 编队平移：每条路径以自身首航点为基准，叠加相同偏移
 		const FVector NewWaypointLocation = EditingPathOrigins[i] + Offset;
 		PathActor->AddWaypoint(NewWaypointLocation, EditDefaultSegmentSpeed);
+	}
+}
+
+bool ADroneOpsPlayerController::SetEditingPathClosedLoop(int32 DroneId, bool bClosedLoop)
+{
+	for (int32 i = 0; i < EditingPaths.Num(); ++i)
+	{
+		if (EditingDroneIds.IsValidIndex(i) && EditingDroneIds[i] == DroneId && IsValid(EditingPaths[i]))
+		{
+			EditingPaths[i]->SetClosedLoop(bClosedLoop);
+			return true;
+		}
+	}
+	return false;
+}
+
+void ADroneOpsPlayerController::SetAllEditingPathsClosedLoop(bool bClosedLoop)
+{
+	for (ADronePathActor* PathActor : EditingPaths)
+	{
+		if (IsValid(PathActor))
+		{
+			PathActor->SetClosedLoop(bClosedLoop);
+		}
+	}
+}
+
+// ================= 编队旋转预览（JSON 路径：运行锚点平移 + 水平旋转）=================
+
+FVector ADroneOpsPlayerController::ApplyFormationTransform(const FVector& NodeEditLocation, const FVector& RefEditOrigin, const FVector& TargetBase, float YawDegrees)
+{
+	// 相对位置 = 节点(编辑系) - 源锚点
+	const FVector Relative = NodeEditLocation - RefEditOrigin;
+
+	// 只绕世界 Z 旋转水平分量；高度(Z)保持不变。
+	const float YawRad = FMath::DegreesToRadians(YawDegrees);
+	const float CosYaw = FMath::Cos(YawRad);
+	const float SinYaw = FMath::Sin(YawRad);
+
+	const FVector RotatedRelative(
+		Relative.X * CosYaw - Relative.Y * SinYaw,
+		Relative.X * SinYaw + Relative.Y * CosYaw,
+		Relative.Z);
+
+	// 旋转后位置 = 目标基准 + RotateZ(相对位置)
+	return TargetBase + RotatedRelative;
+}
+
+bool ADroneOpsPlayerController::ResolveRunAnchorDrone(int32& OutDroneId, FVector& OutAnchorWorld)
+{
+	if (!DroneRegistry)
+	{
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			DroneRegistry = GI->GetSubsystem<UDroneRegistrySubsystem>();
+		}
+	}
+	if (!DroneRegistry)
+	{
+		return false;
+	}
+
+	auto TryResolve = [this](int32 DroneId, FVector& OutLoc) -> bool
+	{
+		if (DroneId <= 0)
+		{
+			return false;
+		}
+		APawn* ShadowPawn = DroneRegistry->GetSenderPawn(DroneId);
+		if (!IsValid(ShadowPawn))
+		{
+			return false;
+		}
+		OutLoc = ShadowPawn->GetActorLocation();
+		return true;
+	};
+
+	// 1. 主选中无人机
+	const int32 Primary = DroneRegistry->GetPrimarySelectedDrone();
+	if (Primary > 0)
+	{
+		FVector Loc;
+		if (TryResolve(Primary, Loc))
+		{
+			OutDroneId = Primary;
+			OutAnchorWorld = Loc;
+			return true;
+		}
+	}
+
+	// 2. 最小可用 DroneId
+	int32 BestId = MAX_int32;
+	FVector BestLoc = FVector::ZeroVector;
+	bool bFound = false;
+	for (const FDroneDescriptor& Desc : DroneRegistry->GetAllDroneDescriptors())
+	{
+		if (Desc.DroneId <= 0 || Desc.DroneId >= BestId)
+		{
+			continue;
+		}
+		FVector Loc;
+		if (TryResolve(Desc.DroneId, Loc))
+		{
+			BestId = Desc.DroneId;
+			BestLoc = Loc;
+			bFound = true;
+		}
+	}
+
+	if (bFound)
+	{
+		OutDroneId = BestId;
+		OutAnchorWorld = BestLoc;
+		return true;
+	}
+
+	return false;
+}
+
+bool ADroneOpsPlayerController::BeginFormationRotatePreview(const FDronePathsSaveData& PathsData)
+{
+	EndFormationRotatePreview();
+
+	if (PathsData.Paths.IsEmpty())
+	{
+		return false;
+	}
+
+	int32 AnchorDroneId = INDEX_NONE;
+	FVector AnchorWorld = FVector::ZeroVector;
+	if (!ResolveRunAnchorDrone(AnchorDroneId, AnchorWorld))
+	{
+		return false;
+	}
+
+	// 源锚点：JSON 中 AnchorDroneId 对应路径的首航点；缺失则退回第一条路径首航点。
+	const FDronePathSaveData* AnchorPath = PathsData.Paths.FindByPredicate(
+		[&PathsData](const FDronePathSaveData& P)
+		{
+			return P.PathId == PathsData.AnchorDroneId && P.Waypoints.Num() > 0;
+		});
+	if (!AnchorPath)
+	{
+		AnchorPath = PathsData.Paths.FindByPredicate(
+			[](const FDronePathSaveData& P) { return P.Waypoints.Num() > 0; });
+	}
+	if (!AnchorPath)
+	{
+		return false;
+	}
+
+	FormationSourcePaths = PathsData;
+	FormationRefEditOrigin = AnchorPath->Waypoints[0].Location;
+	FormationRunAnchorWorld = AnchorWorld;
+	FormationRunAnchorDroneId = AnchorDroneId;
+	FormationYawDegrees = 0.0f;
+	bFormationRotateActive = true;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	// 生成预览路径可视化 Actor（只显示不移动）。
+	for (const FDronePathSaveData& PathData : FormationSourcePaths.Paths)
+	{
+		if (PathData.Waypoints.IsEmpty())
+		{
+			continue;
+		}
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ADronePathActor* PathActor = World->SpawnActor<ADronePathActor>(
+			ADronePathActor::StaticClass(), FTransform::Identity, SpawnParams);
+		if (!IsValid(PathActor))
+		{
+			continue;
+		}
+
+		PathActor->SetPathNumericId(PathData.PathId);
+		PathActor->bClosedLoop = PathData.bClosedLoop;
+		FormationPreviewActors.Add(PathActor);
+	}
+
+	// 生成锚点旋转环 Gizmo。
+	FActorSpawnParameters GizmoParams;
+	GizmoParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	FormationGizmoActor = World->SpawnActor<AFormationRotationGizmoActor>(
+		AFormationRotationGizmoActor::StaticClass(), FTransform(AnchorWorld), GizmoParams);
+
+	// 缓存环半径供平面命中判定使用。
+	if (IsValid(FormationGizmoActor))
+	{
+		FormationRingRadiusCm = FormationGizmoActor->RingRadiusCm;
+	}
+
+	RefreshFormationPreview();
+	return true;
+}
+
+void ADroneOpsPlayerController::RefreshFormationPreview()
+{
+	if (!bFormationRotateActive)
+	{
+		return;
+	}
+
+	// 按当前 Yaw 与锚点重新摆放每条预览路径的节点。
+	for (int32 i = 0; i < FormationPreviewActors.Num() && i < FormationSourcePaths.Paths.Num(); ++i)
+	{
+		ADronePathActor* PathActor = FormationPreviewActors[i];
+		const FDronePathSaveData& PathData = FormationSourcePaths.Paths[i];
+		if (!IsValid(PathActor))
+		{
+			continue;
+		}
+
+		PathActor->ClearWaypoints();
+		for (int32 w = 0; w < PathData.Waypoints.Num(); ++w)
+		{
+			const FVector WorldLoc = ApplyFormationTransform(
+				PathData.Waypoints[w].Location, FormationRefEditOrigin, FormationRunAnchorWorld, FormationYawDegrees);
+			const float Speed = (w == 0) ? 0.0f : PathData.Waypoints[w].SegmentSpeed;
+			PathActor->AddWaypoint(WorldLoc, Speed);
+		}
+		PathActor->RefreshPath();
+	}
+
+	if (IsValid(FormationGizmoActor))
+	{
+		FormationGizmoActor->SetGizmoWorldLocation(FormationRunAnchorWorld);
+	}
+}
+
+void ADroneOpsPlayerController::EndFormationRotatePreview()
+{
+	EndFormationRingDrag();
+
+	for (ADronePathActor* PathActor : FormationPreviewActors)
+	{
+		if (IsValid(PathActor))
+		{
+			PathActor->Destroy();
+		}
+	}
+	FormationPreviewActors.Reset();
+
+	if (IsValid(FormationGizmoActor))
+	{
+		FormationGizmoActor->Destroy();
+	}
+	FormationGizmoActor = nullptr;
+
+	bFormationRotateActive = false;
+	bDraggingFormationRing = false;
+	FormationYawDegrees = 0.0f;
+	FormationSourcePaths = FDronePathsSaveData();
+}
+
+bool ADroneOpsPlayerController::ComputeCursorRadiusOnAnchorPlane(float& OutRadiusCm) const
+{
+	// 把鼠标反投影成世界射线，与"过锚点、水平"的平面（Z=锚点.Z）求交，
+	// 得到光标在世界水平面上的落点，返回它离锚点的距离。用于按下时判定是否点中旋转环。
+	FVector WorldOrigin = FVector::ZeroVector;
+	FVector WorldDirection = FVector::ZeroVector;
+	if (!DeprojectMousePositionToWorld(WorldOrigin, WorldDirection))
+	{
+		return false;
+	}
+
+	if (FMath::Abs(WorldDirection.Z) < KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const float T = (FormationRunAnchorWorld.Z - WorldOrigin.Z) / WorldDirection.Z;
+	if (T <= 0.0f)
+	{
+		return false;
+	}
+
+	const FVector HitPoint = WorldOrigin + WorldDirection * T;
+	OutRadiusCm = FVector2D(HitPoint.X - FormationRunAnchorWorld.X, HitPoint.Y - FormationRunAnchorWorld.Y).Size();
+	return true;
+}
+
+bool ADroneOpsPlayerController::IsCursorOnFormationRing() const
+{
+	float RadiusCm = 0.0f;
+	if (!ComputeCursorRadiusOnAnchorPlane(RadiusCm))
+	{
+		return false;
+	}
+
+	// 命中容差：环半径 ± 较大的带宽（细环很难点，放宽到 ~40% 半径或至少 200cm）。
+	const float Tolerance = FMath::Max(FormationRingRadiusCm * 0.4f, 200.0f);
+	return FMath::Abs(RadiusCm - FormationRingRadiusCm) <= Tolerance;
+}
+
+void ADroneOpsPlayerController::HandleFormationRingPressed()
+{
+	if (!bFormationRotateActive || !IsValid(FormationGizmoActor))
+	{
+		return;
+	}
+
+	bDraggingFormationRing = true;
+	FormationGizmoActor->SetRingHighlighted(true);
+	SetIgnoreLookInput(true);
+	SetIgnoreMoveInput(true);
+}
+
+void ADroneOpsPlayerController::UpdateFormationRingDrag()
+{
+	if (!bDraggingFormationRing || !bFormationRotateActive)
+	{
+		return;
+	}
+
+	// GameAndUI 捕获期间真实光标被冻结，无法用光标绝对位置；改用原始鼠标增量：
+	// 水平拖动映射为绕世界 Z 的偏航角（与自由相机转视角一致）。
+	float MouseDX = 0.0f;
+	float MouseDY = 0.0f;
+	GetInputMouseDelta(MouseDX, MouseDY);
+
+	if (FMath::IsNearlyZero(MouseDX))
+	{
+		return;
+	}
+
+	FormationYawDegrees = FMath::UnwindDegrees(FormationYawDegrees + MouseDX * FormationRotateDegPerMouseUnit);
+	RefreshFormationPreview();
+}
+
+void ADroneOpsPlayerController::EndFormationRingDrag()
+{
+	if (bDraggingFormationRing)
+	{
+		SetIgnoreLookInput(false);
+		SetIgnoreMoveInput(false);
+	}
+	bDraggingFormationRing = false;
+	if (IsValid(FormationGizmoActor))
+	{
+		FormationGizmoActor->SetRingHighlighted(false);
 	}
 }
 

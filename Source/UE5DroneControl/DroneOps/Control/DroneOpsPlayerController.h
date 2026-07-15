@@ -62,6 +62,44 @@ public:
 	UFUNCTION(BlueprintPure, Category = "DroneOps|PathEdit")
 	bool IsPathEditMode() const { return bPathEditMode; }
 
+	/** 设置某条临时路径的循环开关（预演关卡，每条路径独立）。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	bool SetEditingPathClosedLoop(int32 DroneId, bool bClosedLoop);
+
+	/** 一次性设置全部临时路径的循环开关。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	void SetAllEditingPathsClosedLoop(bool bClosedLoop);
+
+	// ---- 编队旋转预览（JSON 路径：运行锚点平移 + 水平旋转 Gizmo）----
+
+	/**
+	 * 编队旋转的几何变换：把编辑系节点坐标先相对源锚点旋转（仅水平面绕 Z），再平移到目标基准位置。
+	 * 高度(Z)保持不变，节点相对距离不变。预演与派发共用此函数，保证结果完全一致。
+	 */
+	static FVector ApplyFormationTransform(const FVector& NodeEditLocation, const FVector& RefEditOrigin, const FVector& TargetBase, float YawDegrees);
+
+	/**
+	 * 解析运行锚点无人机：优先主选中，其次最小可用 DroneId；都没有则返回 false。
+	 * OutAnchorWorld = 该无人机当前世界位置。
+	 */
+	bool ResolveRunAnchorDrone(int32& OutDroneId, FVector& OutAnchorWorld);
+
+	/**
+	 * 开始 JSON 编队旋转预览：生成预览路径可视化 + 锚点旋转环 Gizmo。角度从 0 开始。
+	 * 失败（无有效运行锚点）返回 false。
+	 */
+	bool BeginFormationRotatePreview(const FDronePathsSaveData& PathsData);
+
+	/** 结束编队旋转预览：销毁预览可视化与 Gizmo。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	void EndFormationRotatePreview();
+
+	bool IsFormationRotateActive() const { return bFormationRotateActive; }
+	float GetFormationYawDegrees() const { return FormationYawDegrees; }
+	FVector GetFormationRunAnchorWorld() const { return FormationRunAnchorWorld; }
+	FVector GetFormationRefEditOrigin() const { return FormationRefEditOrigin; }
+	int32 GetFormationRunAnchorDroneId() const { return FormationRunAnchorDroneId; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -196,6 +234,44 @@ private:
 	// 编队参考原点（第一架影子机的首航点世界坐标）
 	FVector EditFormationRefOrigin = FVector::ZeroVector;
 
+	// ---- 编队旋转预览状态 ----
+	// 预览路径可视化 Actor（只显示不移动），BeginFormationRotatePreview 生成，End 清理。
+	UPROPERTY()
+	TArray<TObjectPtr<ADronePathActor>> FormationPreviewActors;
+
+	// 锚点旋转环 Gizmo。
+	UPROPERTY()
+	TObjectPtr<class AFormationRotationGizmoActor> FormationGizmoActor = nullptr;
+
+	// 当前加载的 JSON 路径数据（原始，只读，不修改）。
+	FDronePathsSaveData FormationSourcePaths;
+
+	bool bFormationRotateActive = false;
+	// 当前编队水平旋转角（度，绕世界 Z）。
+	float FormationYawDegrees = 0.0f;
+	// 运行锚点无人机当前世界位置（编队平移目标基准）。
+	FVector FormationRunAnchorWorld = FVector::ZeroVector;
+	int32 FormationRunAnchorDroneId = INDEX_NONE;
+	// 源锚点（JSON 中 AnchorDroneId 路径首航点的编辑系坐标）。
+	FVector FormationRefEditOrigin = FVector::ZeroVector;
+
+	// 旋转环拖拽状态。
+	bool bDraggingFormationRing = false;
+	// 旋转环半径（cm），生成 Gizmo 时缓存，用于平面命中判定。
+	float FormationRingRadiusCm = 400.0f;
+	// 编队旋转灵敏度：每单位水平鼠标增量对应的偏航角（度）。
+	UPROPERTY(EditAnywhere, Category = "PathEdit")
+	float FormationRotateDegPerMouseUnit = 4.0f;
+
+	void RefreshFormationPreview();
+	void HandleFormationRingPressed();
+	void UpdateFormationRingDrag();
+	void EndFormationRingDrag();
+	// 鼠标反投影到锚点水平面，返回落点离锚点的距离(cm)。用于按下时判定是否点中旋转环。
+	bool ComputeCursorRadiusOnAnchorPlane(float& OutRadiusCm) const;
+	// 光标是否落在旋转环附近（平面半径判定，命中可靠，不依赖细碰撞体）。
+	bool IsCursorOnFormationRing() const;
+
 	UPROPERTY()
 	TObjectPtr<ADroneWaypointActor> EditSelectedWaypoint = nullptr;
 
@@ -205,7 +281,7 @@ private:
 
 	// 编辑时地图点击加点的默认段速度（m/s）
 	UPROPERTY(EditAnywhere, Category = "PathEdit")
-	float EditDefaultSegmentSpeed = 5.0f;
+	float EditDefaultSegmentSpeed = 1.0f;
 
 	// gizmo 拖拽灵敏度
 	UPROPERTY(EditAnywhere, Category = "PathEdit")

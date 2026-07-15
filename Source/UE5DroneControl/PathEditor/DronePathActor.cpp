@@ -26,6 +26,13 @@ namespace DronePathVisual
 	constexpr float BasicShapeCylinderRadiusCm = 50.0f;
 	constexpr float CentimetersPerMeter = 100.0f;
 	constexpr float MinSegmentDurationSeconds = 0.01f;
+	// 所有未明确设置速度的路径段统一使用的缺省速度 (m/s)。
+	constexpr float DefaultSegmentSpeedMps = 1.0f;
+}
+
+float ADronePathActor::GetDefaultSegmentSpeedMps()
+{
+	return DronePathVisual::DefaultSegmentSpeedMps;
 }
 
 ADronePathActor::ADronePathActor()
@@ -213,7 +220,15 @@ void ADronePathActor::AddWaypointAtEnd()
 		NewLocation = LastLocation + (Direction * DefaultWaypointSpacing);
 	}
 
-	const float NewSegmentSpeed = Waypoints.IsEmpty() ? 0.0f : FMath::Clamp(Waypoints.Last().SegmentSpeed, 0.0f, 15.0f);
+	// 新增路径点默认沿用上一段速度；若上一段无有效速度或这是首段之后的第一段，使用缺省 1m/s。
+	float NewSegmentSpeed = DronePathVisual::DefaultSegmentSpeedMps;
+	if (!Waypoints.IsEmpty())
+	{
+		const float PreviousSpeed = Waypoints.Last().SegmentSpeed;
+		NewSegmentSpeed = (PreviousSpeed > KINDA_SMALL_NUMBER)
+			? FMath::Clamp(PreviousSpeed, 0.0f, 15.0f)
+			: DronePathVisual::DefaultSegmentSpeedMps;
+	}
 	AddWaypoint(NewLocation, NewSegmentSpeed);
 }
 
@@ -370,6 +385,7 @@ void ADronePathActor::StartMovement(AActor* DroneActor)
 	PrecomputeSegmentDurations();
 
 	CurrentSegmentIndex = 1;
+	bReturningToStart = false;
 	SegmentStartTime = World->GetTimeSeconds();
 	SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex) ? SegmentDurations[CurrentSegmentIndex] : DronePathVisual::MinSegmentDurationSeconds;
 	bIsMoving = true;
@@ -421,6 +437,7 @@ bool ADronePathActor::ResumeMovement(AActor* DroneActor, int32 SegmentIndex, flo
 	PrecomputeSegmentDurations();
 
 	CurrentSegmentIndex = SegmentIndex;
+	bReturningToStart = false;
 	SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex) ? SegmentDurations[CurrentSegmentIndex] : DronePathVisual::MinSegmentDurationSeconds;
 
 	const float SafeDuration = FMath::Max(SegmentDuration, DronePathVisual::MinSegmentDurationSeconds);
@@ -968,6 +985,24 @@ void ADronePathActor::PrecomputeSegmentDurations()
 
 		SegmentDurations[WaypointIndex] = FMath::Max(ComputedDuration, DronePathVisual::MinSegmentDurationSeconds);
 	}
+
+	// 循环闭合段：最后一个节点 -> 第一个节点。速度沿用最后一段速度，缺省 1m/s，保证 >0。
+	ClosedLoopSegmentDuration = 0.0f;
+	if (bClosedLoop && Waypoints.Num() > 2)
+	{
+		const FVector LastLocation = GetWaypointWorldLocation(Waypoints.Num() - 1);
+		const FVector FirstLocation = GetWaypointWorldLocation(0);
+		const float DistanceMeters = FVector::Distance(LastLocation, FirstLocation) / DronePathVisual::CentimetersPerMeter;
+
+		float ClosingSpeed = Waypoints.Last().SegmentSpeed;
+		if (ClosingSpeed <= KINDA_SMALL_NUMBER)
+		{
+			ClosingSpeed = DronePathVisual::DefaultSegmentSpeedMps;
+		}
+
+		const float ComputedDuration = DistanceMeters / ClosingSpeed;
+		ClosedLoopSegmentDuration = FMath::Max(ComputedDuration, DronePathVisual::MinSegmentDurationSeconds);
+	}
 }
 
 void ADronePathActor::TickMovement()
@@ -987,7 +1022,8 @@ void ADronePathActor::TickMovement()
 		return;
 	}
 
-	if (!Waypoints.IsValidIndex(CurrentSegmentIndex) || CurrentSegmentIndex <= 0)
+	// 正常段要求 CurrentSegmentIndex>=1；闭合段（bReturningToStart）不依赖 CurrentSegmentIndex。
+	if (!bReturningToStart && (!Waypoints.IsValidIndex(CurrentSegmentIndex) || CurrentSegmentIndex <= 0))
 	{
 		StopMovementInternal(false);
 		SetPathStatus(EPathStatus::Standby);
@@ -999,8 +1035,13 @@ void ADronePathActor::TickMovement()
 	const float SafeDuration = FMath::Max(SegmentDuration, DronePathVisual::MinSegmentDurationSeconds);
 	const float Alpha = FMath::Clamp((Now - SegmentStartTime) / SafeDuration, 0.0f, 1.0f);
 
-	const FVector StartLocation = GetWaypointWorldLocation(CurrentSegmentIndex - 1);
-	const FVector EndLocation = GetWaypointWorldLocation(CurrentSegmentIndex);
+	// 闭合段：最后节点 -> 首节点；正常段：上一节点 -> 当前节点。
+	const FVector StartLocation = bReturningToStart
+		? GetWaypointWorldLocation(Waypoints.Num() - 1)
+		: GetWaypointWorldLocation(CurrentSegmentIndex - 1);
+	const FVector EndLocation = bReturningToStart
+		? GetWaypointWorldLocation(0)
+		: GetWaypointWorldLocation(CurrentSegmentIndex);
 	const FVector NewLocation = FMath::Lerp(StartLocation, EndLocation, Alpha);
 	DroneActor->SetActorLocation(NewLocation);
 
@@ -1029,9 +1070,29 @@ void ADronePathActor::TickMovement()
 		return;
 	}
 
+	// 闭合段抵达首节点：重置回第一段，继续循环（不瞬移，下一帧从首节点继续 Lerp）。
+	if (bReturningToStart)
+	{
+		bReturningToStart = false;
+		CurrentSegmentIndex = 1;
+		SegmentStartTime = Now;
+		SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex) ? SegmentDurations[CurrentSegmentIndex] : DronePathVisual::MinSegmentDurationSeconds;
+		return;
+	}
+
 	++CurrentSegmentIndex;
 	if (CurrentSegmentIndex >= Waypoints.Num())
 	{
+		// 循环路径：进入"最后节点 -> 首节点"的闭合段，平滑飞回，绝不瞬移。
+		if (bClosedLoop && Waypoints.Num() > 2)
+		{
+			bReturningToStart = true;
+			SegmentStartTime = Now;
+			SegmentDuration = FMath::Max(ClosedLoopSegmentDuration, DronePathVisual::MinSegmentDurationSeconds);
+			return;
+		}
+
+		// 非循环路径：到达最后一个节点后结束并保持悬停。
 		SnapControlledDroneToPathEnd();
 		CompleteExecution();
 		ReceivePathMovementFinished(DroneActor);
@@ -1045,6 +1106,7 @@ void ADronePathActor::TickMovement()
 void ADronePathActor::StopMovementInternal(bool bClearControlledDrone)
 {
 	bIsMoving = false;
+	bReturningToStart = false;
 	CurrentSegmentIndex = INDEX_NONE;
 	SegmentStartTime = 0.0f;
 	SegmentDuration = 0.0f;
