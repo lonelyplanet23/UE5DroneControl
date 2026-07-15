@@ -71,9 +71,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MainMenu|Navigation")
 	FName QueueEditorLevelName = FName("EditMap");
 
-	/** 预演关卡名称，默认 "DroneOpsMap" */
+	/** 预演关卡名称，默认使用包含 CesiumGeoreference 的 CesiumWorld。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MainMenu|Navigation")
-	FName PreviewLevelName = FName("DroneOpsMap");
+	FName PreviewLevelName = FName("CesiumWorld");
 
 private:
 	/** 当前显示的主菜单 Widget 实例 */

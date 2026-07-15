@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
+#include "DroneOps/Core/GeographicTypes.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraActor.h"
 #include "PathEditor/DroneWaypointActor.h"
@@ -38,6 +39,49 @@ public:
 	/** Manually snap every shadow drone to the current position of its registered mirror drone. */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps|Calibration")
 	void ResetShadowDronesToMirrors();
+
+	/**
+	 * Dispatch (or preview) a geographic target for the currently selected drone(s).
+	 *
+	 * The primary selected drone is placed exactly at the input lon/lat/alt point; any other
+	 * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
+	 * by ascending DroneId for a stable layout. Each drone subtracts its own GPS anchor before
+	 * the command is sent, and exactly one logical command is sent per drone (the backend owns
+	 * reliable resend). Altitude is treated as height above mean sea level and converted to
+	 * ellipsoid height via UDroneNetworkManager::GeoidSeparationMeters before the coordinate
+	 * transform.
+	 *
+	 * @param CoordinateSystem  Coordinate system of the input (currently only WGS84).
+	 * @param Longitude  Longitude in degrees, range [-180, 180].
+	 * @param Latitude   Latitude in degrees, range [-90, 90].
+	 * @param AltitudeMslMeters  Altitude in metres above mean sea level.
+	 * @param bPreviewOnly  When true, only draws preview markers and sends no command.
+	 * @return Result describing success, dispatched count, and a status message.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps")
+	FGeographicDispatchResult DispatchGeographicTarget(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters,
+		bool bPreviewOnly);
+
+	/**
+	 * Validate the current selection and a geographic target without drawing or sending anything.
+	 * bForDispatch=false validates preview prerequisites; true additionally requires every selected
+	 * drone to be controllable, anchored, and the backend WebSocket to be connected.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps")
+	FGeographicDispatchResult ValidateGeographicTarget(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters,
+		bool bForDispatch) const;
+
+	/** Number of drones currently selected for dispatch (multi-selection, or 0). */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps")
+	int32 GetSelectedDroneCountForDispatch() const;
 
 	// ---- 预演关卡路径编辑模式（供 SequenceDispatchPanelWidget 调用）----
 
@@ -184,6 +228,28 @@ public:
 	FName MainMenuLevelName = FName("MainMenu");
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FWgs84GeographicDispatchLatentCommand;
+#endif
+
+	struct FGeographicDispatchSlot
+	{
+		int32 DroneId = 0;
+		FVector WorldTarget = FVector::ZeroVector;
+		bool bIsPrimary = false;
+	};
+
+	FGeographicDispatchResult BuildGeographicDispatchPlan(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters,
+		bool bForDispatch,
+		TArray<FGeographicDispatchSlot>& OutSlots) const;
+
+	/** Last preview plan, redrawn every frame until another preview replaces it. */
+	TArray<FGeographicDispatchSlot> ActiveGeographicPreviewSlots;
+
 	AActor* GetSelectableDroneUnderCursor(FVector* OutFallbackWorldLocation = nullptr) const;
 	AActor* FindNearestSelectableDroneOnScreen(float MaxScreenDistance) const;
 	AActor* ResolveDroneActorById(int32 DroneId) const;

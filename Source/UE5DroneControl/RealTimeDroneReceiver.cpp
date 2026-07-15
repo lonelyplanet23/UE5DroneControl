@@ -980,9 +980,18 @@ void ARealTimeDroneReceiver::OnDroneWsEvent(int32 InDroneId, const FString& Even
 		return;
 	}
 
-	AnchorWorldLocation = ICoordinateService::Execute_GeographicToWorld(CoordService.GetObject(), GpsLat, GpsLon, GpsAlt);
+	// Jetson publishes VehicleGlobalPosition::altitude_amsl. Convert it with the same geoid
+	// separation used by geographic target input before passing the height to Cesium.
+	double EllipsoidAltitudeMeters = GpsAlt;
+	if (const UDroneNetworkManager* NetworkManager = GI->GetSubsystem<UDroneNetworkManager>())
+	{
+		EllipsoidAltitudeMeters = NetworkManager->ConvertMslToWgs84EllipsoidHeight(GpsAlt);
+	}
+
+	AnchorWorldLocation = ICoordinateService::Execute_GeographicToWorld(
+		CoordService.GetObject(), GpsLat, GpsLon, EllipsoidAltitudeMeters);
 	bHasGpsAnchor = true;
 
-	UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: '%s' event — GPS anchor (%.6f, %.6f, %.1fm) → UE world %s"),
-		*DroneName, *Event, GpsLat, GpsLon, GpsAlt, *AnchorWorldLocation.ToString());
+	UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: '%s' event — GPS anchor (%.6f, %.6f, AMSL %.1fm, ellipsoid %.1fm) → UE world %s"),
+		*DroneName, *Event, GpsLat, GpsLon, GpsAlt, EllipsoidAltitudeMeters, *AnchorWorldLocation.ToString());
 }

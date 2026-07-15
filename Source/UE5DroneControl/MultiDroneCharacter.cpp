@@ -168,12 +168,32 @@ void AMultiDroneCharacter::Tick(float DeltaTime)
 		bSendClickTarget = false;
 		bVerticalMoveActive = false;
 		VerticalMoveDirection = 0.0f;
+		bOneShot3DMoveActive = false;
 	}
 
 	// Disable parent UDP send — shadow drones use WebSocket exclusively
 	bEnableUDPSend = false;
 
 	Super::Tick(DeltaTime);
+
+	// One-shot 3D local visual move (geographic dispatch). Honours target Z, unlike the
+	// parent XY-only click movement, and drives no WebSocket resend. Runs before the
+	// mirror-follow / assembly blocks so those do not fight it back to the mirror position.
+	if (bOneShot3DMoveActive && !bIsPaused && !bInAssemblyMode)
+	{
+		const FVector CurrentLocation = GetActorLocation();
+		const FVector NewLocation = FMath::VInterpConstantTo(
+			CurrentLocation, OneShot3DTarget, DeltaTime, OneShot3DMoveSpeedCmPerSec);
+		SetActorLocation(NewLocation);
+
+		if (FVector::DistSquared(NewLocation, OneShot3DTarget) <= OneShot3DArriveThresholdCm * OneShot3DArriveThresholdCm)
+		{
+			SetActorLocation(OneShot3DTarget);
+			bOneShot3DMoveActive = false;
+			UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: One-shot 3D move arrived at target"), *DroneName);
+		}
+		return;
+	}
 
 	// Parent click movement intentionally preserves the current Actor Z. Apply
 	// shadow-drone vertical movement afterwards so Q/E owns Z independently.
@@ -253,6 +273,7 @@ void AMultiDroneCharacter::EnterAssemblyMode()
 	bSendClickTarget = false;
 	bVerticalMoveActive = false;
 	VerticalMoveDirection = 0.0f;
+	bOneShot3DMoveActive = false;
 	WsSendTimer = 0.0f;
 
 	if (Registry)
@@ -323,6 +344,7 @@ void AMultiDroneCharacter::SetPaused(bool bPause)
 		bSendClickTarget = false;
 		bVerticalMoveActive = false;
 		VerticalMoveDirection = 0.0f;
+		bOneShot3DMoveActive = false;
 		WsSendTimer = 0.0f;
 	}
 	else
@@ -382,6 +404,7 @@ void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 
 	}
 
 	bFollowingMirror = false;
+	bOneShot3DMoveActive = false;
 
 	ClickTargetLocation = TargetLocation;
 	if (bVerticalMoveActive)
@@ -399,6 +422,25 @@ void AMultiDroneCharacter::SetClickTargetLocation(FVector TargetLocation, int32 
 
 	SendWebSocketMoveCommand();
 	WsSendTimer = 0.0f;
+}
+
+void AMultiDroneCharacter::MoveToTarget3D(FVector WorldTarget)
+{
+	if (bInAssemblyMode || bIsPaused)
+	{
+		return;
+	}
+
+	// Take over movement locally without any periodic WebSocket resend: the dispatcher
+	// sends the backend command once and the backend owns reliable resend.
+	bFollowingMirror = false;
+	bSendClickTarget = false;
+	bVerticalMoveActive = false;
+	VerticalMoveDirection = 0.0f;
+	WsSendTimer = 0.0f;
+
+	OneShot3DTarget = WorldTarget;
+	bOneShot3DMoveActive = true;
 }
 
 void AMultiDroneCharacter::SendWebSocketMoveCommand()
@@ -447,6 +489,7 @@ void AMultiDroneCharacter::SendWebSocketMoveCommand()
 void AMultiDroneCharacter::StopClickTargetSending()
 {
 	bSendClickTarget = false;
+	bOneShot3DMoveActive = false;
 	if (bVerticalMoveActive)
 	{
 		const FVector CurrentLocation = GetActorLocation();
@@ -474,6 +517,7 @@ void AMultiDroneCharacter::SetVerticalMoveInput(float Direction)
 	{
 		bVerticalMoveActive = true;
 		bFollowingMirror = false;
+		bOneShot3DMoveActive = false;
 		VerticalCommandTargetLocation = bSendClickTarget ? ClickTargetLocation : GetActorLocation();
 		VerticalCommandTargetLocation.Z = GetActorLocation().Z;
 
@@ -577,6 +621,7 @@ void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event,
 	bSendClickTarget = false;
 	bVerticalMoveActive = false;
 	VerticalMoveDirection = 0.0f;
+	bOneShot3DMoveActive = false;
 	WsSendTimer = 0.0f;
 
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: '%s' event — now following mirror drone"), *DroneName, *Event);

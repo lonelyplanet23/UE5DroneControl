@@ -28,6 +28,26 @@ namespace DronePathVisual
 	constexpr float MinSegmentDurationSeconds = 0.01f;
 	// 所有未明确设置速度的路径段统一使用的缺省速度 (m/s)。
 	constexpr float DefaultSegmentSpeedMps = 1.0f;
+
+	// 无人机模型应始终保持水平。路径段只有水平分量时才更新 Yaw；
+	// 纯升降段没有可用的水平朝向，因此保留当前 Yaw，避免 Rotation()
+	// 把垂直方向转换成 +/-90 度 Pitch，或把 Yaw 意外重置为 0。
+	void OrientActorToHorizontalTravel(AActor* Actor, const FVector& TravelDirection)
+	{
+		if (!IsValid(Actor))
+		{
+			return;
+		}
+
+		FRotator NewRotation(0.0f, Actor->GetActorRotation().Yaw, 0.0f);
+		const FVector HorizontalDirection(TravelDirection.X, TravelDirection.Y, 0.0f);
+		if (!HorizontalDirection.IsNearlyZero())
+		{
+			NewRotation.Yaw = HorizontalDirection.Rotation().Yaw;
+		}
+
+		Actor->SetActorRotation(NewRotation);
+	}
 }
 
 float ADronePathActor::GetDefaultSegmentSpeedMps()
@@ -454,12 +474,9 @@ bool ADronePathActor::ResumeMovement(AActor* DroneActor, int32 SegmentIndex, flo
 	DroneActor->SetActorLocation(ResumeLocation);
 
 	const FVector TravelDirection = EndLocation - StartLocation;
-	if (bOrientControlledDroneToPath && !TravelDirection.IsNearlyZero())
+	if (bOrientControlledDroneToPath)
 	{
-		FRotator NewRot = TravelDirection.Rotation();
-		NewRot.Pitch = 0.0f;
-		NewRot.Roll = 0.0f;
-		DroneActor->SetActorRotation(NewRot);
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, TravelDirection);
 	}
 
 	SetActorTickEnabled(true);
@@ -1046,12 +1063,9 @@ void ADronePathActor::TickMovement()
 	DroneActor->SetActorLocation(NewLocation);
 
 	const FVector TravelDirection = EndLocation - StartLocation;
-	if (bOrientControlledDroneToPath && !TravelDirection.IsNearlyZero())
+	if (bOrientControlledDroneToPath)
 	{
-		FRotator NewRot = TravelDirection.Rotation();
-		NewRot.Pitch = 0.0f;
-		NewRot.Roll = 0.0f;
-		DroneActor->SetActorRotation(NewRot);
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, TravelDirection);
 	}
 
 	{
@@ -1132,10 +1146,7 @@ void ADronePathActor::SnapControlledDroneToPathStart() const
 	if (bOrientControlledDroneToPath && Waypoints.Num() > 1)
 	{
 		const FVector ForwardDirection = GetWaypointWorldLocation(1) - StartLocation;
-		if (!ForwardDirection.IsNearlyZero())
-		{
-			DroneActor->SetActorRotation(ForwardDirection.Rotation());
-		}
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, ForwardDirection);
 	}
 }
 
@@ -1153,10 +1164,7 @@ void ADronePathActor::SnapControlledDroneToPathEnd() const
 	if (bOrientControlledDroneToPath && Waypoints.Num() > 1)
 	{
 		const FVector EndDirection = EndLocation - GetWaypointWorldLocation(Waypoints.Num() - 2);
-		if (!EndDirection.IsNearlyZero())
-		{
-			DroneActor->SetActorRotation(EndDirection.Rotation());
-		}
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, EndDirection);
 	}
 }
 

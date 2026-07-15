@@ -55,6 +55,23 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "Network")
 	float PollIntervalSec = 3.0f;
 
+	/**
+	 * Geoid separation (metres) for the operating region: EllipsoidHeight = MSLHeight + GeoidSeparationMeters.
+	 *
+	 * The geographic target panel and PX4 VehicleGlobalPosition::altitude_amsl both use height above
+	 * mean sea level, while Cesium expects WGS84 ellipsoid height. Configure this value for the
+	 * operating region (or leave 0 only when the upstream altitude already uses ellipsoid height).
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "Coordinate")
+	double GeoidSeparationMeters = 0.0;
+
+	/** Convert an AMSL/orthometric altitude to the ellipsoid height consumed by Cesium. */
+	UFUNCTION(BlueprintPure, Category = "Coordinate")
+	double ConvertMslToWgs84EllipsoidHeight(double AltitudeMslMeters) const
+	{
+		return AltitudeMslMeters + GeoidSeparationMeters;
+	}
+
 	// ---- Pending Georeference Origin (set before transitioning to preview level) ----
 
 	/** Latitude to apply to CesiumGeoreference on preview level load. 0 = not set. */

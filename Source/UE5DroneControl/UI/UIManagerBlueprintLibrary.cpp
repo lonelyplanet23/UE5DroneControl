@@ -5,14 +5,17 @@
 #include "ToastWidget.h"
 #include "AssemblyPopupWidget.h"
 #include "SequenceDispatchPanelWidget.h"
+#include "GeographicTargetPanelWidget.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
+#include "GameFramework/PlayerController.h"
 
 // 静态成员初始化
 TWeakObjectPtr<UDroneListWidget> UUIManagerBlueprintLibrary::CurrentDroneList;
 TWeakObjectPtr<UToastWidget> UUIManagerBlueprintLibrary::CurrentToast;
 TWeakObjectPtr<UAssemblyPopupWidget> UUIManagerBlueprintLibrary::CurrentAssemblyPopup;
 TWeakObjectPtr<USequenceDispatchPanelWidget> UUIManagerBlueprintLibrary::CurrentSequenceDispatchPanel;
+TWeakObjectPtr<UGeographicTargetPanelWidget> UUIManagerBlueprintLibrary::CurrentGeographicTargetPanel;
 
 TSubclassOf<UDroneListWidget> UUIManagerBlueprintLibrary::GetDroneListClass()
 {
@@ -142,5 +145,43 @@ void UUIManagerBlueprintLibrary::HideSequenceDispatchPanel(UObject* WorldContext
     {
         CurrentSequenceDispatchPanel->RemoveFromParent();
         CurrentSequenceDispatchPanel = nullptr;
+    }
+}
+
+TSubclassOf<UGeographicTargetPanelWidget> UUIManagerBlueprintLibrary::GetGeographicTargetPanelClass()
+{
+    UClass* Class = LoadClass<UGeographicTargetPanelWidget>(nullptr, TEXT("/Game/DroneOps/UI/WBP_GeographicTargetPanel.WBP_GeographicTargetPanel_C"));
+    return Class ? Class : UGeographicTargetPanelWidget::StaticClass();
+}
+
+void UUIManagerBlueprintLibrary::ShowGeographicTargetPanel(UObject* WorldContextObject)
+{
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    if (!World) return;
+
+    if (CurrentGeographicTargetPanel.IsValid())
+    {
+        CurrentGeographicTargetPanel->SetVisibility(ESlateVisibility::Visible);
+        return;
+    }
+
+    APlayerController* OwningPlayer = World->GetFirstPlayerController();
+    UGeographicTargetPanelWidget* Panel = OwningPlayer
+        ? CreateWidget<UGeographicTargetPanelWidget>(OwningPlayer, GetGeographicTargetPanelClass())
+        : CreateWidget<UGeographicTargetPanelWidget>(World, GetGeographicTargetPanelClass());
+    if (Panel)
+    {
+        Panel->AddToViewport();
+        CurrentGeographicTargetPanel = Panel;
+        UE_LOG(LogTemp, Log, TEXT("UIManager: GeographicTargetPanel created"));
+    }
+}
+
+void UUIManagerBlueprintLibrary::HideGeographicTargetPanel(UObject* WorldContextObject)
+{
+    if (CurrentGeographicTargetPanel.IsValid())
+    {
+        CurrentGeographicTargetPanel->RemoveFromParent();
+        CurrentGeographicTargetPanel = nullptr;
     }
 }

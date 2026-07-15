@@ -133,6 +133,15 @@ public:
 	virtual void SetClickTargetLocation(FVector TargetLocation, int32 Mode = 1) override;
 	virtual void StopClickTargetSending() override;
 
+	/**
+	 * Move the shadow drone toward a full 3D world target (XYZ) as a one-shot local visual move.
+	 * Unlike SetClickTargetLocation this honours the target Z and does NOT drive periodic WebSocket
+	 * resends — the backend command is expected to be sent once separately by the dispatcher, and the
+	 * backend owns reliable resend. Used by the geographic (lon/lat/alt) target dispatch.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Drone Network")
+	void MoveToTarget3D(FVector WorldTarget);
+
 	/** Set continuous vertical input (-1 down, +1 up). Local Z is handled separately from click movement. */
 	void SetVerticalMoveInput(float Direction);
 
@@ -140,12 +149,28 @@ public:
 	void StopVerticalMove(bool bSendFinalCommand = true);
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FWgs84GeographicDispatchLatentCommand;
+#endif
+
 	bool bInAssemblyMode = false;
 	bool bIsPaused = false;
 	bool bWasMovingBeforePause = false;
 	bool bVerticalMoveActive = false;
 	float VerticalMoveDirection = 0.0f;
 	FVector VerticalCommandTargetLocation = FVector::ZeroVector;
+
+	// One-shot 3D local visual move (geographic target dispatch). Honours target Z; no WS resend.
+	bool bOneShot3DMoveActive = false;
+	FVector OneShot3DTarget = FVector::ZeroVector;
+
+	/** Local move speed (cm/s) for the one-shot 3D move toward a geographic target. */
+	UPROPERTY(EditAnywhere, Category = "Vertical Control", meta = (ClampMin = "1.0"))
+	float OneShot3DMoveSpeedCmPerSec = 600.0f;
+
+	/** Arrival threshold (cm) for the one-shot 3D move. */
+	UPROPERTY(EditAnywhere, Category = "Vertical Control", meta = (ClampMin = "1.0"))
+	float OneShot3DArriveThresholdCm = 50.0f;
 
 	/** Local shadow-drone vertical speed in centimeters per second. */
 	UPROPERTY(EditAnywhere, Category = "Vertical Control", meta = (ClampMin = "1.0"))
