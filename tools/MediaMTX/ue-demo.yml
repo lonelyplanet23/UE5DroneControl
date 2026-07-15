@@ -1,0 +1,13 @@
+# Local UE drone-panel demo: publish RTSP to drone-1, play it through WebRTC.
+rtsp: true
+rtspAddress: :8554
+
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ['*']
+
+pathDefaults:
+  source: publisher
+
+paths:
+  all: {}

@@ -1,0 +1,19 @@
+2026/07/14 17:47:33 INF MediaMTX v1.18.2, windows, amd64
+2026/07/14 17:47:33 INF configuration loaded from D:\RedAlert\UE5DroneControl\Tools\MediaMTX\ue-demo.yml
+2026/07/14 17:47:33 INF [RTSP] listener opened on :8554 (TCP/RTSP), :8000 (UDP/RTP), :8001 (UDP/RTCP)
+2026/07/14 17:47:33 INF [RTMP] listener opened on :1935 (TCP/RTMP)
+2026/07/14 17:47:33 INF [HLS] listener opened on :8888 (TCP/HTTP)
+2026/07/14 17:47:33 INF [WebRTC] listener opened on :8889 (TCP/HTTP), :8189 (UDP/ICE)
+2026/07/14 17:47:33 INF [SRT] listener opened on :8890 (UDP)
+2026/07/14 17:50:35 INF [RTSP] [conn 127.0.0.1:63737] opened
+2026/07/14 17:50:35 INF [RTSP] [session 5b60f5b2] created by 127.0.0.1:63737
+2026/07/14 17:50:35 INF [path drone-1] stream is available and online, 1 track (H264)
+2026/07/14 17:50:35 INF [RTSP] [session 5b60f5b2] is publishing to path 'drone-1'
+2026/07/14 17:50:35 INF [path drone-1] RTP packets are too big (1460 > 1440), remuxing them into smaller ones
+2026/07/14 17:50:37 INF [RTSP] [session 5b60f5b2] destroyed: torn down by 127.0.0.1:63737
+2026/07/14 17:50:37 INF [RTSP] [conn 127.0.0.1:63737] closed: read tcp 127.0.0.1:8554->127.0.0.1:63737: wsarecv: An established connection was aborted by the software in your host machine.
+2026/07/14 17:51:16 INF [RTSP] [conn 127.0.0.1:59954] opened
+2026/07/14 17:51:16 INF [RTSP] [session e34b3d29] created by 127.0.0.1:59954
+2026/07/14 17:51:16 INF [path drone-1] stream is available and online, 1 track (H264)
+2026/07/14 17:51:16 INF [RTSP] [session e34b3d29] is publishing to path 'drone-1'
+2026/07/14 17:51:16 INF [path drone-1] RTP packets are too big (1460 > 1440), remuxing them into smaller ones
