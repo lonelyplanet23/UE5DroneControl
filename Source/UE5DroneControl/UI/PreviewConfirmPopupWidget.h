@@ -50,6 +50,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PreviewConfirm")
 	void SetMessage(const FString& Message);
 
+	// ===== 攻击确认模式 =====
+
+	/** 设置为攻击确认模式 */
+	UFUNCTION(BlueprintCallable, Category = "AttackConfirm")
+	void SetAttackConfirmData(int32 InDroneId, int32 InTargetId, const FVector& InTargetLocation);
+
+	/** 攻击确认广播 */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnAttackConfirmMade,
+		int32, DroneId, int32, TargetId, bool, bAttack);
+	UPROPERTY(BlueprintAssignable, Category = "AttackConfirm")
+	FOnAttackConfirmMade OnAttackConfirmMade;
+
+	/** 攻击按钮（复用 LocalPreviewButton） */
+	UFUNCTION(BlueprintCallable, Category = "AttackConfirm")
+	void SetAttackButtonText(const FString& Text);
+
+	/** 不攻击按钮（复用 CancelButton） */
+	UFUNCTION(BlueprintCallable, Category = "AttackConfirm")
+	void SetDeclineButtonText(const FString& Text);
+
 protected:
 	virtual void NativeConstruct() override;
 
@@ -64,4 +84,13 @@ private:
 	void HandleCancelClicked();
 
 	void MakeChoice(EPreviewConfirmChoice Choice);
+
+	// 攻击确认数据
+	int32 AttackDroneId = 0;
+	int32 AttackTargetId = 0;
+	FVector AttackTargetLocation = FVector::ZeroVector;
+	bool bIsAttackConfirmMode = false;
+
+	void HandleAttackConfirmClicked();
+	void HandleAttackDeclineClicked();
 };

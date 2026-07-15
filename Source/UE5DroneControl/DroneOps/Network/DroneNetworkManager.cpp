@@ -273,6 +273,32 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 
 		Registry->RegisterDrone(Desc);
 
+		// ===== 解析任务状态字段，GET /api/drones 初次加载 =====
+        FString TaskStateStr;
+        if (Obj->TryGetStringField(TEXT("task_state"), TaskStateStr))
+        {
+            int32 CurrentWp = 0, TotalWp = 0;
+            Obj->TryGetNumberField(TEXT("current_waypoint"), CurrentWp);
+            Obj->TryGetNumberField(TEXT("total_waypoints"), TotalWp);
+            FString ErrorDetail;
+            Obj->TryGetStringField(TEXT("task_error"), ErrorDetail);
+            
+            EDroneTaskState State = EDroneTaskState::Standby;
+            const FString Normalized = TaskStateStr.ToLower();
+            if (Normalized == TEXT("assembling")) State = EDroneTaskState::Assembling;
+            else if (Normalized == TEXT("moving")) State = EDroneTaskState::Moving;
+            else if (Normalized == TEXT("scouting")) State = EDroneTaskState::Scouting;
+            else if (Normalized == TEXT("patrolling")) State = EDroneTaskState::Patrolling;
+            else if (Normalized == TEXT("attacking")) State = EDroneTaskState::Attacking;
+            else if (Normalized == TEXT("paused")) State = EDroneTaskState::Paused;
+            else if (Normalized == TEXT("avoiding")) State = EDroneTaskState::Avoiding;
+            else if (Normalized == TEXT("completed")) State = EDroneTaskState::Completed;
+            else if (Normalized == TEXT("error")) State = EDroneTaskState::Error;
+            else State = EDroneTaskState::Standby;
+
+            Registry->UpdateTaskState(Id, State, ErrorDetail, CurrentWp, TotalWp);
+        }
+
 		FString Status;
 		if (Obj->TryGetStringField(TEXT("status"), Status))
 		{
@@ -292,12 +318,19 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 		}
 	}
 
+	// 后端不存在的无人机直接从本地注销，避免面板显示失联的历史记录
+	TArray<int32> ToRemove;
 	for (const FDroneDescriptor& LocalDesc : Registry->GetAllDroneDescriptors())
 	{
 		if (LocalDesc.DroneId > 0 && !SeenBackendIds.Contains(LocalDesc.DroneId))
 		{
-			Registry->MarkDroneAvailability(LocalDesc.DroneId, EDroneAvailability::Lost);
+			ToRemove.Add(LocalDesc.DroneId);
 		}
+	}
+	for (int32 RemovedId : ToRemove)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Drone %d no longer in backend, unregistering"), RemovedId);
+		Registry->UnregisterDrone(RemovedId);
 	}
 }
 
@@ -373,11 +406,35 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		double Speed = 0;
 		Root->TryGetNumberField(TEXT("speed"), Speed);
 		Snap.Velocity = FVector(Speed, 0, 0); // scalar speed stored in X component
+		
+		// ===== 解析 GPS 和电量 =====
+		// 使用新增的独立字段，不再借用 GeographicLocation.Z
+    	double GpsLat = 0, GpsLon = 0, GpsAlt = 0;
+    	Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
+    	Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
+    	Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+    	int32 Battery = -1;
+    	Root->TryGetNumberField(TEXT("battery"), Battery);
+    
+    	// 如果 telemetry 未携带 GPS/电量，保留缓存中的旧值
+    	FDroneTelemetrySnapshot ExistingSnap;
+    	if (Registry->GetTelemetry(DroneId, ExistingSnap))
+    	{
+        	if (GpsLat == 0 && GpsLon == 0 && GpsAlt == 0) {
+            	GpsLat = ExistingSnap.GpsLatitude;
+            	GpsLon = ExistingSnap.GpsLongitude;
+            	GpsAlt = ExistingSnap.GpsAltitude;
+        	}
+        	if (Battery < 0) {
+                Battery = ExistingSnap.BatteryPercent;
+            }
+    	}
+    
+    	Snap.GpsLatitude = GpsLat;
+    	Snap.GpsLongitude = GpsLon;
+    	Snap.GpsAltitude = GpsAlt;
+    	Snap.BatteryPercent = Battery;
 
-		int32 Battery = -1;
-		Root->TryGetNumberField(TEXT("battery"), Battery);
-		// Battery stored in GeographicLocation.Z as a convenient spare float field
-		Snap.GeographicLocation.Z = static_cast<double>(Battery);
 
 		Snap.LastUpdateTime = FPlatformTime::Seconds();
 		Snap.Availability = EDroneAvailability::Online;
@@ -413,6 +470,26 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		}
 
 		OnDroneWsEvent.Broadcast(DroneId, Event, GpsLat, GpsLon, GpsAlt);
+
+		// ===== 将 GPS 写入 Registry 快照 =====
+    	// 确保 UI 列表能通过 GetTelemetry 读到 GPS 数据
+    	if (Event == TEXT("power_on") || Event == TEXT("reconnect"))
+    	{
+        	UDroneRegistrySubsystem* Registry = GetGameInstance()
+            	? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+            	: nullptr;
+        	if (Registry)
+        	{
+            	FDroneTelemetrySnapshot Snap;
+            	Registry->GetTelemetry(DroneId, Snap);
+            	Snap.DroneId = DroneId;
+            	Snap.GpsLatitude = GpsLat;
+            	Snap.GpsLongitude = GpsLon;
+            	Snap.GpsAltitude = GpsAlt;
+            	Snap.LastUpdateTime = FPlatformTime::Seconds();
+            	Registry->UpdateTelemetry(DroneId, Snap);
+        	}
+    	}
 		return;
 	}
 
@@ -529,6 +606,46 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		OnAssignmentResult.Broadcast(ArrayId, Assignments);
 		return;
 	}
+
+	// ===== 新增 drone_task_state 解析 =====
+    if (MsgType == TEXT("drone_task_state"))
+    {
+        int32 DroneId = 0;
+        Root->TryGetNumberField(TEXT("drone_id"), DroneId);
+        
+        FString StateStr;
+        Root->TryGetStringField(TEXT("state"), StateStr);
+        
+        FString Detail;
+        Root->TryGetStringField(TEXT("detail"), Detail);
+        
+        int32 CurrentWp = 0, TotalWp = 0;
+        Root->TryGetNumberField(TEXT("current_waypoint"), CurrentWp);
+        Root->TryGetNumberField(TEXT("total_waypoints"), TotalWp);
+        
+        UDroneRegistrySubsystem* Registry = GetGameInstance()
+            ? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+            : nullptr;
+        
+        if (Registry)
+        {
+            EDroneTaskState State = EDroneTaskState::Standby;
+            const FString Normalized = StateStr.ToLower();
+            if (Normalized == TEXT("assembling")) State = EDroneTaskState::Assembling;
+            else if (Normalized == TEXT("moving")) State = EDroneTaskState::Moving;
+            else if (Normalized == TEXT("scouting")) State = EDroneTaskState::Scouting;
+            else if (Normalized == TEXT("patrolling")) State = EDroneTaskState::Patrolling;
+            else if (Normalized == TEXT("attacking")) State = EDroneTaskState::Attacking;
+            else if (Normalized == TEXT("paused")) State = EDroneTaskState::Paused;
+            else if (Normalized == TEXT("avoiding")) State = EDroneTaskState::Avoiding;
+            else if (Normalized == TEXT("completed")) State = EDroneTaskState::Completed;
+            else if (Normalized == TEXT("error")) State = EDroneTaskState::Error;
+            else State = EDroneTaskState::Standby;
+
+            Registry->UpdateTaskState(DroneId, State, Detail, CurrentWp, TotalWp);
+        }
+        return;
+    }
 }
 
 // ---- Control commands ----

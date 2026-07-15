@@ -110,6 +110,14 @@ public:
     std::vector<ExecutionTaskSnapshot> GetTaskSnapshots() const;
     AvoidanceStats GetAvoidanceStats() const;
 
+    // ===== task_state callback =====
+    using TaskStateCallback = std::function<void(int drone_id, 
+                                                 const std::string& state,
+                                                 const std::string& detail,
+                                                 int current_wp, 
+                                                 int total_wp)>;
+    void SetTaskStateCallback(TaskStateCallback cb);
+
 private:
     void RunDroneTask(int drone_id);
     bool WaitForArrival(int drone_id, double ned_n, double ned_e, double ned_d);
@@ -147,4 +155,6 @@ private:
     AvoidanceStats avoidance_stats_;
 
     std::thread avoidance_thread_;
+
+    TaskStateCallback task_state_cb_;
 };

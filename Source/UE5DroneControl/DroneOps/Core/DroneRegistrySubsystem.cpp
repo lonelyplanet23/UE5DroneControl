@@ -510,3 +510,38 @@ bool UDroneRegistrySubsystem::IsDroneRegistered(int32 DroneId) const
 {
 	return DroneDescriptors.Contains(DroneId);
 }
+
+// ===== 任务状态管理 =====
+void UDroneRegistrySubsystem::UpdateTaskState(int32 DroneId, EDroneTaskState State,
+                                              const FString& ErrorDetail,
+                                              int32 CurrentWaypoint, int32 TotalWaypoints)
+{
+    FDroneTelemetrySnapshot& Snap = TelemetryCache.FindOrAdd(DroneId);
+    Snap.DroneId = DroneId;
+    Snap.TaskState = State;
+    Snap.TaskErrorDetail = ErrorDetail;
+    Snap.CurrentWaypointIndex = CurrentWaypoint;
+    Snap.TotalWaypoints = TotalWaypoints;
+    Snap.LastUpdateTime = FPlatformTime::Seconds();
+    
+    OnTaskStateUpdated.Broadcast(DroneId, State, CurrentWaypoint, TotalWaypoints);
+    OnTelemetryUpdated.Broadcast(DroneId, Snap);
+}
+
+void UDroneRegistrySubsystem::UpdateLocalState(int32 DroneId, EUELocalDroneState LocalState)
+{
+    FDroneTelemetrySnapshot& Snap = TelemetryCache.FindOrAdd(DroneId);
+    Snap.DroneId = DroneId;
+    Snap.LocalState = LocalState;
+    Snap.LastUpdateTime = FPlatformTime::Seconds();
+    OnTelemetryUpdated.Broadcast(DroneId, Snap);
+}
+
+bool UDroneRegistrySubsystem::GetTaskState(int32 DroneId, EDroneTaskState& OutState, FString& OutError) const
+{
+    const FDroneTelemetrySnapshot* Found = TelemetryCache.Find(DroneId);
+    if (!Found) return false;
+    OutState = Found->TaskState;
+    OutError = Found->TaskErrorDetail;
+    return true;
+}

@@ -27,6 +27,33 @@ enum class EDroneAvailability : uint8
 	Lost UMETA(DisplayName = "Lost Connection")
 };
 
+// ========== task ==========
+UENUM(BlueprintType)
+enum class EDroneTaskState : uint8
+{
+	Standby     UMETA(DisplayName = "待命"),
+	Assembling  UMETA(DisplayName = "集结中"),
+	Moving      UMETA(DisplayName = "移动中"),
+	Scouting    UMETA(DisplayName = "侦察中"),
+	Patrolling  UMETA(DisplayName = "巡逻中"),
+	Attacking   UMETA(DisplayName = "攻击中"),
+	Paused      UMETA(DisplayName = "暂停"),
+	Avoiding    UMETA(DisplayName = "避障中"),
+	Completed   UMETA(DisplayName = "已完成"),
+	Error       UMETA(DisplayName = "异常")
+};
+
+// ========== UE-only ==========
+UENUM(BlueprintType)
+enum class EUELocalDroneState : uint8
+{
+	None                    UMETA(DisplayName = "无"),
+	TargetDetectedPending   UMETA(DisplayName = "目标确认待命"),
+	LocalAttacking          UMETA(DisplayName = "攻击中（UE预演）"),
+	LocalAttackCompleted    UMETA(DisplayName = "UE攻击完成"),
+	TargetDeclined          UMETA(DisplayName = "用户拒绝攻击")
+};
+
 /**
  * Reason why drone control is locked
  */
@@ -168,7 +195,7 @@ struct FDroneTelemetrySnapshot
 
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
 	FVector GeographicLocation = FVector::ZeroVector; // Lat, Lon, Alt
-
+	
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
 	FVector Velocity = FVector::ZeroVector;
 
@@ -180,6 +207,26 @@ struct FDroneTelemetrySnapshot
 
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
 	double LastUpdateTime = 0.0;
+
+	// ===== adding =====
+	// 1. GPS
+	UPROPERTY(BlueprintReadOnly) double GpsLatitude = 0.0;
+	UPROPERTY(BlueprintReadOnly) double GpsLongitude = 0.0;
+	UPROPERTY(BlueprintReadOnly) double GpsAltitude = 0.0;  
+
+	// 2.BatteryPercent 
+	UPROPERTY(BlueprintReadOnly) int32 BatteryPercent = -1; 
+
+	// 3. taskstate
+	UPROPERTY(BlueprintReadOnly) EDroneTaskState TaskState = EDroneTaskState::Standby;
+	UPROPERTY(BlueprintReadOnly) FString TaskErrorDetail;
+
+	// 4. waypoint info
+	UPROPERTY(BlueprintReadOnly) int32 CurrentWaypointIndex = 0;
+	UPROPERTY(BlueprintReadOnly) int32 TotalWaypoints = 0;
+
+	// 5. UE-only
+	UPROPERTY(BlueprintReadOnly) EUELocalDroneState LocalState = EUELocalDroneState::None;
 
 	FDroneTelemetrySnapshot() = default;
 };

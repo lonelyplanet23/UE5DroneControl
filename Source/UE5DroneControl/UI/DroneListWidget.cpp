@@ -60,33 +60,43 @@ void UDroneListWidget::RefreshFromRegistry()
 
     for (const FDroneDescriptor& Desc : Descriptors)
     {
-        FDroneTelemetrySnapshot Snapshot;
-        const bool bHasTelemetry = Registry->GetTelemetry(Desc.DroneId, Snapshot);
-        const EDroneAvailability Availability = bHasTelemetry
-            ? Snapshot.Availability
-            : EDroneAvailability::Lost;
+        FDroneTelemetrySnapshot Snap;
+        if (!Registry->GetTelemetry(Desc.DroneId, Snap))
+        {
+            // 无快照时构造默认值，避免UI空指针
+            Snap.DroneId = Desc.DroneId;
+            Snap.Availability = EDroneAvailability::Lost;
+            Snap.BatteryPercent = -1;
+            Snap.TaskState = EDroneTaskState::Standby;
+            Snap.LastUpdateTime = FPlatformTime::Seconds();
+        }
 
         if (ListItemClass && DroneScrollBox)
         {
             UDroneListItemWidget* Item = CreateWidget<UDroneListItemWidget>(GetWorld(), ListItemClass);
             if (Item)
             {
-                Item->SetDroneDataWithModeAndAvailability(
-                    Desc.DroneId,
-                    Desc.BackendIdString,
-                    Availability,
-                    Registry->GetDroneCommandMode(Desc.DroneId));
+                // SetDroneFullState 覆盖：连接状态、GPS、海拔、电量、任务状态、航点、更新时间
+                Item->SetDroneFullState(Desc.DroneId, Snap);
+                // 名称单独设置（FDroneTelemetrySnapshot 不含 name 字段）
+                if (Item->DroneNameText)
+                {
+                    Item->DroneNameText->SetText(FText::FromString(Desc.Name));
+                }
+                // 单独更新模式显示，不覆盖连接状态等字段
+                Item->SetCommandMode(Desc.DroneId, Registry->GetDroneCommandMode(Desc.DroneId));
                 DroneScrollBox->AddChild(Item);
             }
         }
 
+        // ---- 构造视图数据（供蓝图事件使用） ----
         FDroneRegistrationViewData Data;
-		Data.Id = Desc.DroneId;
-		Data.IdStr = Desc.BackendIdString;
-		Data.Name = Desc.BackendIdString;
-		Data.Battery = -1; // battery comes from backend HTTP polling, not from local telemetry snapshot
-		Data.WorldLocation = Snapshot.WorldLocation;
-        switch (Availability)
+        Data.Id = Desc.DroneId;
+        Data.IdStr = Desc.BackendIdString;
+        Data.Name = Desc.BackendIdString;
+        Data.Battery = Snap.BatteryPercent;
+        Data.WorldLocation = Snap.WorldLocation;
+        switch (Snap.Availability)
         {
         case EDroneAvailability::Online:
             Data.Status = TEXT("online");

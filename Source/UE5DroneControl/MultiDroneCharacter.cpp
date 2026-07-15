@@ -11,6 +11,7 @@
 #include "PathEditor/DronePathActor.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
+#include "EngineUtils.h"
 #include "Components/WidgetComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
@@ -172,6 +173,58 @@ void AMultiDroneCharacter::Tick(float DeltaTime)
 	bEnableUDPSend = false;
 
 	Super::Tick(DeltaTime);
+
+	// ===== 本地攻击移动 =====
+	if (bIsLocalAttacking && !bIsLocalAttackCompleted)
+	{
+		const FVector CurrentPos = GetActorLocation();
+		const FVector DirToTarget = (AttackTargetLocation - CurrentPos);
+		const float DistToTarget = DirToTarget.Size();
+
+		// 到达目标
+		if (DistToTarget <= AttackArrivalThresholdCm)
+		{
+			SetActorLocation(AttackTargetLocation);
+			bIsLocalAttackCompleted = true;
+			bIsLocalAttacking = false;
+
+			// 更新本地状态（面板显示）
+			if (Registry)
+			{
+				Registry->UpdateLocalState(DroneId, EUELocalDroneState::LocalAttackCompleted);
+			}
+
+			UE_LOG(LogTemp, Log, TEXT("[MultiDroneCharacter] %s: Local attack completed at target"),
+				*DroneName);
+			return;
+		}
+
+		// 向目标移动
+		const FVector MoveDelta = DirToTarget.GetSafeNormal() * LocalAttackSpeed * DeltaTime;
+		const FVector NewPos = CurrentPos + MoveDelta;
+		SetActorLocation(NewPos);
+
+		// 朝向目标
+		if (bOrientToAttackTarget)
+		{
+			const FRotator TargetRot = DirToTarget.Rotation();
+			SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRot, DeltaTime, 5.0f));
+		}
+
+		// 更新 Registry 位置（让面板显示实时位置）
+		if (Registry)
+		{
+			FDroneTelemetrySnapshot Snap;
+			if (Registry->GetTelemetry(DroneId, Snap))
+			{
+				Snap.WorldLocation = NewPos;
+				Snap.LastUpdateTime = FPlatformTime::Seconds();
+				Registry->UpdateTelemetry(DroneId, Snap);
+			}
+		}
+
+		return; // 攻击中，跳过后续逻辑
+	}
 
 	if (!Registry)
 	{
@@ -448,4 +501,79 @@ void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event,
 	bSendClickTarget = false;
 
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter [%s]: '%s' event — now following mirror drone"), *DroneName, *Event);
+}
+
+// 敌对目标攻击
+
+void AMultiDroneCharacter::StopPatrolAndAttack(const FVector& TargetLocation)
+{
+	if (bIsLocalAttacking || bIsLocalAttackCompleted)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MultiDroneCharacter] %s: Already attacking or completed"),
+			*DroneName);
+		return;
+	}
+
+	// 1. 停止当前巡逻路径
+	// 查找当前控制此无人机的 PathActor
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		for (TActorIterator<ADronePathActor> It(World); It; ++It)
+		{
+			ADronePathActor* PathActor = *It;
+			if (!IsValid(PathActor))
+			{
+				continue;
+			}
+
+			AActor* ControlledDrone = PathActor->ControlledDrone.Get();
+			if (ControlledDrone == this || (IsValid(ControlledDrone) &&
+				ControlledDrone->GetClass()->ImplementsInterface(UDroneSelectableInterface::StaticClass()) &&
+				IDroneSelectableInterface::Execute_GetDroneId(ControlledDrone) == DroneId))
+			{
+				// 暂停路径移动（不销毁）
+				PathActor->PauseMovement();
+				CachedPathActor = PathActor;
+				UE_LOG(LogTemp, Log, TEXT("[MultiDroneCharacter] %s: Paused path actor %s"),
+					*DroneName, *PathActor->GetName());
+				break;
+			}
+		}
+	}
+
+	// 2. 停止跟随镜像机
+	bFollowingMirror = false;
+
+	// 3. 设置攻击状态
+	bIsLocalAttacking = true;
+	bIsLocalAttackCompleted = false;
+	AttackTargetLocation = TargetLocation;
+
+	// 4. 更新本地状态（面板显示）
+	if (Registry)
+	{
+		Registry->UpdateLocalState(DroneId, EUELocalDroneState::LocalAttacking);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[MultiDroneCharacter] %s: StopPatrolAndAttack -> target (%.1f, %.1f, %.1f)"),
+		*DroneName, TargetLocation.X, TargetLocation.Y, TargetLocation.Z);
+}
+
+void AMultiDroneCharacter::ResetLocalAttackState()
+{
+	bIsLocalAttacking = false;
+	bIsLocalAttackCompleted = false;
+	AttackTargetLocation = FVector::ZeroVector;
+
+	if (Registry)
+	{
+		Registry->UpdateLocalState(DroneId, EUELocalDroneState::None);
+	}
+
+	// 恢复跟随镜像机
+	bFollowingMirror = true;
+	CachedPathActor = nullptr;
+
+	UE_LOG(LogTemp, Log, TEXT("[MultiDroneCharacter] %s: Reset local attack state"), *DroneName);
 }

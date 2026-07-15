@@ -207,6 +207,23 @@ HttpServer::HttpServer(const AppConfig& config,
     });
 
     LoadDrones();
+
+    // ===== 新增：注册任务状态回调 -> 推送 drone_task_state =====
+    drone_mgr_.SetTaskStateCallback([this](int drone_id, const std::string& state,
+                                           const std::string& detail,
+                                           int current_wp, int total_wp) {
+        auto msg = boost::json::object{
+            {"type", "drone_task_state"},
+            {"drone_id", get_number_or_string_id(drone_id)},
+            {"drone_id_str", drone_id_string(drone_id)},
+            {"state", state},
+            {"detail", detail},
+            {"current_waypoint", current_wp},
+            {"total_waypoints", total_wp},
+        };
+        ws_manager_.broadcast(json_stringify(msg));
+    });
+
 }
 
 // ============================================================
@@ -407,6 +424,10 @@ boost::json::value HttpServer::ApiListDrones() {
             {"topic_prefix", topic_prefix},
             {"bit_index", rec.slot > 0 ? rec.slot - 1 : 0},
             {"mavlink_system_id", rec.slot},
+            {"task_state", status.task_state},
+            {"task_error", status.task_error_detail},
+            {"current_waypoint", status.task_current_wp},
+            {"total_waypoints", status.task_total_wp},
         });
     }
     return arr;
@@ -558,6 +579,22 @@ boost::json::value HttpServer::ApiCreateArray(const boost::json::object& body) {
 
     if (!assembly_ctrl_.Start(cfg, config_.assembly_safety_cylinder_m))
         throw ApiError(409, "assembly already in progress");
+
+    // ===== 补漏：集结开始 -> 设置 assembling =====
+    for (const auto& path : cfg.paths)
+    {
+        if (path.drone_id.empty()) continue;
+        int drone_id = 0;
+        try {
+            std::string s = path.drone_id;
+            if (s[0] == 'd' || s[0] == 'D') s = s.substr(1);
+            drone_id = std::stoi(s);
+        } catch (...) { continue; }
+        if (drone_id > 0) {
+            drone_mgr_.SetDroneTaskState(drone_id, "assembling", "", 0,
+                                         static_cast<int>(path.waypoints.size()));
+        }
+    }
 
     return boost::json::object{{"array_id", cfg.array_id}, {"status", "assembling"}};
 }

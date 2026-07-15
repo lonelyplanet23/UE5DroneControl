@@ -69,6 +69,11 @@ ADronePathActor::ADronePathActor()
 	}
 
 	WaypointActorClass = ADroneWaypointActor::StaticClass();
+
+	// ===== 初始化暂停变量 =====
+    PausedSegmentIndex = 0;
+    PausedElapsedTime = 0.0f;
+    bIsPaused = false;
 }
 
 int32 ADronePathActor::AddWaypoint(const FVector& Location, float SegmentSpeed)
@@ -1155,6 +1160,85 @@ void ADronePathActor::ApplyColorToMaterial(UMaterialInstanceDynamic* MaterialIns
 	MaterialInstance->SetVectorParameterValue(DronePathVisual::BaseColorParameterName, FLinearColor(ColorVector.X, ColorVector.Y, ColorVector.Z));
 	MaterialInstance->SetVectorParameterValue(DronePathVisual::EmissiveColorParameterName, FLinearColor(EmissiveColorVector.X, EmissiveColorVector.Y, EmissiveColorVector.Z));
 	MaterialInstance->SetVectorParameterValue(DronePathVisual::TintParameterName, FLinearColor(ColorVector.X, ColorVector.Y, ColorVector.Z));
+}
+
+// 暂停/恢复路径移动
+
+void ADronePathActor::PauseMovement()
+{
+    if (!bIsMoving)
+    {
+        UE_LOG(LogDronePathActor, Verbose, TEXT("PauseMovement: %s not moving"), *GetName());
+        return;
+    }
+
+    bIsPaused = true;
+    bIsMoving = false;
+    SetActorTickEnabled(false);
+
+    // 记录暂停时的段索引和已用时间，以便恢复
+    UWorld* World = GetWorld();
+    if (World && CurrentSegmentIndex > 0)
+    {
+        const float Elapsed = World->GetTimeSeconds() - SegmentStartTime;
+        PausedSegmentIndex = CurrentSegmentIndex;
+        PausedElapsedTime = Elapsed;
+    }
+
+    UE_LOG(LogDronePathActor, Log, TEXT("PauseMovement: %s paused at segment %d"),
+        *GetName(), CurrentSegmentIndex);
+}
+
+void ADronePathActor::ResumeMovement()
+{
+    if (!bIsPaused)
+    {
+        UE_LOG(LogDronePathActor, Verbose, TEXT("ResumeMovement: %s not paused"), *GetName());
+        return;
+    }
+
+    if (!IsValid(ControlledDrone.Get()))
+    {
+        UE_LOG(LogDronePathActor, Warning, TEXT("ResumeMovement: %s has no controlled drone"),
+            *GetName());
+        bIsPaused = false;
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        bIsPaused = false;
+        return;
+    }
+
+    // 从暂停位置恢复
+    const int32 ResumeSegment = PausedSegmentIndex > 0 ? PausedSegmentIndex : 1;
+    const float RemainingTime = SegmentDuration - PausedElapsedTime;
+
+    if (Waypoints.Num() < 2 || !Waypoints.IsValidIndex(ResumeSegment))
+    {
+        UE_LOG(LogDronePathActor, Warning, TEXT("ResumeMovement: %s invalid segment %d"),
+            *GetName(), ResumeSegment);
+        bIsPaused = false;
+        return;
+    }
+
+    // 恢复移动
+    bIsPaused = false;
+    bIsMoving = true;
+    CurrentSegmentIndex = ResumeSegment;
+    SegmentStartTime = World->GetTimeSeconds() - PausedElapsedTime;
+    SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex)
+        ? SegmentDurations[CurrentSegmentIndex]
+        : DronePathVisual::MinSegmentDurationSeconds;
+
+    SetActorTickEnabled(true);
+    SetPathStatus(EPathStatus::InFlight);
+    SetExecutionState(EDronePathExecutionState::Running);
+
+    UE_LOG(LogDronePathActor, Log, TEXT("ResumeMovement: %s resumed at segment %d"),
+        *GetName(), CurrentSegmentIndex);
 }
 
 int32 ADronePathActor::GetSplineSegmentCount() const

@@ -297,6 +297,10 @@ void ExecutionEngine::RunDroneTask(int drone_id)
 {
     spdlog::info("[Exec] Drone {} task thread started", drone_id);
 
+    // ===== 用于去重，避免重复推送相同状态 =====
+    std::string last_pushed_state;
+    int last_pushed_wp = -1;
+
     while (running_) {
         DroneTask task;
         {
@@ -308,6 +312,26 @@ void ExecutionEngine::RunDroneTask(int drone_id)
 
         if (task.waypoints.empty()) break;
 
+        // ============================================================
+        // 1. 设置初始任务状态（只执行一次）
+        // ============================================================
+        if (last_pushed_state.empty() && !task.waypoints.empty()) {
+            std::string state;
+            if (task.mode == "scout") state = "scouting";
+            else if (task.mode == "patrol") state = "patrolling";
+            else if (task.mode == "attack") state = "attacking";
+            else state = "moving";
+            
+            if (task_state_cb_) {
+                task_state_cb_(drone_id, state, "", 0, static_cast<int>(task.waypoints.size()));
+                last_pushed_state = state;
+                last_pushed_wp = 0;
+            }
+        }
+
+        // ============================================================
+        // 2. 巡逻模式：检查是否有目标覆盖（需求3.6）
+        // ============================================================
         if (task.mode == "patrol") {
             bool has_override = false;
             AssemblyConfig::Path::Waypoint override_wp;
@@ -322,6 +346,13 @@ void ExecutionEngine::RunDroneTask(int drone_id)
             }
 
             if (has_override) {
+                // 巡逻收到目标覆盖 -> 状态变为 attacking
+                if (task_state_cb_ && last_pushed_state != "attacking") {
+                    task_state_cb_(drone_id, "attacking", "target override",
+                                   task.current_wp, static_cast<int>(task.waypoints.size()));
+                    last_pushed_state = "attacking";
+                }
+
                 double ned_n = 0.0, ned_e = 0.0, ned_d = 0.0;
                 CoordinateConverter::UeOffsetToNed(
                     override_wp.x, override_wp.y, override_wp.z,
@@ -349,21 +380,57 @@ void ExecutionEngine::RunDroneTask(int drone_id)
             }
         }
 
+        // ============================================================
+        // 3. 航点索引检查
+        // ============================================================
         int wp_idx = task.current_wp;
         if (wp_idx >= static_cast<int>(task.waypoints.size())) {
+            // 3a. 循环巡逻：重置索引，保持 patrolling（需求3.5）
             if (task.mode == "scout" && task.closed_loop) {
                 std::lock_guard<std::mutex> lock(tasks_mutex_);
                 auto it = tasks_.find(drone_id);
                 if (it != tasks_.end()) {
                     it->second.current_wp = 0;
                 }
+                // 循环巡逻完成后不推送 completed，保持 patrolling
                 continue;
+            }
+
+            // 3b. 非循环完成 -> completed（需求3.9）
+            if (task_state_cb_ && last_pushed_state != "completed") {
+                task_state_cb_(drone_id, "completed", "",
+                               static_cast<int>(task.waypoints.size()),
+                               static_cast<int>(task.waypoints.size()));
+                last_pushed_state = "completed";
             }
 
             spdlog::info("[Exec] Drone {} completed all waypoints, hovering", drone_id);
             break;
         }
 
+        // ============================================================
+        // 4. 航点推进时更新 current_wp（需求1：当前路径点）
+        // ============================================================
+        if (wp_idx != last_pushed_wp) {
+            std::string state = last_pushed_state;
+            if (state.empty()) {
+                // 极少数情况：初始状态未设置，根据 mode 补设
+                if (task.mode == "scout") state = "scouting";
+                else if (task.mode == "patrol") state = "patrolling";
+                else if (task.mode == "attack") state = "attacking";
+                else state = "moving";
+            }
+            if (task_state_cb_) {
+                task_state_cb_(drone_id, state, "", wp_idx,
+                               static_cast<int>(task.waypoints.size()));
+                last_pushed_wp = wp_idx;
+                last_pushed_state = state;
+            }
+        }
+
+        // ============================================================
+        // 5. 处理当前航点
+        // ============================================================
         const auto& wp = task.waypoints[wp_idx];
         double ned_n = 0.0, ned_e = 0.0, ned_d = 0.0;
         CoordinateConverter::UeOffsetToNed(wp.x, wp.y, wp.z, ned_n, ned_e, ned_d);
@@ -397,6 +464,9 @@ void ExecutionEngine::RunDroneTask(int drone_id)
             }
         }
 
+        // ============================================================
+        // 6. 推进到下一个航点
+        // ============================================================
         {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
             auto it = tasks_.find(drone_id);
@@ -526,6 +596,26 @@ void ExecutionEngine::CheckAvoidance()
                 it->second.avoidance_cooldown_until = now + std::chrono::seconds(6);
             }
 
+            // ============================================================
+            // 补漏：避障激活 -> 推送 avoiding 状态
+            // ============================================================
+            {
+                int current_wp = 0;
+                int total_wp = 0;
+                {
+                    std::lock_guard<std::mutex> lock(tasks_mutex_);
+                    auto it = tasks_.find(low_prio_id);
+                    if (it != tasks_.end()) {
+                        current_wp = it->second.current_wp;
+                        total_wp = static_cast<int>(it->second.waypoints.size());
+                    }
+                }
+                if (task_state_cb_) {
+                    std::string detail = "avoiding drone " + std::to_string(other_id);
+                    task_state_cb_(low_prio_id, "avoiding", detail, current_wp, total_wp);
+                }
+            }
+
             const Vec3 travel_dir = normalize_xy(other_state.pos - low_state.pos);
             const Vec3 lateral_dir{-travel_dir.y, travel_dir.x, 0.0};
             const double offset_distance = std::max(avoidance_radius_m_ * 1.5, 1.0);
@@ -602,6 +692,8 @@ void ExecutionEngine::RestoreExpiredAvoidanceTargets(const std::chrono::steady_c
         double ned_n = 0.0;
         double ned_e = 0.0;
         double ned_d = 0.0;
+        int current_wp = 0;      // 新增：用于恢复状态时携带航点信息
+        int total_wp = 0;        // 新增
     };
 
     std::vector<RestoreItem> items;
@@ -616,7 +708,24 @@ void ExecutionEngine::RestoreExpiredAvoidanceTargets(const std::chrono::steady_c
             target.ned_n = target.base_ned_n;
             target.ned_e = target.base_ned_e;
             target.ned_d = target.base_ned_d;
-            items.push_back({drone_id, target.ned_n, target.ned_e, target.ned_d});
+            
+            RestoreItem item;
+            item.drone_id = drone_id;
+            item.ned_n = target.ned_n;
+            item.ned_e = target.ned_e;
+            item.ned_d = target.ned_d;
+            
+            // 获取当前航点信息
+            {
+                std::lock_guard<std::mutex> lock(tasks_mutex_);
+                auto it = tasks_.find(drone_id);
+                if (it != tasks_.end()) {
+                    item.current_wp = it->second.current_wp;
+                    item.total_wp = static_cast<int>(it->second.waypoints.size());
+                }
+            }
+            
+            items.push_back(item);
         }
     }
 
@@ -655,10 +764,25 @@ void ExecutionEngine::RestoreExpiredAvoidanceTargets(const std::chrono::steady_c
             avoidance_cb_(event);
         }
 
+        // ============================================================
+        // 新增：避障恢复 -> 推送状态
+        // 恢复到 moving（简单方案），如果希望精确恢复到避障前的状态，
+        // 需要在 DroneTarget 中增加 previous_task_state 字段
+        // ============================================================
+        if (task_state_cb_) {
+            task_state_cb_(item.drone_id, "moving", "avoidance restored", 
+                           item.current_wp, item.total_wp);
+        }
+
         if (move_cb_) {
             move_cb_(item.drone_id, item.ned_n, item.ned_e, item.ned_d);
         }
 
         spdlog::info("[Avoidance] Drone {} restored to original target", item.drone_id);
     }
+}
+
+// 设置任务状态回调函数
+void ExecutionEngine::SetTaskStateCallback(TaskStateCallback cb) {
+    task_state_cb_ = std::move(cb);
 }

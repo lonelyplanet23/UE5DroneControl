@@ -37,6 +37,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnControlLockChanged, int32, Dro
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneCommandModeChanged, int32, DroneId, EDroneCommandMode, Mode);
 
 /**
+ * Delegate for task state updates
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnTaskStateUpdated,
+    int32, DroneId, EDroneTaskState, NewState, int32, CurrentWp, int32, TotalWp);
+
+/**
  * Global drone registry and state management subsystem
  * Central hub for all drone-related state and events
  */
@@ -171,6 +177,21 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
 	FOnDroneCommandModeChanged OnDroneCommandModeChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
+    FOnTaskStateUpdated OnTaskStateUpdated;
+
+	// ===== 任务状态管理 =====
+    UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+    void UpdateTaskState(int32 DroneId, EDroneTaskState State,
+                         const FString& ErrorDetail = "",
+                         int32 CurrentWaypoint = 0, int32 TotalWaypoints = 0);
+
+    UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+    void UpdateLocalState(int32 DroneId, EUELocalDroneState LocalState);
+
+    UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+    bool GetTaskState(int32 DroneId, EDroneTaskState& OutState, FString& OutError) const;
 
 private:
 	// Coordinate service
