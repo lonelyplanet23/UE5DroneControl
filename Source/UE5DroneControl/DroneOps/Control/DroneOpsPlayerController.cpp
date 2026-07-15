@@ -231,6 +231,25 @@ void ADroneOpsPlayerController::BeginPlay()
 		}
 	}
 
+	// 创建框选矩形 Widget，默认隐藏，框选期间由控制器调用蓝图函数驱动显示
+	if (BoxSelectWidgetClass && IsLocalController())
+	{
+		BoxSelectWidgetInstance = CreateWidget(this, BoxSelectWidgetClass);
+		if (BoxSelectWidgetInstance)
+		{
+			BoxSelectWidgetInstance->AddToViewport(10);
+			UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: BoxSelectWidget created OK, class=%s"), *BoxSelectWidgetClass->GetName());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("DroneOpsPlayerController: BoxSelectWidget CreateWidget FAILED"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("DroneOpsPlayerController: BoxSelectWidgetClass is NULL - not assigned in BP"));
+	}
+
 	// Create Sequence Dispatch Panel (persistent, bottom-right)
 	UUIManagerBlueprintLibrary::ShowSequenceDispatchPanel(this);
 
@@ -446,6 +465,14 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 		FVector2D LogicalPos = UWidgetLayoutLibrary::GetMousePositionOnViewport(this);
 		BoxSelectCurrentScreen = LogicalPos * DPI;
 
+		// 同步蓝图可读变量，供 Widget Tick 驱动矩形显示
+		bIsBoxSelectingBP = true;
+		BoxSelectStartLogical = BoxSelectStartScreen / DPI;
+		BoxSelectEndLogical = LogicalPos;
+
+		// 实时通知 Widget 更新矩形位置，传入逻辑像素（Widget 坐标系）
+		NotifyBoxSelectUpdate(BoxSelectStartScreen / DPI, LogicalPos);
+
 		if (!IsInputKeyDown(EKeys::LeftMouseButton))
 		{
 			FinishBoxSelectIfPending();
@@ -543,6 +570,7 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 		BoxSelectStartScreen = LogicalPos * DPI;
 		BoxSelectCurrentScreen = BoxSelectStartScreen;
 		bIsBoxSelecting = true;
+		NotifyBoxSelectShow();
 		return;
 	}
 
@@ -613,6 +641,8 @@ void ADroneOpsPlayerController::FinishBoxSelectIfPending()
 	}
 
 	bIsBoxSelecting = false; // 先清标志，防止 Tick 与本函数同帧重复处理
+	bIsBoxSelectingBP = false;
+	NotifyBoxSelectHide();   // 隐藏框选矩形
 
 	if (USequenceDispatchPanelWidget::IsPanelInteractive())
 	{
@@ -2327,4 +2357,43 @@ void ADroneOpsPlayerController::UndoLastEditWaypoint()
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, TEXT("没有可撤销的航点"));
 	}
+}
+
+// ---- 框选矩形 Widget 通知 ----
+// 通过 UFunction 反射调用蓝图函数，避免 C++ 依赖具体蓝图类
+
+void ADroneOpsPlayerController::NotifyBoxSelectShow()
+{
+	if (!BoxSelectWidgetInstance)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("NotifyBoxSelectShow: BoxSelectWidgetInstance is null"));
+		return;
+	}
+	UFunction* Func = BoxSelectWidgetInstance->FindFunction(FName("ShowSelectionRect"));
+	if (Func)
+	{
+		BoxSelectWidgetInstance->ProcessEvent(Func, nullptr);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("NotifyBoxSelectShow: Function 'ShowSelectionRect' not found on widget"));
+	}
+}
+
+void ADroneOpsPlayerController::NotifyBoxSelectUpdate(FVector2D Start, FVector2D End)
+{
+	if (!BoxSelectWidgetInstance) return;
+	UFunction* Func = BoxSelectWidgetInstance->FindFunction(FName("UpdateSelectionRect"));
+	if (!Func) return;
+
+	// 参数结构体按蓝图函数签名顺序排列：startpos (Vector2D), endpos (Vector2D)
+	struct { FVector2D startpos; FVector2D endpos; } Params{ Start, End };
+	BoxSelectWidgetInstance->ProcessEvent(Func, &Params);
+}
+
+void ADroneOpsPlayerController::NotifyBoxSelectHide()
+{
+	if (!BoxSelectWidgetInstance) return;
+	UFunction* Func = BoxSelectWidgetInstance->FindFunction(FName("HideSelectionRect"));
+	if (Func) BoxSelectWidgetInstance->ProcessEvent(Func, nullptr);
 }
