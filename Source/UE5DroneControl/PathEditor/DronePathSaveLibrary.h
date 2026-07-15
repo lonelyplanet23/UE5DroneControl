@@ -44,6 +44,11 @@ struct FDronePathsSaveData
 	GENERATED_BODY()
 
 public:
+	// 源锚点无人机 ID：编队旋转/平移的基准路径。默认 1（编辑关卡固定 DroneId=1）。
+	// 读取旧 JSON 缺该字段时保持默认 1。
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Path|Save")
+	int32 AnchorDroneId = 1;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Path|Save")
 	TArray<FDronePathSaveData> Paths;
 };
@@ -62,4 +67,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Drone|IO")
 	static bool LoadPathsFromJson(const FString& FilePath, FDronePathsSaveData& OutData);
+
+	/**
+	 * 把路径数据写回指定的绝对文件路径（覆盖）。用于在回放面板里就地修改某个 JSON 的循环状态等。
+	 * 与 SavePathsToJson 不同：这里直接指定完整文件路径，不做 DronePaths 目录拼接。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Drone|IO")
+	static bool SavePathsDataToFile(const FString& FilePath, const FDronePathsSaveData& Data);
 };

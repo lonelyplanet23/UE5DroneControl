@@ -303,6 +303,14 @@ bool ADroneRuntimeInteractionPlayerController::CanInteractWithWaypoint(const ADr
 		return false;
 	}
 
+	// 源锚点：DroneId=1 路径的第一个节点是锚定节点，不允许修改位置。
+	// 其他无人机的首节点、以及所有路径的后续节点均可编辑。
+	if (WaypointActor->WaypointIndex == 0
+		&& WaypointActor->PathActor->GetPathNumericId() == AnchorSourceDroneId)
+	{
+		return false;
+	}
+
 	return !WaypointActor->PathActor->IsMovementActive();
 }
 

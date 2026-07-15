@@ -6,6 +6,7 @@
 
 class ADronePlaybackManager;
 class UButton;
+class UCheckBox;
 class UScrollBox;
 class UTextBlock;
 class UPathFileListItemWidget;
@@ -33,6 +34,10 @@ public:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> StatusText;
+
+	// 循环播放勾选框：选中一个文件后反映其循环状态；勾选/取消会写回该 JSON 文件。
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> LoopCheckBox;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone Path Playback")
 	TSubclassOf<UPathFileListItemWidget> FileListItemClass;
@@ -67,4 +72,11 @@ private:
 	void SelectFile(const FString& FilePath);
 	ADronePlaybackManager* GetOrCreatePlaybackManager();
 	void SetStatusMessage(const FString& Message);
+
+	// 勾选框回调：把当前选中文件所有路径的 bClosedLoop 写成勾选状态并存回 JSON。
+	UFUNCTION()
+	void OnLoopCheckChanged(bool bIsChecked);
+
+	// 根据选中文件的循环状态刷新勾选框显示（不触发写回）。
+	void UpdateLoopCheckBoxFromSelectedFile();
 };

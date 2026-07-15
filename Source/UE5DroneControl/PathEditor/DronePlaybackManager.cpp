@@ -91,7 +91,7 @@ void ADronePlaybackManager::PlayFromData(const FDronePathsSaveData& Data)
 		PathActor->SetPathNumericId(PathData.PathId);
 		PathActor->bClosedLoop = PathData.bClosedLoop;
 
-		constexpr float DefaultSpeedMps = 5.0f;
+		const float DefaultSpeedMps = ADronePathActor::GetDefaultSegmentSpeedMps();
 
 		for (int32 WaypointIndex = 0; WaypointIndex < PathData.Waypoints.Num(); ++WaypointIndex)
 		{
