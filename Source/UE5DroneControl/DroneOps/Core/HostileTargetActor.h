@@ -9,6 +9,7 @@
 class USphereComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UPointLightComponent;
 
 /**
  * 敌对目标点 Actor
@@ -61,6 +62,10 @@ public:
 	/** 编号标签 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UTextRenderComponent> LabelComponent;
+
+	/** 红色点光源，让目标在暗色地形或三维瓦片上也容易辨认。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UPointLightComponent> MarkerLight;
 
 	// ----- 方法 -----
 

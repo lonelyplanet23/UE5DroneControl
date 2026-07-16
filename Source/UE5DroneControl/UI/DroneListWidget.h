@@ -75,6 +75,7 @@ public:
         void AddDemoDrones(); //
 
 protected:
+    virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override; //
     virtual void NativeDestruct() override; //
 
@@ -82,5 +83,6 @@ private:
     FTimerHandle RefreshTimerHandle; //
 
     void OnRefreshTimer(); //
+    void BuildRuntimeWidgetTree();
 };
 

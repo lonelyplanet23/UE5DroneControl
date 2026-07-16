@@ -4,6 +4,7 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HostileTargetManager.h"
@@ -33,7 +34,18 @@ AHostileTargetActor::AHostileTargetActor()
 	{
 		MeshComponent->SetStaticMesh(CubeMesh.Object);
 	}
-	MeshComponent->SetWorldScale3D(FVector(0.5f, 0.5f, 0.5f));
+	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 55.0f));
+	MeshComponent->SetRelativeScale3D(FVector(0.75f, 0.75f, 1.1f));
+	MeshComponent->SetVisibility(true);
+	MeshComponent->SetHiddenInGame(false);
+	MeshComponent->SetRenderCustomDepth(true);
+
+	MarkerLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("MarkerLight"));
+	MarkerLight->SetupAttachment(RootScene);
+	MarkerLight->SetRelativeLocation(FVector(0.0f, 0.0f, 110.0f));
+	MarkerLight->SetLightColor(FLinearColor(1.0f, 0.08f, 0.03f));
+	MarkerLight->SetIntensity(900.0f);
+	MarkerLight->SetAttenuationRadius(500.0f);
 
 	// 发现半径可视化（仅编辑器，运行时碰撞检测用）
 	DiscoverySphere = CreateDefaultSubobject<USphereComponent>(TEXT("DiscoverySphere"));
@@ -51,6 +63,7 @@ AHostileTargetActor::AHostileTargetActor()
 	LabelComponent->SetHorizontalAlignment(EHTA_Center);
 	LabelComponent->SetVerticalAlignment(EVRTA_TextCenter);
 	LabelComponent->SetVisibility(true);
+	LabelComponent->SetHiddenInGame(false);
 	LabelComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 

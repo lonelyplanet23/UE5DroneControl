@@ -71,6 +71,7 @@ public:
 	void SetDeclineButtonText(const FString& Text);
 
 protected:
+	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
 
 private:
@@ -93,4 +94,5 @@ private:
 
 	void HandleAttackConfirmClicked();
 	void HandleAttackDeclineClicked();
+	void BuildRuntimeWidgetTree();
 };

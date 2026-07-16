@@ -3,6 +3,62 @@
 #include "PreviewConfirmPopupWidget.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
+#include "Components/Border.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
+#include "Blueprint/WidgetTree.h"
+
+void UPreviewConfirmPopupWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+	BuildRuntimeWidgetTree();
+}
+
+void UPreviewConfirmPopupWidget::BuildRuntimeWidgetTree()
+{
+	if (!WidgetTree)
+	{
+		return;
+	}
+
+	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ConfirmRoot"));
+	WidgetTree->RootWidget = Root;
+	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ConfirmPanel"));
+	Panel->SetBrushColor(FLinearColor(0.035f, 0.06f, 0.10f, 0.98f));
+	Panel->SetPadding(FMargin(20.0f, 18.0f));
+    if (UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(Panel))
+    {
+        PanelSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+        PanelSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+        PanelSlot->SetSize(FVector2D(380.0f, 230.0f));
+	}
+	UVerticalBox* Content = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ConfirmContent"));
+	Panel->SetContent(Content);
+	MessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("MessageText"));
+	MessageText->SetText(FText::FromString(TEXT("请选择操作")));
+	MessageText->SetAutoWrapText(true);
+	MessageText->SetColorAndOpacity(FLinearColor(0.94f, 0.97f, 1.0f, 1.0f));
+    if (UVerticalBoxSlot* MessageSlot = Content->AddChildToVerticalBox(MessageText))
+    {
+        MessageSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 16.0f));
+        MessageSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+    auto MakeButton = [this, Content](const FName Name, const FString& Label, UButton*& OutButton, const FLinearColor& Color)
+	{
+		OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+		OutButton->SetBackgroundColor(Color);
+		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+		Text->SetText(FText::FromString(Label));
+		Text->SetJustification(ETextJustify::Center);
+		OutButton->AddChild(Text);
+		if (UVerticalBoxSlot* ButtonSlot = Content->AddChildToVerticalBox(OutButton)) ButtonSlot->SetPadding(FMargin(0.0f, 3.0f));
+	};
+	MakeButton(TEXT("LocalPreviewButton"), TEXT("本地预演"), LocalPreviewButton, FLinearColor(0.08f, 0.36f, 0.56f, 1.0f));
+	MakeButton(TEXT("DispatchButton"), TEXT("派发指令"), DispatchButton, FLinearColor(0.10f, 0.48f, 0.34f, 1.0f));
+	MakeButton(TEXT("CancelButton"), TEXT("取消"), CancelButton, FLinearColor(0.20f, 0.24f, 0.30f, 1.0f));
+}
 
 void UPreviewConfirmPopupWidget::NativeConstruct()
 {
@@ -20,15 +76,6 @@ void UPreviewConfirmPopupWidget::NativeConstruct()
 	{
 		CancelButton->OnClicked.AddDynamic(this, &UPreviewConfirmPopupWidget::HandleCancelClicked);
 	}
-	// 攻击确认模式复用 LocalPreviewButton 和 CancelButton
-	if (LocalPreviewButton)
-	{
-		LocalPreviewButton->OnClicked.AddDynamic(this, &UPreviewConfirmPopupWidget::HandleAttackConfirmClicked);
-	}
-	if (CancelButton)
-	{
-		CancelButton->OnClicked.AddDynamic(this, &UPreviewConfirmPopupWidget::HandleAttackDeclineClicked);
-	}
 }
 
 void UPreviewConfirmPopupWidget::SetMessage(const FString& Message)
@@ -41,6 +88,11 @@ void UPreviewConfirmPopupWidget::SetMessage(const FString& Message)
 
 void UPreviewConfirmPopupWidget::HandleLocalPreviewClicked()
 {
+	if (bIsAttackConfirmMode)
+	{
+		HandleAttackConfirmClicked();
+		return;
+	}
 	MakeChoice(EPreviewConfirmChoice::LocalPreview);
 }
 
@@ -51,6 +103,11 @@ void UPreviewConfirmPopupWidget::HandleDispatchClicked()
 
 void UPreviewConfirmPopupWidget::HandleCancelClicked()
 {
+	if (bIsAttackConfirmMode)
+	{
+		HandleAttackDeclineClicked();
+		return;
+	}
 	MakeChoice(EPreviewConfirmChoice::Cancel);
 }
 

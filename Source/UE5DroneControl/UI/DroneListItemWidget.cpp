@@ -6,6 +6,9 @@
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/PanelWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Engine/GameInstance.h"
@@ -73,22 +76,85 @@ void UDroneListItemWidget::SetDroneDataWithModeAndAvailability(int32 InDroneId, 
     SetDroneDataWithAvailability(Name, Availability);
 }
 
+void UDroneListItemWidget::NativeOnInitialized()
+{
+    Super::NativeOnInitialized();
+    BuildRuntimeCard();
+}
+
 void UDroneListItemWidget::NativeConstruct()
 {
     Super::NativeConstruct();
-
-    // 若蓝图未绑定新增控件，则由代码自动创建
-    BuildWidgetsFromCode();
-
-    if (ModeButton)
-    {
-        ModeButton->OnClicked.AddDynamic(this, &UDroneListItemWidget::OnModeButtonClicked);
-    }
     UpdateModeText();
 }
 
-void UDroneListItemWidget::BuildWidgetsFromCode()
+void UDroneListItemWidget::BuildRuntimeCard()
 {
+    if (WidgetTree)
+    {
+        UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DroneCard"));
+        Card->SetBrushColor(FLinearColor(0.045f, 0.075f, 0.115f, 0.96f));
+        Card->SetPadding(FMargin(12.0f, 10.0f));
+        WidgetTree->RootWidget = Card;
+
+        UVerticalBox* Content = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CardContent"));
+        Card->SetContent(Content);
+        auto MakeText = [this](const FName Name, const FString& Value, const FLinearColor& Color = FLinearColor(0.86f, 0.91f, 0.97f, 1.0f))
+        {
+            UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
+            Text->SetText(FText::FromString(Value));
+            Text->SetColorAndOpacity(Color);
+            return Text;
+        };
+        auto Add = [](UVerticalBox* Box, UWidget* Child, const FMargin& ChildPadding = FMargin(0.0f, 3.0f))
+        {
+            if (UVerticalBoxSlot* ChildSlot = Box->AddChildToVerticalBox(Child)) ChildSlot->SetPadding(ChildPadding);
+        };
+
+        UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HeaderRow"));
+        DroneNameText = MakeText(TEXT("DroneNameText"), TEXT("无人机"), FLinearColor(0.96f, 0.98f, 1.0f, 1.0f));
+        if (UHorizontalBoxSlot* ChildSlot = Header->AddChildToHorizontalBox(DroneNameText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        ConnectionStatusText = MakeText(TEXT("ConnectionStatusText"), TEXT("离线"), FLinearColor(0.95f, 0.38f, 0.34f, 1.0f));
+        Header->AddChildToHorizontalBox(ConnectionStatusText);
+        StatusText = ConnectionStatusText;
+        Add(Content, Header, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
+
+        UHorizontalBox* TaskRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("TaskRow"));
+        TaskRow->AddChildToHorizontalBox(MakeText(TEXT("ModeLabel"), TEXT("模式  "), FLinearColor(0.48f, 0.67f, 0.84f, 1.0f)));
+        ModeText = MakeText(TEXT("ModeText"), TEXT("移动"));
+        if (UHorizontalBoxSlot* ChildSlot = TaskRow->AddChildToHorizontalBox(ModeText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        TaskRow->AddChildToHorizontalBox(MakeText(TEXT("TaskLabel"), TEXT("任务  "), FLinearColor(0.48f, 0.67f, 0.84f, 1.0f)));
+        TaskStatusText = MakeText(TEXT("TaskStatusText"), TEXT("待命"));
+        if (UHorizontalBoxSlot* ChildSlot = TaskRow->AddChildToHorizontalBox(TaskStatusText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        Add(Content, TaskRow);
+
+        StatusSourceText = MakeText(TEXT("StatusSourceText"), TEXT("状态来源：后端同步"), FLinearColor(0.48f, 0.67f, 0.84f, 1.0f));
+        Add(Content, StatusSourceText, FMargin(0.0f, 1.0f, 0.0f, 5.0f));
+        GpsText = MakeText(TEXT("GpsText"), TEXT("经度 --    纬度 --"));
+        Add(Content, GpsText);
+
+        UHorizontalBox* MetricsRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MetricsRow"));
+        AltitudeText = MakeText(TEXT("AltitudeText"), TEXT("海拔 -- m"));
+        if (UHorizontalBoxSlot* ChildSlot = MetricsRow->AddChildToHorizontalBox(AltitudeText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        BatteryText = MakeText(TEXT("BatteryText"), TEXT("电量 --"));
+        MetricsRow->AddChildToHorizontalBox(BatteryText);
+        Add(Content, MetricsRow);
+
+        UHorizontalBox* ProgressRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ProgressRow"));
+        WaypointText = MakeText(TEXT("WaypointText"), TEXT("航点 0 / 0"));
+        if (UHorizontalBoxSlot* ChildSlot = ProgressRow->AddChildToHorizontalBox(WaypointText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        UpdateTimeText = MakeText(TEXT("UpdateTimeText"), TEXT("刚刚"), FLinearColor(0.55f, 0.62f, 0.70f, 1.0f));
+        ProgressRow->AddChildToHorizontalBox(UpdateTimeText);
+        Add(Content, ProgressRow);
+
+        TargetIndexText = MakeText(TEXT("TargetIndexText"), TEXT(""));
+        TargetIndexText->SetVisibility(ESlateVisibility::Collapsed);
+        Content->AddChildToVerticalBox(TargetIndexText);
+        StatusIndicator = nullptr;
+        ModeButton = nullptr;
+        return;
+    }
+
     // 如果所有新增字段均已由蓝图绑定，无需任何创建
     if (ConnectionStatusText && TaskStatusText && GpsText &&
         AltitudeText && BatteryText && WaypointText &&
@@ -376,6 +442,16 @@ void UDroneListItemWidget::SetDroneFullState(int32 InDroneId, const FDroneTeleme
 
         TaskStatusText->SetText(FText::FromString(DisplayText));
         TaskStatusText->SetColorAndOpacity(Color);
+    }
+
+    if (StatusSourceText)
+    {
+        const bool bUeLocal = Snap.LocalState != EUELocalDroneState::None;
+        StatusSourceText->SetText(FText::FromString(
+            bUeLocal ? TEXT("状态来源：UE 本地预演") : TEXT("状态来源：后端同步")));
+        StatusSourceText->SetColorAndOpacity(bUeLocal
+            ? FLinearColor(1.0f, 0.66f, 0.18f, 1.0f)
+            : FLinearColor(0.48f, 0.67f, 0.84f, 1.0f));
     }
 
     // ---- 当前路径点 / 当前目标点编号 ----

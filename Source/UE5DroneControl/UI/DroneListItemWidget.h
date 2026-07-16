@@ -72,6 +72,10 @@ public:
     UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
     UTextBlock* UpdateTimeText = nullptr;
 
+    /** 状态数据来源：后端同步或 UE 本地预演。 */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* StatusSourceText = nullptr;
+
     /** 设置无人机数据 */
     UFUNCTION(BlueprintCallable, Category = "UI")
     void SetDroneData(const FString& Name, bool bOnline);
@@ -95,6 +99,7 @@ public:
     void SetCommandMode(int32 InDroneId, EDroneCommandMode InMode);
 
 protected:
+    virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override;
 
 private:
@@ -110,5 +115,5 @@ private:
      * 当蓝图未绑定新增控件时，在代码里创建并挂载。
      * 只对指针仍为 nullptr 的字段创建控件，不覆盖已绑定的控件。
      */
-    void BuildWidgetsFromCode();
+    void BuildRuntimeCard();
 };

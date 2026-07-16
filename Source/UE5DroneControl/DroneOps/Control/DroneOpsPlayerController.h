@@ -47,10 +47,10 @@ public:
 	 * Dispatch (or preview) a geographic target for the currently selected drone(s).
 	 *
 	 * The primary selected drone is placed exactly at the input lon/lat/alt point; any other
-	 * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
-	 * by ascending DroneId for a stable layout. Each drone subtracts its own GPS anchor before
-	 * the command is sent, and exactly one logical command is sent per drone (the backend owns
-	 * reliable resend). Altitude is treated as height above mean sea level and converted to
+ * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
+ * by ascending DroneId for a stable layout. Shadow drones always move locally; when the backend
+ * is connected and a drone has a GPS anchor, one corresponding command is also sent. Altitude is
+ * treated as height above mean sea level and converted to
 	 * ellipsoid height via UDroneNetworkManager::GeoidSeparationMeters before the coordinate
 	 * transform.
 	 *
@@ -70,9 +70,9 @@ public:
 		bool bPreviewOnly);
 
 	/**
-	 * Validate the current selection and a geographic target without drawing or sending anything.
-	 * bForDispatch=false validates preview prerequisites; true additionally requires every selected
-	 * drone to be controllable, anchored, and the backend WebSocket to be connected.
+ * Validate the current selection and a geographic target without drawing or sending anything.
+ * bForDispatch=true validates local dispatch prerequisites only; backend connection and GPS
+ * anchors affect command delivery status but never block the local shadow-drone dispatch.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	FGeographicDispatchResult ValidateGeographicTarget(
@@ -301,6 +301,14 @@ private:
 		bool bForDispatch,
 		TArray<FGeographicDispatchSlot>& OutSlots) const;
 
+	/** Builds the same stable primary-first formation targets for every world-space input path. */
+	FGeographicDispatchResult BuildWorldDispatchPlan(
+		const FVector& BaseWorldTarget,
+		TArray<FGeographicDispatchSlot>& OutSlots) const;
+
+	/** Moves shadow drones locally first; sends backend commands only when they are currently possible. */
+	FGeographicDispatchResult ExecuteWorldDispatchPlan(const TArray<FGeographicDispatchSlot>& Slots);
+
 	/** Last preview plan, redrawn every frame until another preview replaces it. */
 	TArray<FGeographicDispatchSlot> ActiveGeographicPreviewSlots;
 
@@ -528,9 +536,6 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "HostileTarget")
 	TSubclassOf<AHostileTargetActor> HostileTargetClass;
-
-	// 防抖：记录已弹出的攻击确认，避免同一目标重复弹窗
-	TSet<int32> PendingAttackConfirmTargets;
 
 	/** 攻击确认弹窗回调（由 PreviewConfirmPopupWidget 的 OnAttackConfirmMade delegate 触发） */
 	UFUNCTION()

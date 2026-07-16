@@ -186,31 +186,44 @@ TArray<TPair<int32, int32>> UHostileTargetManager::CheckAllPatrollingDrones()
 		return Results;
 	}
 
-	for (int32 DroneId : PatrollingDrones)
+	TSet<int32> ReservedDroneIds;
+	// One target produces one candidate: choose the nearest eligible patrol drone,
+	// with DroneId as the deterministic tie breaker. Do not let iteration order assign it.
+	for (AHostileTargetActor* Target : Undiscovered)
 	{
-		AMultiDroneCharacter* Shadow = GetShadowDrone(DroneId);
-		if (!IsValid(Shadow))
+		if (!IsValid(Target) || Target->bIsDiscovered)
 		{
 			continue;
 		}
 
-		const FVector DroneLocation = Shadow->GetActorLocation();
-
-		for (AHostileTargetActor* Target : Undiscovered)
+		int32 BestDroneId = 0;
+		float BestDistance = TNumericLimits<float>::Max();
+		for (int32 DroneId : PatrollingDrones)
 		{
-			if (!IsValid(Target) || Target->bIsDiscovered)
+			if (ReservedDroneIds.Contains(DroneId))
+			{
+				continue;
+			}
+			AMultiDroneCharacter* Shadow = GetShadowDrone(DroneId);
+			if (!IsValid(Shadow))
 			{
 				continue;
 			}
 
-			const FVector TargetLocation = Target->GetHostileTargetLocation();
-			const float Dist = FVector::Dist(DroneLocation, TargetLocation);
-
-			if (Dist <= Target->DiscoveryRadius)
+			const float Dist = FVector::Dist(Shadow->GetActorLocation(), Target->GetHostileTargetLocation());
+			if (Dist <= Target->DiscoveryRadius &&
+				(Dist < BestDistance || (FMath::IsNearlyEqual(Dist, BestDistance) &&
+					(BestDroneId == 0 || DroneId < BestDroneId))))
 			{
-				Results.Add(TPair<int32, int32>(DroneId, Target->TargetId));
-				break;
+				BestDroneId = DroneId;
+				BestDistance = Dist;
 			}
+		}
+
+		if (BestDroneId > 0)
+		{
+			Results.Add(TPair<int32, int32>(BestDroneId, Target->TargetId));
+			ReservedDroneIds.Add(BestDroneId);
 		}
 	}
 
@@ -229,7 +242,8 @@ void UHostileTargetManager::ResetUndetectedTargets()
 			continue;
 		}
 
-		const int32 AssignedDroneId = GetAssignedDroneId(Target->TargetId);
+		const int32* Assigned = AssignedMap.Find(Target->TargetId);
+		const int32 AssignedDroneId = Assigned ? *Assigned : 0;
 		if (AssignedDroneId <= 0)
 		{
 			continue;
@@ -244,6 +258,10 @@ void UHostileTargetManager::ResetUndetectedTargets()
 		const float Dist = FVector::Dist(Shadow->GetActorLocation(), Target->GetHostileTargetLocation());
 		if (Dist > Target->DiscoveryRadius * 1.2f)
 		{
+			if (CachedRegistry)
+			{
+				CachedRegistry->UpdateLocalState(AssignedDroneId, EUELocalDroneState::None);
+			}
 			Target->ResetTarget();
 			AssignedMap.Remove(Target->TargetId);
 			UE_LOG(LogTemp, Log, TEXT("[HostileTargetManager] Target T-%d left detection range, reset"),
@@ -287,6 +305,10 @@ bool UHostileTargetManager::AssignDroneToTarget(int32 TargetId, int32& OutDroneI
 		}
 
 		const float Dist = FVector::Dist(Shadow->GetActorLocation(), TargetLocation);
+		if (Dist > Target->DiscoveryRadius)
+		{
+			continue;
+		}
 
 		if (Dist < BestDistance || (FMath::IsNearlyEqual(Dist, BestDistance) && DroneId < BestDroneId))
 		{
@@ -370,8 +392,12 @@ TArray<int32> UHostileTargetManager::GetPatrollingDrones() const
 			continue;
 		}
 
+		const bool bBusyInLocalPreview = Snap.LocalState == EUELocalDroneState::TargetDetectedPending ||
+			Snap.LocalState == EUELocalDroneState::LocalAttacking ||
+			Snap.LocalState == EUELocalDroneState::LocalAttackCompleted;
 		if (Snap.Availability == EDroneAvailability::Online &&
-			Snap.TaskState == EDroneTaskState::Patrolling)
+			Snap.TaskMode == EDroneCommandMode::Patrol &&
+			Snap.TaskState == EDroneTaskState::Patrolling && !bBusyInLocalPreview)
 		{
 			Result.Add(Desc.DroneId);
 		}
