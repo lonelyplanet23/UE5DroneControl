@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UE5DroneControlCharacter.h"
 #include "DroneOps/Interfaces/DroneSelectableInterface.h"
+#include "PathEditor/DronePathActor.h"
 #include "MultiDroneCharacter.generated.h"
 
 class UDroneSelectionComponent;
@@ -148,6 +149,28 @@ public:
 	/** Stop vertical movement. Optionally send the final height target once before stopping. */
 	void StopVerticalMove(bool bSendFinalCommand = true);
 
+	// ===== 敌对目标攻击 =====
+
+	/** 停止巡逻并飞向目标点（由攻击确认弹窗触发） */
+	UFUNCTION(BlueprintCallable, Category = "Drone|Attack")
+	void StopPatrolAndAttack(const FVector& TargetLocation);
+
+	/** 是否正在本地攻击中（UE预演） */
+	UFUNCTION(BlueprintPure, Category = "Drone|Attack")
+	bool IsLocalAttacking() const { return bIsLocalAttacking; }
+
+	/** 是否已完成本地攻击 */
+	UFUNCTION(BlueprintPure, Category = "Drone|Attack")
+	bool IsLocalAttackCompleted() const { return bIsLocalAttackCompleted; }
+
+	/** 获取当前攻击目标位置 */
+	UFUNCTION(BlueprintPure, Category = "Drone|Attack")
+	FVector GetAttackTargetLocation() const { return AttackTargetLocation; }
+
+	/** 重置本地攻击状态（恢复巡逻） */
+	UFUNCTION(BlueprintCallable, Category = "Drone|Attack")
+	void ResetLocalAttackState();
+
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FWgs84GeographicDispatchLatentCommand;
@@ -213,4 +236,30 @@ private:
 	float GetVerticalAnchorWorldZ() const;
 
 	float WsSendTimer = 0.0f;
+
+	// ===== 本地攻击状态 =====
+
+	/** 是否正在本地攻击中（UE-only） */
+	bool bIsLocalAttacking = false;
+
+	/** 本地攻击是否已完成（到达目标悬停） */
+	bool bIsLocalAttackCompleted = false;
+
+	/** 当前攻击目标位置 */
+	FVector AttackTargetLocation = FVector::ZeroVector;
+
+	/** 攻击到达阈值（厘米） */
+	UPROPERTY(EditAnywhere, Category = "Drone|Attack", meta = (ClampMin = "10.0"))
+	float AttackArrivalThresholdCm = 100.0f;
+
+	/** 本地攻击移动速度（cm/s） */
+	UPROPERTY(EditAnywhere, Category = "Drone|Attack", meta = (ClampMin = "100.0"))
+	float LocalAttackSpeed = 500.0f;
+
+	/** 攻击时是否朝向目标 */
+	UPROPERTY(EditAnywhere, Category = "Drone|Attack")
+	bool bOrientToAttackTarget = true;
+
+	/** 缓存的 PathActor（用于暂停巡逻） */
+	TWeakObjectPtr<ADronePathActor> CachedPathActor;
 };

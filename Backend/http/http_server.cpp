@@ -245,6 +245,27 @@ HttpServer::HttpServer(const AppConfig& config,
     });
 
     LoadDrones();
+
+    // DroneManager 的状态更新也要汇入同一份任务缓存，再由 PublishTaskState
+    // 对 REST 初始加载和 WebSocket 实时更新使用完全一致的协议字段。
+    drone_mgr_.SetTaskStateCallback([this](int drone_id, const std::string& state,
+                                           const std::string& detail,
+                                           int current_wp, int total_wp) {
+		DroneTaskState merged;
+		{
+			std::lock_guard<std::mutex> lock(task_state_mutex_);
+			if (const auto it = task_states_.find(drone_id); it != task_states_.end()) {
+				merged = it->second;
+			}
+		}
+		merged.drone_id = drone_id;
+		merged.state = state;
+		merged.detail = detail;
+		merged.current_wp = current_wp;
+		merged.waypoint_count = total_wp;
+		PublishTaskState(merged);
+    });
+
 }
 
 HttpServer::~HttpServer()
@@ -477,6 +498,8 @@ boost::json::value HttpServer::ApiListDrones() {
             {"topic_prefix", topic_prefix},
             {"bit_index", rec.slot > 0 ? rec.slot - 1 : 0},
             {"mavlink_system_id", rec.slot},
+            // task_state/task_detail/current waypoint above are the single
+            // authoritative task cache also used by drone_task_state WS pushes.
         });
     }
     return arr;

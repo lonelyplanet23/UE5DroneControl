@@ -289,12 +289,18 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 				TaskState.Mode = DroneCommandModeFromProtocolString(TaskModeText);
 			}
 			Obj->TryGetStringField(TEXT("task_array_id"), TaskState.ArrayId);
-			Obj->TryGetNumberField(TEXT("task_current_wp"), TaskState.CurrentWaypoint);
-			Obj->TryGetNumberField(TEXT("task_waypoint_count"), TaskState.WaypointCount);
+			if (!Obj->TryGetNumberField(TEXT("task_current_wp"), TaskState.CurrentWaypoint))
+			{
+				Obj->TryGetNumberField(TEXT("current_waypoint"), TaskState.CurrentWaypoint);
+			}
+			if (!Obj->TryGetNumberField(TEXT("task_waypoint_count"), TaskState.WaypointCount))
+			{
+				Obj->TryGetNumberField(TEXT("total_waypoints"), TaskState.WaypointCount);
+			}
 			Obj->TryGetStringField(TEXT("task_detail"), TaskState.Detail);
 			Obj->TryGetNumberField(TEXT("task_updated_at"), TaskState.UpdatedAt);
 			Registry->UpdateTaskState(Id, TaskState);
-		}
+        }
 
 		FString Status;
 		if (Obj->TryGetStringField(TEXT("status"), Status))
@@ -315,12 +321,19 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 		}
 	}
 
+	// 后端不存在的无人机直接从本地注销，避免面板显示失联的历史记录
+	TArray<int32> ToRemove;
 	for (const FDroneDescriptor& LocalDesc : Registry->GetAllDroneDescriptors())
 	{
 		if (LocalDesc.DroneId > 0 && !SeenBackendIds.Contains(LocalDesc.DroneId))
 		{
-			Registry->MarkDroneAvailability(LocalDesc.DroneId, EDroneAvailability::Lost);
+			ToRemove.Add(LocalDesc.DroneId);
 		}
+	}
+	for (int32 RemovedId : ToRemove)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Drone %d no longer in backend, unregistering"), RemovedId);
+		Registry->UnregisterDrone(RemovedId);
 	}
 }
 
@@ -375,8 +388,14 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		FDroneTaskStateSnapshot TaskState;
 		Root->TryGetNumberField(TEXT("drone_id"), TaskState.DroneId);
 		Root->TryGetStringField(TEXT("array_id"), TaskState.ArrayId);
-		Root->TryGetNumberField(TEXT("current_wp"), TaskState.CurrentWaypoint);
-		Root->TryGetNumberField(TEXT("waypoint_count"), TaskState.WaypointCount);
+		if (!Root->TryGetNumberField(TEXT("current_wp"), TaskState.CurrentWaypoint))
+		{
+			Root->TryGetNumberField(TEXT("current_waypoint"), TaskState.CurrentWaypoint);
+		}
+		if (!Root->TryGetNumberField(TEXT("waypoint_count"), TaskState.WaypointCount))
+		{
+			Root->TryGetNumberField(TEXT("total_waypoints"), TaskState.WaypointCount);
+		}
 		Root->TryGetStringField(TEXT("detail"), TaskState.Detail);
 		Root->TryGetNumberField(TEXT("updated_at"), TaskState.UpdatedAt);
 
@@ -426,18 +445,40 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		double Speed = 0;
 		Root->TryGetNumberField(TEXT("speed"), Speed);
 		Snap.Velocity = FVector(Speed, 0, 0); // scalar speed stored in X component
+		
+		// ===== 解析 GPS 和电量 =====
+		// 使用新增的独立字段，不再借用 GeographicLocation.Z
+    	double GpsLat = 0, GpsLon = 0, GpsAlt = 0;
+    	Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
+    	Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
+    	Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+    	int32 Battery = -1;
+    	Root->TryGetNumberField(TEXT("battery"), Battery);
+    
+    	// 如果 telemetry 未携带 GPS/电量，保留缓存中的旧值
+    	FDroneTelemetrySnapshot ExistingSnap;
+    	if (Registry->GetTelemetry(DroneId, ExistingSnap))
+    	{
+        	if (GpsLat == 0 && GpsLon == 0 && GpsAlt == 0) {
+            	GpsLat = ExistingSnap.GpsLatitude;
+            	GpsLon = ExistingSnap.GpsLongitude;
+            	GpsAlt = ExistingSnap.GpsAltitude;
+        	}
+        	if (Battery < 0) {
+                Battery = ExistingSnap.BatteryPercent;
+            }
+    	}
+    
+    	Snap.GpsLatitude = GpsLat;
+    	Snap.GpsLongitude = GpsLon;
+    	Snap.GpsAltitude = GpsAlt;
+    	Snap.BatteryPercent = Battery;
 
-		int32 Battery = -1;
-		Root->TryGetNumberField(TEXT("battery"), Battery);
 		Snap.Battery = Battery;
 
 		Root->TryGetBoolField(TEXT("armed"), Snap.bArmed);
 		Root->TryGetBoolField(TEXT("offboard"), Snap.bOffboard);
 		Root->TryGetBoolField(TEXT("gps_fix"), Snap.bGpsFix);
-		double GpsLat = 0.0, GpsLon = 0.0, GpsAlt = 0.0;
-		Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
-		Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
-		Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
 		Snap.GeographicLocation = FVector(GpsLat, GpsLon, GpsAlt);
 		Snap.Altitude = static_cast<float>(GpsAlt);
 
@@ -475,6 +516,26 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		}
 
 		OnDroneWsEvent.Broadcast(DroneId, Event, GpsLat, GpsLon, GpsAlt);
+
+		// ===== 将 GPS 写入 Registry 快照 =====
+    	// 确保 UI 列表能通过 GetTelemetry 读到 GPS 数据
+    	if (Event == TEXT("power_on") || Event == TEXT("reconnect"))
+    	{
+        	UDroneRegistrySubsystem* Registry = GetGameInstance()
+            	? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+            	: nullptr;
+        	if (Registry)
+        	{
+            	FDroneTelemetrySnapshot Snap;
+            	Registry->GetTelemetry(DroneId, Snap);
+            	Snap.DroneId = DroneId;
+            	Snap.GpsLatitude = GpsLat;
+            	Snap.GpsLongitude = GpsLon;
+            	Snap.GpsAltitude = GpsAlt;
+            	Snap.LastUpdateTime = FPlatformTime::Seconds();
+            	Registry->UpdateTelemetry(DroneId, Snap);
+        	}
+    	}
 		return;
 	}
 
@@ -591,6 +652,7 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		OnAssignmentResult.Broadcast(ArrayId, Assignments);
 		return;
 	}
+
 }
 
 // ---- Control commands ----

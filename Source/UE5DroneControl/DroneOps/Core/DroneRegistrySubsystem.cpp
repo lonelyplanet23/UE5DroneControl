@@ -312,8 +312,20 @@ void UDroneRegistrySubsystem::UpdateTelemetry(int32 DroneId, const FDroneTelemet
 {
 	const FDroneTelemetrySnapshot* Existing = TelemetryCache.Find(DroneId);
 	const bool bAvailabilityChanged = !Existing || Existing->Availability != Snapshot.Availability;
-	TelemetryCache.Add(DroneId, Snapshot);
-	OnTelemetryUpdated.Broadcast(DroneId, Snapshot);
+	FDroneTelemetrySnapshot Merged = Snapshot;
+	if (Existing)
+	{
+		// telemetry 只负责位置/连接等高频数据，不能将由 drone_task_state 和
+		// UE 本地预演逻辑维护的状态重置为结构体默认值。
+		Merged.TaskMode = Existing->TaskMode;
+		Merged.TaskState = Existing->TaskState;
+		Merged.TaskErrorDetail = Existing->TaskErrorDetail;
+		Merged.CurrentWaypointIndex = Existing->CurrentWaypointIndex;
+		Merged.TotalWaypoints = Existing->TotalWaypoints;
+		Merged.LocalState = Existing->LocalState;
+	}
+	TelemetryCache.Add(DroneId, Merged);
+	OnTelemetryUpdated.Broadcast(DroneId, Merged);
 	if (bAvailabilityChanged)
 	{
 		SaveRegisteredDrones();
@@ -341,7 +353,18 @@ void UDroneRegistrySubsystem::UpdateTaskState(int32 DroneId, const FDroneTaskSta
 	FDroneTaskStateSnapshot Stored = State;
 	Stored.DroneId = DroneId;
 	TaskStateCache.Add(DroneId, Stored);
+
+	FDroneTelemetrySnapshot& Telemetry = TelemetryCache.FindOrAdd(DroneId);
+	Telemetry.DroneId = DroneId;
+	Telemetry.TaskMode = Stored.Mode;
+	Telemetry.TaskState = Stored.State;
+	Telemetry.TaskErrorDetail = Stored.Detail;
+	Telemetry.CurrentWaypointIndex = Stored.CurrentWaypoint;
+	Telemetry.TotalWaypoints = Stored.WaypointCount;
+	Telemetry.LastUpdateTime = FPlatformTime::Seconds();
 	OnDroneTaskStateUpdated.Broadcast(DroneId, Stored);
+	OnTaskStateUpdated.Broadcast(DroneId, Stored.State, Stored.CurrentWaypoint, Stored.WaypointCount);
+	OnTelemetryUpdated.Broadcast(DroneId, Telemetry);
 }
 
 bool UDroneRegistrySubsystem::GetTaskState(int32 DroneId, FDroneTaskStateSnapshot& OutState) const
@@ -549,3 +572,13 @@ bool UDroneRegistrySubsystem::IsDroneRegistered(int32 DroneId) const
 {
 	return DroneDescriptors.Contains(DroneId);
 }
+
+void UDroneRegistrySubsystem::UpdateLocalState(int32 DroneId, EUELocalDroneState LocalState)
+{
+    FDroneTelemetrySnapshot& Snap = TelemetryCache.FindOrAdd(DroneId);
+    Snap.DroneId = DroneId;
+    Snap.LocalState = LocalState;
+    Snap.LastUpdateTime = FPlatformTime::Seconds();
+    OnTelemetryUpdated.Broadcast(DroneId, Snap);
+}
+

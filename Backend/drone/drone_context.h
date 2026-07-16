@@ -29,6 +29,13 @@ struct DroneContext {
     std::string jetson_ip = "192.168.30.104";
     int send_port = 8889;
 
+    // ===== task_state =====
+    std::string task_state = "standby";
+    std::string task_error_detail;
+    int task_current_wp = 0;
+    int task_total_wp = 0;
+    std::string previous_task_state;  
+
     DroneContext(int id, int slot_id, const std::string& drone_name)
         : drone_id(id)
         , slot(slot_id)

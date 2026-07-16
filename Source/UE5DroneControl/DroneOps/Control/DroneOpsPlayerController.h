@@ -10,6 +10,9 @@
 #include "Camera/CameraActor.h"
 #include "PathEditor/DroneWaypointActor.h"
 #include "PathEditor/DronePathSaveLibrary.h"
+#include "DroneOps/Core/HostileTargetActor.h"
+#include "DroneOps/Core/HostileTargetManager.h"
+#include "UI/PreviewConfirmPopupWidget.h"
 #include "DroneOpsPlayerController.generated.h"
 
 class UDroneRegistrySubsystem;
@@ -144,6 +147,24 @@ public:
 	FVector GetFormationRefEditOrigin() const { return FormationRefEditOrigin; }
 	int32 GetFormationRunAnchorDroneId() const { return FormationRunAnchorDroneId; }
 
+	// ===== 敌对目标点管理 =====
+
+	/** 在鼠标位置放置敌对目标点（Ctrl+Shift+左键，避免占用框选快捷键） */
+	UFUNCTION(BlueprintCallable, Category = "HostileTarget")
+	void SpawnHostileTarget();
+
+	/** 删除选中的敌对目标点 */
+	UFUNCTION(BlueprintCallable, Category = "HostileTarget")
+	void RemoveHostileTarget(AHostileTargetActor* Target);
+
+	/** 获取敌对目标点管理器 */
+	UFUNCTION(BlueprintPure, Category = "HostileTarget")
+	class UHostileTargetManager* GetHostileTargetManager() const;
+
+	/** 获取当前选中的目标点（高亮） */
+	UFUNCTION(BlueprintPure, Category = "HostileTarget")
+	AHostileTargetActor* GetSelectedHostileTarget() const { return SelectedHostileTarget; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -207,6 +228,16 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	bool GetWorldLocationUnderCursor(FVector& OutLocation) const;
 
+	// ===== 敌对目标点发现检测 =====
+	/** Tick中调用：检测所有巡逻无人机是否发现目标 */
+	void CheckHostileTargetDetection();
+
+	/** 处理无人机发现目标的逻辑（弹窗、分配） */
+	void HandleTargetDiscovery(int32 DroneId, int32 TargetId);
+
+	/** 获取鼠标下的敌对目标点 */
+	AHostileTargetActor* GetHostileTargetUnderCursor() const;
+
 public:
 	/**
 	 * Event broadcast when user clicks middle mouse button while hovering a drone.
@@ -246,6 +277,9 @@ public:
 	/** 框选当前终点（逻辑像素，viewport-relative，供 Widget 蓝图读取） */
 	UPROPERTY(BlueprintReadOnly, Category = "BoxSelect")
 	FVector2D BoxSelectEndLogical = FVector2D::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HostileTarget")
+	TSubclassOf<UPreviewConfirmPopupWidget> PreviewConfirmPopupClass;
 
 private:
 #if WITH_DEV_AUTOMATION_TESTS
@@ -486,4 +520,19 @@ private:
 
 	UFUNCTION()
 	void OnTestArrayTaskComplete(bool bSuccess, const FString& ResponseBody);
+
+	// ===== 敌对目标点成员 =====
+
+	UPROPERTY()
+	TObjectPtr<AHostileTargetActor> SelectedHostileTarget = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "HostileTarget")
+	TSubclassOf<AHostileTargetActor> HostileTargetClass;
+
+	// 防抖：记录已弹出的攻击确认，避免同一目标重复弹窗
+	TSet<int32> PendingAttackConfirmTargets;
+
+	/** 攻击确认弹窗回调（由 PreviewConfirmPopupWidget 的 OnAttackConfirmMade delegate 触发） */
+	UFUNCTION()
+	void OnAttackConfirmMade(int32 DroneId, int32 TargetId, bool bAttack);
 };

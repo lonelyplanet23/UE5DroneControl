@@ -199,6 +199,10 @@ DroneStatus DroneManager::GetStatusInternal(int drone_id) const
         s.control_ack_command_id = ctx->latest_telemetry.control_ack_command_id;
         s.control_ack_sequence = ctx->latest_telemetry.control_ack_sequence;
     }
+    s.task_state = ctx->task_state;
+    s.task_error_detail = ctx->task_error_detail;
+    s.task_current_wp = ctx->task_current_wp;
+    s.task_total_wp = ctx->task_total_wp;
     return s;
 }
 
@@ -312,6 +316,8 @@ bool DroneManager::ProcessPauseCommand(int drone_id)
         ctx->last_ned_y = ctx->latest_telemetry.position_ned[1];
         ctx->last_ned_z = ctx->latest_telemetry.position_ned[2];
     }
+    ctx->previous_task_state = ctx->task_state;
+    SetDroneTaskState(drone_id, "paused", "", ctx->task_current_wp, ctx->task_total_wp);
     hb_manager_.RequestHold(
         drone_id, ctx->last_ned_x, ctx->last_ned_y, ctx->last_ned_z);
     spdlog::info(
@@ -327,6 +333,8 @@ bool DroneManager::ProcessResumeCommand(int drone_id)
     if (!ctx) return false;
 
     ctx->command_queue->SetPaused(false);
+    SetDroneTaskState(drone_id, ctx->previous_task_state, "",
+                  ctx->task_current_wp, ctx->task_total_wp);
     spdlog::info("Resume drone {}", drone_id);
     return true;
 }
@@ -473,5 +481,26 @@ void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
 
     if (telemetry_cb_) {
         telemetry_cb_(drone_id, data);
+    }
+}
+
+void DroneManager::SetTaskStateCallback(TaskStateCallback cb) {
+    task_state_cb_ = std::move(cb);
+}
+
+void DroneManager::SetDroneTaskState(int drone_id, const std::string& state,
+                                     const std::string& detail,
+                                     int current_wp, int total_wp) {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
+    auto* ctx = GetContextUnsafe(drone_id);
+    if (!ctx) return;
+    
+    ctx->task_state = state;
+    ctx->task_error_detail = detail;
+    ctx->task_current_wp = current_wp;
+    ctx->task_total_wp = total_wp;
+    
+    if (task_state_cb_) {
+        task_state_cb_(drone_id, state, detail, current_wp, total_wp);
     }
 }

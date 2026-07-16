@@ -244,6 +244,14 @@ public:
 	void MarkConflictSegment(int32 StartWaypointIndex, int32 EndWaypointIndex);
 	void RefreshConflictVisualization();
 
+	/** 暂停当前路径移动（不销毁，可恢复） */
+	UFUNCTION(BlueprintCallable, Category = "Drone Path|Movement")
+	void PauseMovement();
+
+	/** 恢复暂停的路径移动 */
+	UFUNCTION(BlueprintCallable, Category = "Drone Path|Movement")
+	void ResumeMovement();
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -328,4 +336,9 @@ private:
 	FTimerHandle ScheduledExecutionTimerHandle;
 	TSet<int32> ConflictedWaypointIndices;
 	TSet<int32> ConflictedSegmentStartIndices;
+
+	// 暂停恢复状态
+    int32 PausedSegmentIndex = 0;
+    float PausedElapsedTime = 0.0f;
+    bool bIsPaused = false;
 };

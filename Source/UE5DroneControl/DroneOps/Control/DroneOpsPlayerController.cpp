@@ -5,6 +5,8 @@
 #include "Camera/CameraActor.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/ICoordinateService.h"
+#include "DroneOps/Core/HostileTargetActor.h"
+#include "DroneOps/Core/HostileTargetManager.h"
 #include "DroneOps/Interfaces/DroneSelectableInterface.h"
 #include "DroneOps/Drone/DroneSelectionComponent.h"
 #include "DroneOps/Drone/DroneCommandSenderComponent.h"
@@ -22,6 +24,8 @@
 #include "Engine/GameInstance.h"
 #include "Engine/OverlapResult.h"
 #include "UI/UIManagerBlueprintLibrary.h"
+#include "UI/DroneInfoPanelWidget.h"
+#include "UI/GeographicTargetPanelWidget.h"
 #include "UI/SequenceDispatchPanelWidget.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Engine/World.h"
@@ -492,6 +496,16 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 			FinishBoxSelectIfPending();
 		}
 	}
+
+	// 敌对目标发现检测
+	if (!bPathEditMode)
+	{
+		CheckHostileTargetDetection();
+		if (UHostileTargetManager* Manager = GetHostileTargetManager())
+		{
+			Manager->ResetUndetectedTargets();
+		}
+	}
 }
 
 void ADroneOpsPlayerController::UpdateSelectedDroneVerticalControl()
@@ -511,38 +525,23 @@ void ADroneOpsPlayerController::UpdateSelectedDroneVerticalControl()
 	}
 
 	TArray<TWeakObjectPtr<AMultiDroneCharacter>> CurrentControlledDrones;
-	const TArray<int32> SelectedDroneIds = DroneRegistry->GetMultiSelectedDrones();
-	for (const int32 DroneId : SelectedDroneIds)
+	for (const int32 DroneId : DroneRegistry->GetMultiSelectedDrones())
 	{
 		EDroneControlLockReason LockReason = EDroneControlLockReason::None;
-		if (DroneRegistry->IsControlLocked(DroneId, LockReason))
-		{
-			continue;
-		}
-
+		if (DroneRegistry->IsControlLocked(DroneId, LockReason)) continue;
 		AMultiDroneCharacter* ShadowDrone = Cast<AMultiDroneCharacter>(DroneRegistry->GetSenderPawn(DroneId));
-		if (!IsValid(ShadowDrone))
-		{
-			continue;
-		}
-
+		if (!IsValid(ShadowDrone)) continue;
 		ShadowDrone->SetVerticalMoveInput(Direction);
 		CurrentControlledDrones.AddUnique(TWeakObjectPtr<AMultiDroneCharacter>(ShadowDrone));
 	}
 
-	// Selection or lock state may change while a key is held. Stop actors that
-	// are no longer part of the canonical registry selection.
 	for (const TWeakObjectPtr<AMultiDroneCharacter>& PreviousDrone : VerticallyControlledDrones)
 	{
 		if (AMultiDroneCharacter* ShadowDrone = PreviousDrone.Get())
 		{
-			if (!CurrentControlledDrones.Contains(PreviousDrone))
-			{
-				ShadowDrone->StopVerticalMove(false);
-			}
+			if (!CurrentControlledDrones.Contains(PreviousDrone)) ShadowDrone->StopVerticalMove(false);
 		}
 	}
-
 	VerticallyControlledDrones = MoveTemp(CurrentControlledDrones);
 }
 
@@ -550,10 +549,7 @@ void ADroneOpsPlayerController::StopSelectedDroneVerticalControl(bool bSendFinal
 {
 	for (const TWeakObjectPtr<AMultiDroneCharacter>& ControlledDrone : VerticallyControlledDrones)
 	{
-		if (AMultiDroneCharacter* ShadowDrone = ControlledDrone.Get())
-		{
-			ShadowDrone->StopVerticalMove(bSendFinalCommand);
-		}
+		if (AMultiDroneCharacter* ShadowDrone = ControlledDrone.Get()) ShadowDrone->StopVerticalMove(bSendFinalCommand);
 	}
 	VerticallyControlledDrones.Empty();
 }
@@ -581,6 +577,14 @@ void ADroneOpsPlayerController::OnPrimaryClick()
 	// 面板处于交互状态时不处理游戏点击
 	if (USequenceDispatchPanelWidget::IsPanelInteractive() || UGeographicTargetPanelWidget::IsPanelInteractive())
 	{
+		return;
+	}
+
+	// Shift remains the established box-select modifier. Add Ctrl for hostile-target placement so
+	// the two interaction modes can coexist without silently changing box selection behaviour.
+	if (bShiftHeld && (IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl)))
+	{
+		SpawnHostileTarget();
 		return;
 	}
 
@@ -2081,6 +2085,207 @@ void ADroneOpsPlayerController::OnReturnToMainMenu()
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: B key pressed, returning to MainMenu"));
 	UGameplayStatics::OpenLevel(this, MainMenuLevelName);
 }
+
+// 敌对目标点管理
+
+void ADroneOpsPlayerController::SpawnHostileTarget()
+{
+	if (!HostileTargetClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[HostileTarget] HostileTargetClass not set in PlayerController"));
+		return;
+	}
+
+	if (CameraModeState.CameraMode == EDroneCameraMode::Free && !bShiftHeld)
+	{
+		return;
+	}
+
+	FVector WorldLocation;
+	if (!GetWorldLocationUnderCursor(WorldLocation))
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("[HostileTarget] No hit under cursor"));
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// 检查是否与现有目标点重叠（避免叠放）
+	const float MinDistance = 200.0f;
+	for (TActorIterator<AHostileTargetActor> It(World); It; ++It)
+	{
+		if (FVector::Dist(It->GetActorLocation(), WorldLocation) < MinDistance)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[HostileTarget] Too close to existing target"));
+			return;
+		}
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	AHostileTargetActor* NewTarget = World->SpawnActor<AHostileTargetActor>(
+		HostileTargetClass, WorldLocation, FRotator::ZeroRotator, SpawnParams);
+
+	if (NewTarget)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[HostileTarget] Spawned target T-%d at (%.1f, %.1f, %.1f)"),
+			NewTarget->TargetId, WorldLocation.X, WorldLocation.Y, WorldLocation.Z);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
+				FString::Printf(TEXT("敌对目标 T-%d 已放置"), NewTarget->TargetId));
+		}
+	}
+}
+
+void ADroneOpsPlayerController::RemoveHostileTarget(AHostileTargetActor* Target)
+{
+	if (!IsValid(Target))
+	{
+		return;
+	}
+
+	if (Target == SelectedHostileTarget)
+	{
+		SelectedHostileTarget = nullptr;
+	}
+
+	Target->Destroy();
+}
+
+UHostileTargetManager* ADroneOpsPlayerController::GetHostileTargetManager() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+	return World->GetSubsystem<UHostileTargetManager>();
+}
+
+AHostileTargetActor* ADroneOpsPlayerController::GetHostileTargetUnderCursor() const
+{
+	FHitResult HitResult;
+	if (!GetHitResultUnderCursor(ECC_Visibility, false, HitResult))
+	{
+		return nullptr;
+	}
+	return Cast<AHostileTargetActor>(HitResult.GetActor());
+}
+
+// 敌对目标点发现检测
+
+void ADroneOpsPlayerController::CheckHostileTargetDetection()
+{
+	UHostileTargetManager* Manager = GetHostileTargetManager();
+	if (!Manager)
+	{
+		return;
+	}
+
+	// 获取所有发生发现事件 (DroneId, TargetId)
+	TArray<TPair<int32, int32>> Detections = Manager->CheckAllPatrollingDrones();
+
+	for (const auto& Detection : Detections)
+	{
+		const int32 DroneId = Detection.Key;
+		const int32 TargetId = Detection.Value;
+
+		// 防重：同一目标只弹窗一次
+		if (PendingAttackConfirmTargets.Contains(TargetId))
+		{
+			continue;
+		}
+
+		HandleTargetDiscovery(DroneId, TargetId);
+	}
+}
+
+void ADroneOpsPlayerController::HandleTargetDiscovery(int32 DroneId, int32 TargetId)
+{
+    UHostileTargetManager* Manager = GetHostileTargetManager();
+    if (!Manager) return;
+
+    if (!Manager->TryAssignTarget(TargetId, DroneId))
+    {
+        UE_LOG(LogTemp, Log, TEXT("[HostileTarget] Target T-%d already assigned, skipping"), TargetId);
+        return;
+    }
+
+    PendingAttackConfirmTargets.Add(TargetId);
+
+    AHostileTargetActor* Target = Manager->GetTarget(TargetId);
+    if (!IsValid(Target)) return;
+
+    if (!PreviewConfirmPopupClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[HostileTarget] PreviewConfirmPopupClass not set"));
+        return;
+    }
+
+    UPreviewConfirmPopupWidget* Popup = CreateWidget<UPreviewConfirmPopupWidget>(this, PreviewConfirmPopupClass);
+    if (!Popup)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[HostileTarget] Failed to create popup"));
+        return;
+    }
+
+    Popup->SetAttackConfirmData(DroneId, TargetId, Target->GetHostileTargetLocation());
+    Popup->OnAttackConfirmMade.AddDynamic(this, &ADroneOpsPlayerController::OnAttackConfirmMade);
+    Popup->AddToViewport(100);
+
+    UE_LOG(LogTemp, Log, TEXT("[HostileTarget] Drone %d discovered target T-%d, showing confirm popup"),
+        DroneId, TargetId);
+}
+
+// 攻击确认回调
+
+void ADroneOpsPlayerController::OnAttackConfirmMade(int32 DroneId, int32 TargetId, bool bAttack)
+{
+	UE_LOG(LogTemp, Log, TEXT("[HostileTarget] Attack confirm: Drone %d Target T-%d -> %s"),
+		DroneId, TargetId, bAttack ? TEXT("ATTACK") : TEXT("DECLINE"));
+
+	if (bAttack)
+	{
+		// 用户点击“攻击”
+		UHostileTargetManager* Manager = GetHostileTargetManager();
+		if (!Manager)
+		{
+			return;
+		}
+
+		// 获取影子机
+		AMultiDroneCharacter* Shadow = Manager->GetShadowDrone(DroneId);
+		if (!IsValid(Shadow))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[HostileTarget] Shadow drone %d not found"), DroneId);
+			return;
+		}
+
+		// 获取目标位置
+		AHostileTargetActor* Target = Manager->GetTarget(TargetId);
+		if (!IsValid(Target))
+		{
+			return;
+		}
+
+		// 停止巡逻并飞向目标
+		Shadow->StopPatrolAndAttack(Target->GetHostileTargetLocation());
+	}
+	else
+	{
+		// 用户点击“不攻击”：什么都不做，目标继续存在，路径继续
+		// PendingAttackConfirmTargets 保留，目标保持 bIsDiscovered = true
+		// 直到目标离开检测范围后由 ResetUndetectedTargets 重置
+		UE_LOG(LogTemp, Log, TEXT("[HostileTarget] Attack declined, drone %d continues patrol"), DroneId);
+	}
+}
+
 
 // ================= 路径编辑模式 =================
 
