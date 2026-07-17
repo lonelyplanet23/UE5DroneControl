@@ -132,41 +132,10 @@ void UDronePathPlaybackWidget::PlaySelectedFile()
 
 void UDronePathPlaybackWidget::StopCurrentPlayback()
 {
-	int32 StoppedManagers = 0;
-
-	// 停掉本 widget 缓存的 manager。
-	if (PlaybackManager && IsValid(PlaybackManager))
-	{
-		PlaybackManager->StopPlayback();
-		++StoppedManagers;
-	}
-
-	// 兜底：停掉世界里所有 playback manager。避免因 manager/widget 实例不一致
-	// （例如循环路径永不 Completed、或播放与停止分属不同实例）导致"停止无效"。
-	if (UWorld* World = GetWorld())
-	{
-		for (TActorIterator<ADronePlaybackManager> It(World); It; ++It)
-		{
-			ADronePlaybackManager* Manager = *It;
-			if (IsValid(Manager) && Manager != PlaybackManager)
-			{
-				Manager->StopPlayback();
-				++StoppedManagers;
-			}
-		}
-
-		// 最后再兜一层：直接停下场景中仍在移动的所有路径 Actor。
-		for (TActorIterator<ADronePathActor> It(World); It; ++It)
-		{
-			ADronePathActor* PathActor = *It;
-			if (IsValid(PathActor) && PathActor->IsMovementActive())
-			{
-				PathActor->StopMovement();
-			}
-		}
-	}
-
-	SetStatusMessage(StoppedManagers > 0 ? TEXT("Playback stopped") : TEXT("No active playback"));
+	// 统一走全局停止入口：停掉所有 manager 并销毁所有路径 Actor，
+	// 覆盖"循环路径永不 Completed"与"播放/停止分属不同实例"的情况。
+	ADronePlaybackManager::StopAndClearAllInWorld(GetWorld());
+	SetStatusMessage(TEXT("Playback stopped"));
 }
 
 void UDronePathPlaybackWidget::SelectFile(const FString& FilePath)
