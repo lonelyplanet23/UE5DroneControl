@@ -76,7 +76,7 @@ static void StopAndClearAllInWorld(UWorld* World);
   3. 若当前 `bInPathEditMode`，执行编辑清理（`PC->EndPathEditMode()` + `PC->ClearEditingPaths()`）并 `ResetPathEditState()`。
   4. 清空 `PendingRemappedMap` 及待启动缓存（见组件三）。
   5. 状态提示"已全局停止并清除所有路径"。
-- **移除** `StopEditPathButton` 相关的绑定与 `OnStopEditPathClicked()`；`SetEditControlsVisible` 不再控制该按钮。（保留头文件 `BindWidgetOptional` 声明为可选，或一并删除——实现时删除以保持整洁。）
+- **完全删除** `StopEditPathButton`：头文件 `BindWidgetOptional` 声明、`NativeConstruct` 中的 `OnClicked` 绑定、`OnStopEditPathClicked()` 函数声明与实现全部移除；`SetEditControlsVisible` 不再引用该按钮。
 - 重构 `UDronePathPlaybackWidget::StopCurrentPlayback()` 改为调用同一静态辅助函数，去除其内部重复的世界扫描逻辑。
 
 按钮布局位于 Widget Blueprint（`.uasset`），需用户在序列派发 WBP 中添加名为 `GlobalStopButton` 的 Button，置于 `OpenButton` 左侧。C++ 用 `BindWidgetOptional`，未添加控件也能编译。
@@ -114,7 +114,7 @@ TArray<FPendingArrivalPath> PendingArrivalPaths;
 ## 蓝图侧改动（用户手动）
 
 - 序列派发 WBP：新增 Button `GlobalStopButton`（放在 `OpenButton` 左侧）。
-- 序列派发 WBP：可移除旧的编辑停止按钮 `StopEditPathButton`（C++ 不再引用；不移除也无害，因是 `BindWidgetOptional`）。
+- 序列派发 WBP：删除旧的编辑停止按钮 `StopEditPathButton`（C++ 已不再引用该控件）。
 
 ## 测试与验证
 
