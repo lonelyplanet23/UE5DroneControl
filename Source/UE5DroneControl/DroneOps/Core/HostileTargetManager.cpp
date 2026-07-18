@@ -395,9 +395,11 @@ TArray<int32> UHostileTargetManager::GetPatrollingDrones() const
 		const bool bBusyInLocalPreview = Snap.LocalState == EUELocalDroneState::TargetDetectedPending ||
 			Snap.LocalState == EUELocalDroneState::LocalAttacking ||
 			Snap.LocalState == EUELocalDroneState::LocalAttackCompleted;
-		if (Snap.Availability == EDroneAvailability::Online &&
+		const bool bBackendPatrolling = Snap.Availability == EDroneAvailability::Online &&
 			Snap.TaskMode == EDroneCommandMode::Patrol &&
-			Snap.TaskState == EDroneTaskState::Patrolling && !bBusyInLocalPreview)
+			Snap.TaskState == EDroneTaskState::Patrolling;
+		const bool bLocalPatrolSimulation = Snap.LocalState == EUELocalDroneState::LocalPatrolling;
+		if ((bBackendPatrolling || bLocalPatrolSimulation) && !bBusyInLocalPreview)
 		{
 			Result.Add(Desc.DroneId);
 		}

@@ -68,6 +68,10 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UComboBoxString* ModeComboBox;
 
+	/** 勾选后，本地预演中的 patrol 路径也会参与目标识别；仅用于 UE 场景测试。 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UCheckBox* LocalPatrolSimulationToggle;
+
 	/** 自动分配勾选框：勾选后跳过手动匹配，由后端匈牙利算法分配无人机 */
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UCheckBox* AutoAssignCheckBox;
@@ -133,6 +137,9 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<ADronePathActor>> ActiveDispatchPathActors;
 
+	// 当前由“本地巡逻模拟”接管的无人机。只在选择 patrol 且勾选开关后填充。
+	TSet<int32> LocalPatrolSimulationDroneIds;
+
 	// 在线真机派发：spawn 但未启动的路径，等后端 assembly_complete 后再启动。
 	struct FPendingArrivalPath
 	{
@@ -152,6 +159,11 @@ private:
 
 	// 清除上次派发留下的 PathActor
 	void ClearActiveDispatchPaths();
+
+	// 本地预演测试通道：把影子机标记为可参与巡逻目标识别，停止/结束时复位。
+	void BeginLocalPatrolSimulation(const TMap<int32, FDronePathSaveData>& PreviewMap);
+	void EndLocalPatrolSimulation(bool bForceClearAllLocalStates = false);
+	bool IsLocalPatrolSimulationEnabled() const;
 
 	// 派发成功后：为每个影子机 spawn DronePathActor 并驱动移动
 	void StartShadowDronePlayback();
@@ -199,6 +211,9 @@ private:
 
 	UFUNCTION()
 	void OnModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void OnLocalPatrolSimulationToggleChanged(bool bIsChecked);
 
 	UFUNCTION()
 	void OnDispatchResponse(bool bSuccess, const FString& ResponseBody);

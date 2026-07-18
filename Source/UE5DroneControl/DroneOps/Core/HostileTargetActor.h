@@ -31,7 +31,7 @@ public:
 
 	/** 发现半径（厘米） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HostileTarget", meta = (ClampMin = "100.0", UIMin = "100.0"))
-	float DiscoveryRadius = 800.0f;
+	float DiscoveryRadius = 3000.0f;
 
 	/** 是否已被发现（任何无人机发现过） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HostileTarget")

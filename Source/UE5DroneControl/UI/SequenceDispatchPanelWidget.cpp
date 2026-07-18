@@ -77,6 +77,11 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 		AutoAssignCheckBox->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnAutoAssignCheckChanged);
 		bAutoAssignEnabled = AutoAssignCheckBox->IsChecked();
 	}
+	if (LocalPatrolSimulationToggle)
+	{
+		LocalPatrolSimulationToggle->OnCheckStateChanged.AddDynamic(
+			this, &USequenceDispatchPanelWidget::OnLocalPatrolSimulationToggleChanged);
+	}
 	if (PathEditToggle)
 	{
 		PathEditToggle->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnPathEditToggleChanged);
@@ -117,6 +122,7 @@ void USequenceDispatchPanelWidget::NativeDestruct()
 {
 	// 面板销毁：清理编队旋转预览可视化与 Gizmo
 	StopFormationRotatePreview();
+	EndLocalPatrolSimulation(true);
 
 	// 编辑中被销毁：清理临时路径，避免残留
 	if (bInPathEditMode)
@@ -780,6 +786,14 @@ void USequenceDispatchPanelWidget::OnModeSelectionChanged(FString SelectedItem, 
 	DispatchMode = DroneCommandModeFromProtocolString(SelectedItem);
 }
 
+void USequenceDispatchPanelWidget::OnLocalPatrolSimulationToggleChanged(bool bIsChecked)
+{
+	if (!bIsChecked)
+	{
+		EndLocalPatrolSimulation();
+	}
+}
+
 void USequenceDispatchPanelWidget::OnDispatchResponse(bool bSuccess, const FString& ResponseBody)
 {
 	if (bSuccess)
@@ -848,14 +862,19 @@ void USequenceDispatchPanelWidget::OnLocalPreviewClicked()
 
 	PendingRemappedMap = PreviewMap;
 	StartShadowDronePlayback();
+	BeginLocalPatrolSimulation(PreviewMap);
 
-	SetStatusMessage(TEXT("本地预演已开始（未向后端发送指令）"));
+	SetStatusMessage(IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol
+		? TEXT("本地巡逻模拟已开始：影子机可识别目标（未向后端发送指令）")
+		: TEXT("本地预演已开始（未向后端发送指令）"));
 	MatchedPairs.Empty();
 	SetPanelState(ESequencePanelState::Collapsed);
 }
 
 void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
 {
+	EndLocalPatrolSimulation(true);
+
 	for (ADronePathActor* PathActor : ActiveDispatchPathActors)
 	{
 		if (IsValid(PathActor))
@@ -874,6 +893,7 @@ void USequenceDispatchPanelWidget::OnGlobalStopClicked()
 
 	// 2. 本面板派发路径 Actor 已被上面销毁，仅清引用。
 	ActiveDispatchPathActors.Empty();
+	EndLocalPatrolSimulation(true);
 
 	// 3. 若在编辑模式：清理临时路径并复位编辑状态与 UI。
 	if (bInPathEditMode)
@@ -905,6 +925,77 @@ void USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged(ADronePat
 	ActiveDispatchPathActors.Remove(PathActor);
 	PathActor->StopMovement();
 	PathActor->Destroy();
+
+	if (ActiveDispatchPathActors.IsEmpty())
+	{
+		EndLocalPatrolSimulation();
+	}
+}
+
+bool USequenceDispatchPanelWidget::IsLocalPatrolSimulationEnabled() const
+{
+	return LocalPatrolSimulationToggle && LocalPatrolSimulationToggle->IsChecked();
+}
+
+void USequenceDispatchPanelWidget::BeginLocalPatrolSimulation(const TMap<int32, FDronePathSaveData>& PreviewMap)
+{
+	if (DispatchMode != EDroneCommandMode::Patrol || !IsLocalPatrolSimulationEnabled())
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+	if (!Registry)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[LocalPatrolSimulation] Drone registry unavailable"));
+		return;
+	}
+
+	for (const TPair<int32, FDronePathSaveData>& Pair : PreviewMap)
+	{
+		if (Pair.Key <= 0 || Pair.Value.Waypoints.IsEmpty())
+		{
+			continue;
+		}
+
+		Registry->UpdateLocalState(Pair.Key, EUELocalDroneState::LocalPatrolling);
+		LocalPatrolSimulationDroneIds.Add(Pair.Key);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[LocalPatrolSimulation] Enabled for %d local preview drone(s)"),
+		LocalPatrolSimulationDroneIds.Num());
+}
+
+void USequenceDispatchPanelWidget::EndLocalPatrolSimulation(bool bForceClearAllLocalStates)
+{
+	if (LocalPatrolSimulationDroneIds.IsEmpty())
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+	if (Registry)
+	{
+		for (int32 DroneId : LocalPatrolSimulationDroneIds)
+		{
+			FDroneTelemetrySnapshot Snapshot;
+			if (!Registry->GetTelemetry(DroneId, Snapshot))
+			{
+				continue;
+			}
+
+			const bool bShouldClear = bForceClearAllLocalStates ||
+				Snapshot.LocalState == EUELocalDroneState::LocalPatrolling;
+			if (bShouldClear)
+			{
+				Registry->UpdateLocalState(DroneId, EUELocalDroneState::None);
+			}
+		}
+	}
+
+	LocalPatrolSimulationDroneIds.Empty();
 }
 
 bool USequenceDispatchPanelWidget::IsOnlineRealDrone(int32 DroneId) const
@@ -1259,7 +1350,10 @@ void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice 
 		}
 		PendingRemappedMap = Map;
 		StartShadowDronePlayback();
-		SetStatusMessage(TEXT("本地预演已开始（未向后端发送指令，点停止结束）"));
+		BeginLocalPatrolSimulation(Map);
+		SetStatusMessage(IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol
+			? TEXT("本地巡逻模拟已开始：影子机可识别目标（未向后端发送指令，点停止结束）")
+			: TEXT("本地预演已开始（未向后端发送指令，点停止结束）"));
 		break;
 	}
 	case EPreviewConfirmChoice::Dispatch:
