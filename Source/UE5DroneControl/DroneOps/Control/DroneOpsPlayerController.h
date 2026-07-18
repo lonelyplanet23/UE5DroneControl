@@ -102,6 +102,17 @@ public:
 	/** 把当前临时路径打包成 DroneId -> FDronePathSaveData（世界坐标）。 */
 	TMap<int32, FDronePathSaveData> BuildEditingPathsData() const;
 
+	/**
+	 * 编辑模式下把一个 WGS84 经纬高目标点加为所有在编路径的航点（与地图点击加点同样走编队平移）。
+	 * 非编辑模式或无在编路径时返回失败。用于右上角坐标输入面板在编辑模式下的行为。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	FGeographicDispatchResult AddGeographicWaypointInEditMode(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters);
+
 	/** 销毁全部临时路径 Actor（含航点句柄）并清空编辑状态。 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
 	void ClearEditingPaths();
@@ -301,6 +312,19 @@ private:
 		bool bForDispatch,
 		TArray<FGeographicDispatchSlot>& OutSlots) const;
 
+	/**
+	 * 把 WGS84 经纬高（海拔 MSL）转换为 UE 世界坐标（cm）。
+	 * 供派发规划与编辑模式加航点共用，避免重复坐标转换逻辑。
+	 * 失败时返回 false 并写入 OutError（坐标系不支持/服务未就绪/超范围/转换失败）。
+	 */
+	bool TryConvertGeographicToWorld(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters,
+		FVector& OutWorld,
+		FString& OutError) const;
+
 	/** Builds the same stable primary-first formation targets for every world-space input path. */
 	FGeographicDispatchResult BuildWorldDispatchPlan(
 		const FVector& BaseWorldTarget,
@@ -327,6 +351,16 @@ private:
 	void SetEditActiveAxis(EGizmoAxis NewAxis);
 	bool CanInteractWithEditWaypoint(const ADroneWaypointActor* WaypointActor) const;
 	void AddWaypointToAllEditingPaths(const FVector& WorldLocation);
+
+	// 编辑模式下点击无人机：活跃则冻结（保留路径），已冻结/未加入则激活（复活或新建路径）。
+	// 返回 true 表示本次点击已作为增删处理（不应再当作加航点）。
+	bool ToggleDroneInEditMode(int32 DroneId);
+	// 激活单架无人机：已有(冻结)路径则复活并接续加点；无则新建一条以影子机当前位置为首航点的路径。
+	void AddDroneToEditMode(int32 DroneId);
+	// 冻结单架无人机：保留其临时路径可见但不再加点，并移出选中集合（不销毁，退出编辑时才清）。
+	void FreezeDroneInEditMode(int32 DroneId);
+	// 重算编队参考原点为当前第一条在编路径的起点（增删无人机后调用，避免落点偏移）。
+	void RecomputeEditFormationRefOrigin();
 
 	// 编辑模式相机：进入时切自由相机（WASD 移动 + 按住右键转视角），退出时恢复
 	void EnterEditCamera();
@@ -358,6 +392,11 @@ private:
 
 	// 每条路径首航点的世界坐标（编队平移基准），与 EditingPaths 同序
 	TArray<FVector> EditingPathOrigins;
+
+	// 每条路径当前是否活跃（接收新航点），与 EditingPaths 同序。
+	// 取消选中无人机 = 冻结(false)，路径保留可见但不再加点；重新选中 = 复活(true)。
+	// 只有退出编辑模式(ClearEditingPaths)才真正销毁所有路径。
+	TArray<bool> EditingPathActive;
 
 	// 编队参考原点（第一架影子机的首航点世界坐标）
 	FVector EditFormationRefOrigin = FVector::ZeroVector;

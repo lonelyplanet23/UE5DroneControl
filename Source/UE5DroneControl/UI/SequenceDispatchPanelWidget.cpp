@@ -15,6 +15,7 @@
 #include "DroneOps/Network/DroneNetworkManager.h"
 #include "DroneOps/Control/DroneOpsPlayerController.h"
 #include "PathEditor/DronePathActor.h"
+#include "PathEditor/DronePlaybackManager.h"
 #include "PreviewConfirmPopupWidget.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -55,6 +56,10 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 	{
 		OpenButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnOpenButtonClicked);
 	}
+	if (GlobalStopButton)
+	{
+		GlobalStopButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnGlobalStopClicked);
+	}
 	if (DispatchButton)
 	{
 		DispatchButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnDispatchClicked);
@@ -84,10 +89,6 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 	{
 		PlayEditPathButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnPlayEditPathClicked);
 	}
-	if (StopEditPathButton)
-	{
-		StopEditPathButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnStopEditPathClicked);
-	}
 	if (EditLoopCheckBox)
 	{
 		EditLoopCheckBox->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnEditLoopCheckChanged);
@@ -102,6 +103,10 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 		{
 			AssignmentResultHandle = NetMgr->OnAssignmentResult.AddUObject(
 				this, &USequenceDispatchPanelWidget::HandleAssignmentResult);
+			AssemblyCompleteHandle = NetMgr->OnAssemblyComplete.AddUObject(
+				this, &USequenceDispatchPanelWidget::OnAssemblyCompleteForDispatch);
+			AssemblyTimeoutHandle = NetMgr->OnAssemblyTimeout.AddUObject(
+				this, &USequenceDispatchPanelWidget::OnAssemblyTimeoutForDispatch);
 		}
 	}
 
@@ -123,16 +128,27 @@ void USequenceDispatchPanelWidget::NativeDestruct()
 		bInPathEditMode = false;
 	}
 
-	if (AssignmentResultHandle.IsValid())
+	if (UGameInstance* GI = GetGameInstance())
 	{
-		if (UGameInstance* GI = GetGameInstance())
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 		{
-			if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+			// 三个句柄各自独立移除，互不依赖，避免订阅模式变化时漏移除造成悬挂订阅。
+			if (AssignmentResultHandle.IsValid())
 			{
 				NetMgr->OnAssignmentResult.Remove(AssignmentResultHandle);
+				AssignmentResultHandle.Reset();
+			}
+			if (AssemblyCompleteHandle.IsValid())
+			{
+				NetMgr->OnAssemblyComplete.Remove(AssemblyCompleteHandle);
+				AssemblyCompleteHandle.Reset();
+			}
+			if (AssemblyTimeoutHandle.IsValid())
+			{
+				NetMgr->OnAssemblyTimeout.Remove(AssemblyTimeoutHandle);
+				AssemblyTimeoutHandle.Reset();
 			}
 		}
-		AssignmentResultHandle.Reset();
 	}
 
 	Super::NativeDestruct();
@@ -524,6 +540,9 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 	UE_LOG(LogTemp, Warning, TEXT("[Dispatch] OnDispatchClicked entered: matched=%d paths=%d autoAssign=%d"),
 		MatchedPairs.Num(), LoadedPathsData.Paths.Num(), bAutoAssignEnabled ? 1 : 0);
 
+	// 新一轮派发开始：复位集结早到兜底标志，避免上一批的完成信号误放行本批。
+	bAssemblyReleasePending = false;
+
 	if (!bAutoAssignEnabled && MatchedPairs.Num() != LoadedPathsData.Paths.Num())
 	{
 		SetStatusMessage(TEXT("请先完成所有路径匹配"));
@@ -848,9 +867,121 @@ void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
 	ActiveDispatchPathActors.Empty();
 }
 
+void USequenceDispatchPanelWidget::OnGlobalStopClicked()
+{
+	// 1. 全局停止并销毁所有 manager 与路径 Actor（含卡在循环中的 JSON 播放）。
+	ADronePlaybackManager::StopAndClearAllInWorld(GetWorld());
+
+	// 2. 本面板派发路径 Actor 已被上面销毁，仅清引用。
+	ActiveDispatchPathActors.Empty();
+
+	// 3. 若在编辑模式：清理临时路径并复位编辑状态与 UI。
+	if (bInPathEditMode)
+	{
+		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+		{
+			PC->EndPathEditMode();
+			PC->ClearEditingPaths();
+		}
+		ResetPathEditState();
+	}
+
+	// 4. 清空待发送缓存与待启动缓存。
+	PendingRemappedMap.Empty();
+	PendingArrivalPaths.Empty();
+	bAssemblyReleasePending = false;
+
+	SetStatusMessage(TEXT("已全局停止并清除所有路径"));
+}
+
+void USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged(ADronePathActor* PathActor, EDronePathExecutionState NewState)
+{
+	// 仅在路径播放完成时自动清除（循环路径永不 Completed，保留至全局停止）。
+	if (NewState != EDronePathExecutionState::Completed || !IsValid(PathActor))
+	{
+		return;
+	}
+
+	ActiveDispatchPathActors.Remove(PathActor);
+	PathActor->StopMovement();
+	PathActor->Destroy();
+}
+
+bool USequenceDispatchPanelWidget::IsOnlineRealDrone(int32 DroneId) const
+{
+	UGameInstance* GI = GetGameInstance();
+	UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+	if (!Registry)
+	{
+		return false;
+	}
+
+	FDroneTelemetrySnapshot Snap;
+	if (!Registry->GetTelemetry(DroneId, Snap) || Snap.Availability != EDroneAvailability::Online)
+	{
+		return false;
+	}
+
+	// 镜像机存在且已拿到 GPS 锚点，才有真实位置可供影子机跟随等待。
+	if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(Registry->GetReceiverActor(DroneId)))
+	{
+		return Receiver->bHasGpsAnchor;
+	}
+	return false;
+}
+
+void USequenceDispatchPanelWidget::StartPendingArrivalPaths()
+{
+	for (const FPendingArrivalPath& Pending : PendingArrivalPaths)
+	{
+		ADronePathActor* PathActor = Pending.PathActor.Get();
+		APawn* ShadowPawn = Pending.ShadowPawn.Get();
+		if (!IsValid(PathActor) || !IsValid(ShadowPawn))
+		{
+			continue;
+		}
+
+		if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
+		{
+			Shadow->bFollowingMirror = false;
+		}
+		PathActor->StartMovement(ShadowPawn);
+	}
+	PendingArrivalPaths.Empty();
+	bAssemblyReleasePending = false;
+}
+
+void USequenceDispatchPanelWidget::OnAssemblyCompleteForDispatch(const FString& ArrayId)
+{
+	if (PendingArrivalPaths.IsEmpty())
+	{
+		// 事件早于路径入队到达：记下完成信号，待 StartShadowDronePlayback 入队后立即放行。
+		bAssemblyReleasePending = true;
+		return;
+	}
+	StartPendingArrivalPaths();
+	SetStatusMessage(TEXT("集结完成，真机已到位，开始沿路径播放"));
+}
+
+void USequenceDispatchPanelWidget::OnAssemblyTimeoutForDispatch(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
+{
+	// 兜底：集结超时也放行，避免路径永久卡在等待。
+	if (PendingArrivalPaths.IsEmpty())
+	{
+		// 事件早于路径入队到达：记下放行信号，待入队后立即放行。
+		bAssemblyReleasePending = true;
+		return;
+	}
+	StartPendingArrivalPaths();
+	SetStatusMessage(FString::Printf(TEXT("集结超时（%d/%d），仍启动路径播放"), ReadyCount, TotalCount));
+}
+
 void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 {
 	ClearActiveDispatchPaths();
+
+	// 清除上一批遗留的待启动项，避免新旧混放（ClearActiveDispatchPaths 已销毁其路径 Actor）。
+	PendingArrivalPaths.Empty();
 
 	if (PendingRemappedMap.IsEmpty())
 	{
@@ -880,10 +1011,15 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 		APawn* ShadowPawn = Registry->GetSenderPawn(DroneId);
 		if (!IsValid(ShadowPawn)) continue;
 
-		// 停止跟随镜像机，否则 Tick 会每帧把影子机拉回镜像机位置
-		if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
+		const bool bWaitForArrival = IsOnlineRealDrone(DroneId);
+
+		// 离线 / mock：立即停止跟随镜像机；在线真机：保持跟随，等集结完成再解除。
+		if (!bWaitForArrival)
 		{
-			Shadow->bFollowingMirror = false;
+			if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
+			{
+				Shadow->bFollowingMirror = false;
+			}
 		}
 
 		// Spawn DronePathActor
@@ -912,15 +1048,38 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 		}
 
 		PathActor->RefreshPath();
-		PathActor->StartMovement(ShadowPawn);
+		PathActor->OnExecutionStateChanged.AddUObject(
+			this, &USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged);
 
 		ActiveDispatchPathActors.Add(PathActor);
 
-		UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Shadow drone DroneId=%d started playback along path %d"),
-			DroneId, PathData.PathId);
+		if (bWaitForArrival)
+		{
+			// 在线真机：先不启动，等 assembly_complete 放行。
+			FPendingArrivalPath Pending;
+			Pending.PathActor = PathActor;
+			Pending.ShadowPawn = ShadowPawn;
+			PendingArrivalPaths.Add(Pending);
+
+			UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Online drone DroneId=%d path %d spawned, waiting for assembly_complete"),
+				DroneId, PathData.PathId);
+		}
+		else
+		{
+			PathActor->StartMovement(ShadowPawn);
+			UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Shadow drone DroneId=%d started playback along path %d"),
+				DroneId, PathData.PathId);
+		}
 	}
 
 	PendingRemappedMap.Empty();
+
+	// 兜底：若集结完成/超时事件在入队前已到达，此处立即放行等待中的在线真机路径。
+	if (bAssemblyReleasePending && !PendingArrivalPaths.IsEmpty())
+	{
+		StartPendingArrivalPaths();
+		SetStatusMessage(TEXT("集结已完成（事件早到），开始沿路径播放"));
+	}
 }
 
 // ================= 路径编辑模式 =================
@@ -951,10 +1110,11 @@ void USequenceDispatchPanelWidget::OnPathEditToggleChanged(bool bIsChecked)
 			}
 		}
 
+		// 不再要求先选中无人机：可空手进入，进入后点击场景中的无人机动态增删。
 		ADroneOpsPlayerController* PC = GetDroneOpsController();
-		if (!PC || DroneIds.IsEmpty() || !PC->BeginPathEditMode(DroneIds))
+		if (!PC || !PC->BeginPathEditMode(DroneIds))
 		{
-			SetStatusMessage(TEXT("请先选择无人机再进入编辑模式"));
+			SetStatusMessage(TEXT("无法进入编辑模式"));
 			// 复位 Toggle（避免递归：SetIsChecked 不触发 OnCheckStateChanged）
 			if (PathEditToggle)
 			{
@@ -970,7 +1130,9 @@ void USequenceDispatchPanelWidget::OnPathEditToggleChanged(bool bIsChecked)
 		{
 			EditLoopCheckBox->SetIsChecked(false);
 		}
-		SetStatusMessage(FString::Printf(TEXT("编辑模式：%d 架无人机，点击地图加航点，拖拽 gizmo 微调"), DroneIds.Num()));
+		SetStatusMessage(DroneIds.IsEmpty()
+			? FString(TEXT("编辑模式：点击无人机加入编辑，点地图加航点，拖拽 gizmo 微调"))
+			: FString::Printf(TEXT("编辑模式：%d 架无人机，点击无人机可增减，点地图加航点，拖拽 gizmo 微调"), DroneIds.Num()));
 	}
 	else
 	{
@@ -1020,22 +1182,6 @@ void USequenceDispatchPanelWidget::OnPlayEditPathClicked()
 	ShowPreviewConfirmPopup();
 }
 
-void USequenceDispatchPanelWidget::OnStopEditPathClicked()
-{
-	// 停止：终止所有影子机播放，销毁临时路径与缓存，并复位编辑状态。
-	ClearActiveDispatchPaths();
-
-	if (ADroneOpsPlayerController* PC = GetDroneOpsController())
-	{
-		PC->EndPathEditMode();
-		PC->ClearEditingPaths();
-	}
-
-	bInPathEditMode = false;
-	ResetPathEditState();
-	SetStatusMessage(TEXT("已停止，临时路径已清理"));
-}
-
 void USequenceDispatchPanelWidget::OnEditLoopCheckChanged(bool bIsChecked)
 {
 	// 只作用于临时路径的运行副本：同步设置所有临时 ADronePathActor 的循环状态。
@@ -1056,10 +1202,6 @@ void USequenceDispatchPanelWidget::SetEditControlsVisible(bool bVisible)
 	if (PlayEditPathButton)
 	{
 		PlayEditPathButton->SetVisibility(Vis);
-	}
-	if (StopEditPathButton)
-	{
-		StopEditPathButton->SetVisibility(Vis);
 	}
 	if (EditLoopCheckBox)
 	{

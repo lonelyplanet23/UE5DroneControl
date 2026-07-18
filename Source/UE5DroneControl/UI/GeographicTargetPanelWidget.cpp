@@ -488,6 +488,17 @@ void UGeographicTargetPanelWidget::RunDispatch(bool bPreviewOnly)
 		return;
 	}
 
+	// 编辑模式下：坐标输入不派发无人机飞过去，而是在所有在编路径上加一个航点。
+	// 预览(bPreviewOnly)仍走常规坐标预览（画标记，不改路径）。
+	if (!bPreviewOnly && Controller->IsPathEditMode())
+	{
+		const FGeographicDispatchResult EditResult = Controller->AddGeographicWaypointInEditMode(
+			GetSelectedCoordinateSystem(), Longitude, Latitude, AltitudeMsl);
+		LastReadinessMessage.Reset();
+		SetStatusMessage(EditResult.Message);
+		return;
+	}
+
 	const FGeographicDispatchResult Result = Controller->DispatchGeographicTarget(
 		GetSelectedCoordinateSystem(), Longitude, Latitude, AltitudeMsl, bPreviewOnly);
 	LastReadinessMessage.Reset();

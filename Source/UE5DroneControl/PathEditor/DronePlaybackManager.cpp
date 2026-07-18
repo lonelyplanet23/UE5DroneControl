@@ -450,3 +450,31 @@ FDronePathsSaveData ADronePlaybackManager::RemapDataToAnchor(const FDronePathsSa
 
 	return Remapped;
 }
+
+void ADronePlaybackManager::StopAndClearAllInWorld(UWorld* World)
+{
+	if (!IsValid(World))
+	{
+		return;
+	}
+
+	// 1. 停掉所有 playback manager（其 StopPlayback 会销毁自己的路径 Actor）。
+	for (TActorIterator<ADronePlaybackManager> It(World); It; ++It)
+	{
+		if (IsValid(*It))
+		{
+			It->StopPlayback();
+		}
+	}
+
+	// 2. 停止并销毁所有仍存在的路径 Actor（含循环路径、派发面板 spawn 的路径）。
+	for (TActorIterator<ADronePathActor> It(World); It; ++It)
+	{
+		ADronePathActor* PathActor = *It;
+		if (IsValid(PathActor))
+		{
+			PathActor->StopMovement();
+			PathActor->Destroy();
+		}
+	}
+}
