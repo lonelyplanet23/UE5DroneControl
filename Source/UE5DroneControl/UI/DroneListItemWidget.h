@@ -98,13 +98,36 @@ public:
     /** 只更新 DroneId 和任务模式显示，不覆盖连接状态等其他字段 */
     void SetCommandMode(int32 InDroneId, EDroneCommandMode InMode);
 
+    /**
+     * 绑定该条目对应的无人机ID，订阅 OnMultiSelectionChanged 委托，
+     * 并立即同步一次选中按钮状态。
+     * 须在 SetDroneFullState 之后调用（依赖 DroneId 已被设置）。
+     */
+    void SetDroneId(int32 InDroneId);
+
 protected:
     virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override;
+    virtual void NativeDestruct() override;
 
 private:
     int32 DroneId = 0;
     EDroneCommandMode CurrentMode = EDroneCommandMode::Move;
+
+    /** 选中/取消选中按钮（运行时由 BuildRuntimeCard 创建） */
+    UPROPERTY(meta = (BindWidgetOptional))
+    class UButton* SelectButton = nullptr;
+
+    /** 选中按钮上的文字 */
+    UPROPERTY(meta = (BindWidgetOptional))
+    class UTextBlock* SelectButtonText = nullptr;
+
+    /** 根据注册表当前状态刷新 SelectButton 的文字和启用状态（须为 UFUNCTION 以绑定 Dynamic 委托） */
+    UFUNCTION()
+    void UpdateSelectionState();
+
+    UFUNCTION()
+    void OnSelectButtonClicked();
 
     UFUNCTION()
     void OnModeButtonClicked();

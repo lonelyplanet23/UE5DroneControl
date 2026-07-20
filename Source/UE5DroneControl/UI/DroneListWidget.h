@@ -84,5 +84,26 @@ private:
 
     void OnRefreshTimer(); //
     void BuildRuntimeWidgetTree();
+
+    /** Refresh 按钮（BuildRuntimeWidgetTree 中创建） */
+    UPROPERTY(meta = (BindWidgetOptional))
+    class UButton* RefreshButton = nullptr;
+
+    /** Refresh 操作状态文字（BuildRuntimeWidgetTree 中创建） */
+    UPROPERTY(meta = (BindWidgetOptional))
+    class UTextBlock* RefreshStatusText = nullptr;
+
+    /** 严格本地预演模式：从 DroneNetworkManager 读取，true 时禁用 Refresh 按钮 */
+    bool bStrictLocalPreview = false;
+
+    /** 防止 Refresh 重复点击 */
+    bool bRefreshing = false;
+
+    /** Refresh 按钮点击回调 */
+    UFUNCTION()
+    void OnRefreshButtonClicked();
+
+    /** 处理 POST /api/drones/refresh 响应 */
+    void HandleRefreshResponse(bool bSuccess, const TArray<int32>& RefreshedIds);
 };
 

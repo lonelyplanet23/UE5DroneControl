@@ -56,6 +56,20 @@ public:
 	float PollIntervalSec = 3.0f;
 
 	/**
+	 * 严格本地预演模式。
+	 * 开启后禁止所有主动后端写请求（包括 POST /api/drones/refresh）。
+	 * 通过 DefaultGame.ini [/Script/UE5DroneControl.DroneNetworkManager] bStrictLocalPreview=true 开启。
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "Network")
+	bool bStrictLocalPreview = false;
+
+	/**
+	 * POST /api/drones/refresh — 探测所有 offline/lost 无人机。
+	 * 严格本地预演模式下直接回调 (false, {})，不发出 HTTP 请求。
+	 */
+	void RefreshDroneConnections(TFunction<void(bool, const TArray<int32>&)> Callback);
+
+	/**
 	 * Geoid separation (metres) for the operating region: EllipsoidHeight = MSLHeight + GeoidSeparationMeters.
 	 *
 	 * The geographic target panel and PX4 VehicleGlobalPosition::altitude_amsl both use height above

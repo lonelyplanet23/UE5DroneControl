@@ -32,6 +32,11 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		PollIntervalSec = IniFloat;
 	}
+	bool bIniPreview = false;
+	if (GConfig && GConfig->GetBool(Section, TEXT("bStrictLocalPreview"), bIniPreview, GGameIni))
+	{
+		bStrictLocalPreview = bIniPreview;
+	}
 
 	HttpClient = NewObject<UDroneHttpClient>(this);
 	HttpClient->BaseUrl = BackendBaseUrl;
@@ -57,6 +62,25 @@ void UDroneNetworkManager::Deinitialize()
 	}
 
 	Super::Deinitialize();
+}
+
+void UDroneNetworkManager::RefreshDroneConnections(TFunction<void(bool, const TArray<int32>&)> Callback)
+{
+	if (bStrictLocalPreview)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] RefreshDroneConnections blocked: bStrictLocalPreview=true"));
+		Callback(false, {});
+		return;
+	}
+
+	if (!HttpClient)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] RefreshDroneConnections: HttpClient not ready"));
+		Callback(false, {});
+		return;
+	}
+
+	HttpClient->PostRefresh(Callback);
 }
 
 // ---- Polling ----

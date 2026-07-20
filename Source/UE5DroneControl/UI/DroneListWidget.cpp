@@ -2,12 +2,16 @@
 
 #include "DroneListWidget.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
+#include "DroneOps/Network/DroneNetworkManager.h"
 #include "Components/ScrollBox.h"
+#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Border.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Blueprint/WidgetTree.h"
 #include "Engine/GameInstance.h"
@@ -64,7 +68,32 @@ void UDroneListWidget::BuildRuntimeWidgetTree()
     };
 
     Add(Content, MakeText(TEXT("TitleText"), TEXT("无人机态势"), FLinearColor(0.94f, 0.98f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 2.0f));
-    Add(Content, MakeText(TEXT("SubtitleText"), TEXT("已注册无人机 · 实时状态同步"), FLinearColor(0.45f, 0.67f, 0.86f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 10.0f));
+    Add(Content, MakeText(TEXT("SubtitleText"), TEXT("已注册无人机 · 实时状态同步"), FLinearColor(0.45f, 0.67f, 0.86f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 6.0f));
+
+    // ---- Refresh 按钮区（垂直排列：按钮在上，状态文字在下，文字自动换行避免溢出） ----
+    UVerticalBox* RefreshSection = WidgetTree->ConstructWidget<UVerticalBox>(
+        UVerticalBox::StaticClass(), TEXT("RefreshSection"));
+    RefreshButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RefreshButton"));
+    UTextBlock* RefreshLabel = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RefreshLabel"));
+    RefreshLabel->SetText(FText::FromString(TEXT("刷新连接")));
+    RefreshLabel->SetColorAndOpacity(FLinearColor(0.90f, 0.95f, 1.0f, 1.0f));
+    RefreshButton->AddChild(RefreshLabel);
+    if (UVerticalBoxSlot* BtnSlot = RefreshSection->AddChildToVerticalBox(RefreshButton))
+    {
+        BtnSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 4.0f));
+        BtnSlot->SetHorizontalAlignment(HAlign_Left);
+    }
+    RefreshStatusText = WidgetTree->ConstructWidget<UTextBlock>(
+        UTextBlock::StaticClass(), TEXT("RefreshStatusText"));
+    RefreshStatusText->SetColorAndOpacity(FLinearColor(0.55f, 0.75f, 0.95f, 1.0f));
+    RefreshStatusText->SetAutoWrapText(true);
+    if (UVerticalBoxSlot* StatusSlot = RefreshSection->AddChildToVerticalBox(RefreshStatusText))
+    {
+        StatusSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 0.0f));
+        StatusSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+    }
+    Add(Content, RefreshSection, FMargin(0.0f, 0.0f, 0.0f, 8.0f));
 
     DroneScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("DroneScrollBox"));
     DroneScrollBox->SetScrollBarVisibility(ESlateVisibility::Visible);
@@ -159,6 +188,8 @@ void UDroneListWidget::RefreshFromRegistry()
                 }
                 // 单独更新模式显示，不覆盖连接状态等字段
 				Item->SetCommandMode(Desc.DroneId, Snap.TaskMode);
+                // 绑定 DroneId 并订阅多选变更委托，使选中按钮生效
+                Item->SetDroneId(Desc.DroneId);
                 DroneScrollBox->AddChild(Item);
             }
         }
@@ -193,6 +224,32 @@ void UDroneListWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
+    // ---- 读取严格本地预演模式 ----
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+        {
+            bStrictLocalPreview = NetMgr->bStrictLocalPreview;
+        }
+    }
+
+    // ---- 绑定 Refresh 按钮 ----
+    if (RefreshButton)
+    {
+        if (bStrictLocalPreview)
+        {
+            RefreshButton->SetIsEnabled(false);
+            if (RefreshStatusText)
+            {
+                RefreshStatusText->SetText(FText::FromString(TEXT("纯本地预演模式：已禁止请求后端 refresh")));
+            }
+        }
+        else
+        {
+            RefreshButton->OnClicked.AddDynamic(this, &UDroneListWidget::OnRefreshButtonClicked);
+        }
+    }
+
     RefreshFromRegistry();
 
     // 启动刷新定时器
@@ -213,5 +270,77 @@ void UDroneListWidget::NativeDestruct()
 
 void UDroneListWidget::OnRefreshTimer()
 {
+    RefreshFromRegistry();
+}
+
+void UDroneListWidget::OnRefreshButtonClicked()
+{
+    if (bStrictLocalPreview)
+    {
+        if (RefreshStatusText)
+        {
+            RefreshStatusText->SetText(FText::FromString(TEXT("严格本地预演模式：无法请求刷新")));
+        }
+        return;
+    }
+
+    if (bRefreshing)
+    {
+        return;
+    }
+
+    bRefreshing = true;
+    if (RefreshButton)
+    {
+        RefreshButton->SetIsEnabled(false);
+    }
+    if (RefreshStatusText)
+    {
+        RefreshStatusText->SetText(FText::FromString(TEXT("正在探测断连无人机...")));
+    }
+
+    UDroneNetworkManager* NetMgr = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UDroneNetworkManager>()
+        : nullptr;
+    if (!NetMgr)
+    {
+        HandleRefreshResponse(false, {});
+        return;
+    }
+
+    NetMgr->RefreshDroneConnections([this](bool bSuccess, const TArray<int32>& RefreshedIds)
+    {
+        HandleRefreshResponse(bSuccess, RefreshedIds);
+    });
+}
+
+void UDroneListWidget::HandleRefreshResponse(bool bSuccess, const TArray<int32>& RefreshedIds)
+{
+    bRefreshing = false;
+    if (RefreshButton)
+    {
+        RefreshButton->SetIsEnabled(true);
+    }
+
+    FString Message;
+    if (!bSuccess)
+    {
+        Message = TEXT("刷新请求失败，请检查网络或后端状态");
+    }
+    else if (RefreshedIds.Num() == 0)
+    {
+        Message = TEXT("当前无断连无人机需要探测");
+    }
+    else
+    {
+        Message = FString::Printf(TEXT("已请求探测 %d 架断连无人机"), RefreshedIds.Num());
+    }
+
+    if (RefreshStatusText)
+    {
+        RefreshStatusText->SetText(FText::FromString(Message));
+    }
+
+    // 立即刷新一次列表，展示注册表最新状态（不会将 refreshed_drone_ids 直接置为 online）
     RefreshFromRegistry();
 }

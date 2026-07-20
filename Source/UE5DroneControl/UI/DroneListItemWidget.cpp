@@ -86,6 +86,87 @@ void UDroneListItemWidget::NativeConstruct()
 {
     Super::NativeConstruct();
     UpdateModeText();
+
+    if (SelectButton)
+    {
+        SelectButton->OnClicked.AddDynamic(this, &UDroneListItemWidget::OnSelectButtonClicked);
+    }
+}
+
+void UDroneListItemWidget::NativeDestruct()
+{
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+        {
+            Registry->OnMultiSelectionChanged.RemoveDynamic(this, &UDroneListItemWidget::UpdateSelectionState);
+        }
+    }
+    Super::NativeDestruct();
+}
+
+void UDroneListItemWidget::SetDroneId(int32 InDroneId)
+{
+    DroneId = InDroneId;
+
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+        {
+            // RemoveDynamic 在未绑定时安全无操作，确保不重复订阅
+            Registry->OnMultiSelectionChanged.RemoveDynamic(this, &UDroneListItemWidget::UpdateSelectionState);
+            Registry->OnMultiSelectionChanged.AddDynamic(this, &UDroneListItemWidget::UpdateSelectionState);
+        }
+    }
+
+    UpdateSelectionState();
+}
+
+void UDroneListItemWidget::UpdateSelectionState()
+{
+    if (DroneId <= 0 || !SelectButton || !SelectButtonText)
+    {
+        return;
+    }
+
+    UDroneRegistrySubsystem* Registry = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+        : nullptr;
+    if (!Registry)
+    {
+        return;
+    }
+
+    const bool bSelected = Registry->IsDroneSelected(DroneId);
+
+    SelectButton->SetIsEnabled(true);
+    SelectButtonText->SetText(FText::FromString(bSelected ? TEXT("取消选中") : TEXT("选中")));
+}
+
+void UDroneListItemWidget::OnSelectButtonClicked()
+{
+    if (DroneId <= 0)
+    {
+        return;
+    }
+
+    UDroneRegistrySubsystem* Registry = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+        : nullptr;
+    if (!Registry)
+    {
+        return;
+    }
+
+    if (Registry->IsDroneSelected(DroneId))
+    {
+        Registry->RemoveFromMultiSelection(DroneId);
+    }
+    else
+    {
+        Registry->AddToMultiSelection(DroneId);
+    }
+    // OnMultiSelectionChanged 广播后 UpdateSelectionState 会自动刷新按钮，无需手动调用
 }
 
 void UDroneListItemWidget::BuildRuntimeCard()
@@ -150,6 +231,20 @@ void UDroneListItemWidget::BuildRuntimeCard()
         TargetIndexText = MakeText(TEXT("TargetIndexText"), TEXT(""));
         TargetIndexText->SetVisibility(ESlateVisibility::Collapsed);
         Content->AddChildToVerticalBox(TargetIndexText);
+
+        // ---- 选中按钮行 ----
+        UHorizontalBox* SelectRow = WidgetTree->ConstructWidget<UHorizontalBox>(
+            UHorizontalBox::StaticClass(), TEXT("SelectRow"));
+        SelectButtonText = MakeText(TEXT("SelectButtonText"), TEXT("选中"),
+            FLinearColor(0.90f, 0.95f, 1.0f, 1.0f));
+        SelectButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SelectButton"));
+        SelectButton->AddChild(SelectButtonText);
+        if (UHorizontalBoxSlot* BtnSlot = SelectRow->AddChildToHorizontalBox(SelectButton))
+        {
+            BtnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        }
+        Add(Content, SelectRow, FMargin(0.0f, 6.0f, 0.0f, 0.0f));
+
         StatusIndicator = nullptr;
         ModeButton = nullptr;
         return;
@@ -158,7 +253,7 @@ void UDroneListItemWidget::BuildRuntimeCard()
     // 如果所有新增字段均已由蓝图绑定，无需任何创建
     if (ConnectionStatusText && TaskStatusText && GpsText &&
         AltitudeText && BatteryText && WaypointText &&
-        TargetIndexText && UpdateTimeText)
+        TargetIndexText && UpdateTimeText && SelectButton && SelectButtonText)
     {
         return;
     }

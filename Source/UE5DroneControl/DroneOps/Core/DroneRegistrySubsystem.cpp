@@ -406,6 +406,7 @@ void UDroneRegistrySubsystem::SetMultiSelectedDrones(const TArray<int32>& DroneI
 		{
 			SetPrimarySelectedDrone(0);
 		}
+		OnMultiSelectionChanged.Broadcast();
 		return;
 	}
 
@@ -414,6 +415,7 @@ void UDroneRegistrySubsystem::SetMultiSelectedDrones(const TArray<int32>& DroneI
 	{
 		SetPrimarySelectedDrone(DroneIds[0]);
 	}
+	OnMultiSelectionChanged.Broadcast();
 }
 
 void UDroneRegistrySubsystem::ClearSelection()
@@ -423,6 +425,45 @@ void UDroneRegistrySubsystem::ClearSelection()
 	MultiSelectedDroneIds.Empty();
 
 	OnPrimarySelectionChanged.Broadcast(OldDroneId, 0);
+	OnMultiSelectionChanged.Broadcast();
+}
+
+void UDroneRegistrySubsystem::AddToMultiSelection(int32 DroneId)
+{
+	if (DroneId <= 0 || MultiSelectedDroneIds.Contains(DroneId))
+	{
+		return;
+	}
+	MultiSelectedDroneIds.Add(DroneId);
+	if (PrimarySelectedDroneId <= 0)
+	{
+		// 直接赋值而非调用 SetPrimarySelectedDrone，避免后者清空 MultiSelectedDroneIds
+		int32 OldId = PrimarySelectedDroneId;
+		PrimarySelectedDroneId = DroneId;
+		OnPrimarySelectionChanged.Broadcast(OldId, DroneId);
+	}
+	OnMultiSelectionChanged.Broadcast();
+}
+
+void UDroneRegistrySubsystem::RemoveFromMultiSelection(int32 DroneId)
+{
+	if (DroneId <= 0 || !MultiSelectedDroneIds.Contains(DroneId))
+	{
+		return;
+	}
+	MultiSelectedDroneIds.Remove(DroneId);
+	if (PrimarySelectedDroneId == DroneId)
+	{
+		int32 OldId = PrimarySelectedDroneId;
+		PrimarySelectedDroneId = MultiSelectedDroneIds.IsEmpty() ? 0 : MultiSelectedDroneIds[0];
+		OnPrimarySelectionChanged.Broadcast(OldId, PrimarySelectedDroneId);
+	}
+	OnMultiSelectionChanged.Broadcast();
+}
+
+bool UDroneRegistrySubsystem::IsDroneSelected(int32 DroneId) const
+{
+	return MultiSelectedDroneIds.Contains(DroneId);
 }
 
 void UDroneRegistrySubsystem::ApplyControlLock(int32 DroneId, EDroneControlLockReason LockReason)

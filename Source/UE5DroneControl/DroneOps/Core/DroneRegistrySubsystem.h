@@ -38,6 +38,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneCommandModeChanged, int32, 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneTaskStateUpdated, int32, DroneId, const FDroneTaskStateSnapshot&, State);
 
 /**
+ * Delegate for multi-selection set changes (add / remove / clear).
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnMultiSelectionChanged);
+
+/**
  * Delegate for task state updates
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnTaskStateUpdated,
@@ -117,6 +122,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
 	void ClearSelection();
 
+	/** 向多选集合追加一架无人机；若已存在则忽略。广播 OnMultiSelectionChanged。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void AddToMultiSelection(int32 DroneId);
+
+	/** 从多选集合移除一架无人机；若不存在则忽略。广播 OnMultiSelectionChanged。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void RemoveFromMultiSelection(int32 DroneId);
+
+	/** 检查无人机是否在当前多选集合中。 */
+	UFUNCTION(BlueprintPure, Category = "DroneRegistry")
+	bool IsDroneSelected(int32 DroneId) const;
+
 	// Control lock management
 	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
 	void ApplyControlLock(int32 DroneId, EDroneControlLockReason LockReason);
@@ -190,6 +207,10 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
     FOnTaskStateUpdated OnTaskStateUpdated;
+
+	/** 多选集合变更（增/删/清零）时广播，供列表条目实时刷新按钮状态。 */
+	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
+	FOnMultiSelectionChanged OnMultiSelectionChanged;
 
     UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
     void UpdateLocalState(int32 DroneId, EUELocalDroneState LocalState);

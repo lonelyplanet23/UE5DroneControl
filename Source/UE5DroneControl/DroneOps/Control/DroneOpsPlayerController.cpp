@@ -206,6 +206,9 @@ void ADroneOpsPlayerController::BeginPlay()
 		if (DroneRegistry)
 		{
 			UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: Connected to DroneRegistry"));
+			// 订阅多选变更委托，使 UI 面板的选中操作同步刷新场景高亮
+			DroneRegistry->OnMultiSelectionChanged.AddDynamic(
+				this, &ADroneOpsPlayerController::OnRegistryMultiSelectionChanged);
 		}
 	}
 
@@ -1512,20 +1515,7 @@ void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
 	}
 	else
 	{
-		// 未选中 → 加入选中集合（离线无人机不可选中）
-		EDroneControlLockReason LockReason = EDroneControlLockReason::None;
-		if (DroneRegistry->IsControlLocked(ClickedDroneId, LockReason) &&
-			LockReason == EDroneControlLockReason::Offline)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("HandleDroneClick: drone %d is offline, cannot select"), ClickedDroneId);
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
-					FString::Printf(TEXT("Drone %d 离线，无法选中"), ClickedDroneId));
-			}
-			return;
-		}
-
+		// 未选中 → 加入选中集合（离线/失联无人机同样允许选中）
 		CurrentMulti.AddUnique(ClickedDroneId);
 		SetDronePrimarySelectedState(ClickedActor, true);
 
@@ -1560,6 +1550,31 @@ void ADroneOpsPlayerController::HandleDroneClick(AActor* ClickedActor)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
 			FString::Printf(TEXT("选中: %d 架  主选中: %d"), DroneRegistry->GetMultiSelectedDrones().Num(), SelectedDroneId));
+	}
+}
+
+void ADroneOpsPlayerController::OnRegistryMultiSelectionChanged()
+{
+	if (!DroneRegistry)
+	{
+		return;
+	}
+
+	const TArray<int32> CurrentMulti = DroneRegistry->GetMultiSelectedDrones();
+	const int32 PrimaryId = DroneRegistry->GetPrimarySelectedDrone();
+
+	// 同步 PlayerController 本地选中状态，使指令派发、跟随相机等系统感知到面板选中的变化
+	SelectedDroneId = PrimaryId;
+	SelectedDroneActor = (PrimaryId > 0) ? FindShadowDroneById(GetWorld(), PrimaryId) : nullptr;
+
+	// 遍历场景所有影子机，更新高亮显示
+	for (TActorIterator<AMultiDroneCharacter> It(GetWorld()); It; ++It)
+	{
+		AMultiDroneCharacter* ShadowDrone = *It;
+		if (IsValid(ShadowDrone))
+		{
+			SetDronePrimarySelectedState(ShadowDrone, CurrentMulti.Contains(ShadowDrone->DroneId));
+		}
 	}
 }
 

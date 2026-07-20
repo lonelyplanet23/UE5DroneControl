@@ -38,6 +38,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void Delete(const FString& Path, FOnHttpResponse OnComplete);
 
+	/**
+	 * POST /api/drones/refresh — 探测所有断连无人机。
+	 * 回调参数：(bool bSuccess, TArray<int32> RefreshedIds)
+	 * bSuccess=false 时 RefreshedIds 为空；bSuccess=true 且 RefreshedIds 为空表示无断连无人机。
+	 */
+	void PostRefresh(TFunction<void(bool, const TArray<int32>&)> Callback);
+
 private:
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> MakeRequest(
 		const FString& Verb, const FString& Path, const FString& Body);
