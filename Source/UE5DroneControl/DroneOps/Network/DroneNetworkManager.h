@@ -94,6 +94,38 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void ClearPendingGeoreferenceOrigin() { PendingOriginLatitude = 0.0; PendingOriginLongitude = 0.0; PendingOriginAltitude = -1.0; }
 
+	// ---- Strict Local Preview Isolation ----
+
+	/**
+	 * Enable or disable strict local preview isolation.
+	 * When enabled: stops polling, disconnects WebSocket, cancels in-flight HTTP requests,
+	 * and blocks all new outbound communication to DroneBackend.
+	 * When disabled: restores WebSocket, resumes polling, performs an immediate GET /api/drones sync.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Network|Isolation")
+	void SetStrictLocalPreviewIsolation(bool bEnable);
+
+	/** Returns true if strict local preview isolation is currently active. */
+	UFUNCTION(BlueprintPure, Category = "Network|Isolation")
+	bool IsStrictLocalPreviewIsolation() const { return bStrictLocalPreviewIsolation; }
+
+	/**
+	 * Unified guard: returns true when outbound communication to DroneBackend is allowed.
+	 * When strict isolation is active, returns false and logs a warning with the caller context.
+	 * All outbound calls (HTTP, WebSocket) must check this before sending.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Network|Isolation")
+	bool CanSendToBackend() const { return !bStrictLocalPreviewIsolation; }
+
+	/** Broadcast when isolation state changes. Parameter: true = now isolated. */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIsolationStateChanged, bool, bIsolated);
+
+	UPROPERTY(BlueprintAssignable, Category = "Network|Isolation")
+	FOnIsolationStateChanged OnIsolationStateChanged;
+
+	/** Static isolation blocked message for UI display. */
+	static const FString& GetIsolationBlockedMessage();
+
 	// ---- Control API ----
 
 	/**
@@ -222,6 +254,17 @@ private:
 	void OnWsMessage(const FString& Message);
 
 	void SyncDroneListToRegistry(const TArray<TSharedPtr<FJsonObject>>& DroneObjects);
+
+	// ---- Strict Local Preview Isolation ----
+	bool bStrictLocalPreviewIsolation = false;
+	// Saved auto-reconnect state before isolation disabled it; restored on isolation off.
+	bool bSavedAutoReconnect = true;
+
+	/**
+	 * Check isolation and log a blocked message. Returns true if sending is BLOCKED.
+	 * Callers should return early (with callback failure) when this returns true.
+	 */
+	bool CheckIsolationBlocked(const TCHAR* CallerContext) const;
 
 	// Cached GPS anchors keyed by DroneId — updated on power_on / reconnect.
 	struct FGpsAnchorCache

@@ -570,6 +570,12 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 	UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>();
 	if (!NetMgr) return;
 
+	if (!NetMgr->CanSendToBackend())
+	{
+		SetStatusMessage(UDroneNetworkManager::GetIsolationBlockedMessage());
+		return;
+	}
+
 	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
 	if (!Registry) return;
 
@@ -1370,6 +1376,12 @@ void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice 
 		if (!NetMgr)
 		{
 			SetStatusMessage(TEXT("网络管理器不可用，派发失败"));
+			break;
+		}
+
+		if (!NetMgr->CanSendToBackend())
+		{
+			SetStatusMessage(UDroneNetworkManager::GetIsolationBlockedMessage());
 			break;
 		}
 

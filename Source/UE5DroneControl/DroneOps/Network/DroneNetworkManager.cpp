@@ -49,6 +49,9 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UDroneNetworkManager::Deinitialize()
 {
+	// 确保隔离状态清理（避免泄漏到下次初始化）
+	bStrictLocalPreviewIsolation = false;
+
 	StopPolling();
 
 	if (WsClient)
@@ -57,6 +60,74 @@ void UDroneNetworkManager::Deinitialize()
 	}
 
 	Super::Deinitialize();
+}
+
+// ---- Strict Local Preview Isolation ----
+
+const FString& UDroneNetworkManager::GetIsolationBlockedMessage()
+{
+	static const FString Msg = TEXT("纯本地预演模式已阻止后端通信");
+	return Msg;
+}
+
+bool UDroneNetworkManager::CheckIsolationBlocked(const TCHAR* CallerContext) const
+{
+	if (bStrictLocalPreviewIsolation)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] %s blocked: strict local preview isolation is active"), CallerContext);
+		return true;
+	}
+	return false;
+}
+
+void UDroneNetworkManager::SetStrictLocalPreviewIsolation(bool bEnable)
+{
+	if (bStrictLocalPreviewIsolation == bEnable)
+	{
+		return;
+	}
+
+	bStrictLocalPreviewIsolation = bEnable;
+
+	if (bEnable)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] ===== Strict Local Preview Isolation ENABLED ====="));
+
+		// 1. 停止轮询
+		StopPolling();
+
+		// 2. 取消所有在途 HTTP 请求
+		if (HttpClient)
+		{
+			HttpClient->CancelAllPendingRequests();
+		}
+
+		// 3. 断开 WebSocket（保存并禁用自动重连）
+		if (WsClient)
+		{
+			bSavedAutoReconnect = WsClient->bAutoReconnect;
+			WsClient->Disconnect(); // Disconnect 内部会把 bAutoReconnect 设为 false
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] ===== Strict Local Preview Isolation DISABLED ====="));
+
+		// 1. 恢复 WebSocket 自动重连并连接
+		if (WsClient)
+		{
+			WsClient->bAutoReconnect = bSavedAutoReconnect;
+			WsClient->Connect();
+		}
+
+		// 2. 恢复定时轮询
+		StartPolling();
+
+		// 3. 立即同步一次无人机列表
+		PollDroneList();
+	}
+
+	OnIsolationStateChanged.Broadcast(bEnable);
 }
 
 // ---- Polling ----
@@ -84,6 +155,12 @@ void UDroneNetworkManager::StopPolling()
 
 void UDroneNetworkManager::PollDroneList()
 {
+	if (bStrictLocalPreviewIsolation)
+	{
+		// 隔离模式下静默跳过轮询（定时器已停止，此为防御性检查）
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		return;
@@ -659,6 +736,11 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 
 void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetWorldLocation, EDroneCommandMode Mode)
 {
+	if (CheckIsolationBlocked(TEXT("SendMoveCommand")))
+	{
+		return;
+	}
+
 	if (!WsClient || !WsClient->IsConnected())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] WS not connected, move command dropped"));
@@ -679,6 +761,11 @@ void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetW
 
 void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool bPause)
 {
+	if (CheckIsolationBlocked(TEXT("SendPauseCommand")))
+	{
+		return;
+	}
+
 	if (!WsClient || !WsClient->IsConnected())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] WS not connected, pause command dropped"));
@@ -702,6 +789,12 @@ void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool 
 
 void UDroneNetworkManager::RegisterDroneToBackend(int32 Slot, const FString& IpAddress, FOnHttpResponse OnComplete)
 {
+	if (CheckIsolationBlocked(TEXT("RegisterDroneToBackend")))
+	{
+		OnComplete.ExecuteIfBound(false, GetIsolationBlockedMessage());
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] RegisterDroneToBackend: HttpClient not ready"));
@@ -741,6 +834,12 @@ void UDroneNetworkManager::RegisterDroneToBackend(int32 Slot, const FString& IpA
 
 void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign)
 {
+	if (CheckIsolationBlocked(TEXT("SendArrayTask")))
+	{
+		OnComplete.ExecuteIfBound(false, GetIsolationBlockedMessage());
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] SendArrayTask: HttpClient not ready"));
@@ -807,6 +906,12 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 
 void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign)
 {
+	if (CheckIsolationBlocked(TEXT("SendArrayTaskFromData")))
+	{
+		OnComplete.ExecuteIfBound(false, GetIsolationBlockedMessage());
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] SendArrayTaskFromData: HttpClient not ready"));

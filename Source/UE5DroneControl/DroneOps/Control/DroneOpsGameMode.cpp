@@ -480,6 +480,16 @@ void ADroneOpsGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		{
 			Registry->OnDroneRegistered.RemoveDynamic(this, &ADroneOpsGameMode::HandleDroneRegistered);
 		}
+
+		// 离开 CesiumWorld 时复位纯本地预演隔离开关，避免状态泄漏到其他关卡
+		if (UDroneNetworkManager* NetMgr = GameInstance->GetSubsystem<UDroneNetworkManager>())
+		{
+			if (NetMgr->IsStrictLocalPreviewIsolation())
+			{
+				UE_LOG(LogTemp, Log, TEXT("[DroneOpsGameMode] EndPlay: resetting strict local preview isolation"));
+				NetMgr->SetStrictLocalPreviewIsolation(false);
+			}
+		}
 	}
 
 	Super::EndPlay(EndPlayReason);

@@ -26,6 +26,7 @@
 #include "UI/UIManagerBlueprintLibrary.h"
 #include "UI/DroneInfoPanelWidget.h"
 #include "UI/GeographicTargetPanelWidget.h"
+#include "UI/LocalPreviewIsolationToggleWidget.h"
 #include "UI/SequenceDispatchPanelWidget.h"
 #include "UI/DroneInfoPanelWidget.h"
 #include "UI/GeographicTargetPanelWidget.h"
@@ -252,6 +253,17 @@ void ADroneOpsPlayerController::BeginPlay()
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("DroneOpsPlayerController: BoxSelectWidgetClass is NULL - not assigned in BP"));
+	}
+
+	// 纯本地预演隔离 Toggle（右上角，高 ZOrder 确保不被遮挡）
+	{
+		ULocalPreviewIsolationToggleWidget* IsolationToggle =
+			CreateWidget<ULocalPreviewIsolationToggleWidget>(this, ULocalPreviewIsolationToggleWidget::StaticClass());
+		if (IsolationToggle)
+		{
+			IsolationToggle->AddToViewport(50); // ZOrder 50：高于普通面板，低于弹窗
+			UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: LocalPreviewIsolationToggle created"));
+		}
 	}
 
 	// Create Sequence Dispatch Panel (persistent, bottom-right)
@@ -1218,7 +1230,8 @@ FGeographicDispatchResult ADroneOpsPlayerController::ExecuteWorldDispatchPlan(
 	UDroneNetworkManager* NetworkManager = GetGameInstance()
 		? GetGameInstance()->GetSubsystem<UDroneNetworkManager>()
 		: nullptr;
-	const bool bBackendConnected = NetworkManager && NetworkManager->GetWebSocketClient()
+	const bool bBackendConnected = NetworkManager && NetworkManager->CanSendToBackend()
+		&& NetworkManager->GetWebSocketClient()
 		&& NetworkManager->GetWebSocketClient()->IsConnected();
 
 	int32 LocalMoveCount = 0;
@@ -1882,7 +1895,21 @@ void ADroneOpsPlayerController::OnPauseToggle()
 	}
 
 	UDroneNetworkManager* NetworkManager = GI->GetSubsystem<UDroneNetworkManager>();
-	if (!NetworkManager || !NetworkManager->GetWebSocketClient() || !NetworkManager->GetWebSocketClient()->IsConnected())
+	if (!NetworkManager)
+	{
+		return;
+	}
+
+	if (!NetworkManager->CanSendToBackend())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, *UDroneNetworkManager::GetIsolationBlockedMessage());
+		}
+		return;
+	}
+
+	if (!NetworkManager->GetWebSocketClient() || !NetworkManager->GetWebSocketClient()->IsConnected())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("OnPauseToggle: WebSocket not connected"));
 		return;

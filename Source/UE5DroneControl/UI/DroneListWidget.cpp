@@ -2,6 +2,7 @@
 
 #include "DroneListWidget.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
+#include "DroneOps/Network/DroneNetworkManager.h"
 #include "Components/ScrollBox.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
