@@ -47,10 +47,10 @@ public:
 	 * Dispatch (or preview) a geographic target for the currently selected drone(s).
 	 *
 	 * The primary selected drone is placed exactly at the input lon/lat/alt point; any other
-	 * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
-	 * by ascending DroneId for a stable layout. Each drone subtracts its own GPS anchor before
-	 * the command is sent, and exactly one logical command is sent per drone (the backend owns
-	 * reliable resend). Altitude is treated as height above mean sea level and converted to
+ * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
+ * by ascending DroneId for a stable layout. Shadow drones always move locally; when the backend
+ * is connected and a drone has a GPS anchor, one corresponding command is also sent. Altitude is
+ * treated as height above mean sea level and converted to
 	 * ellipsoid height via UDroneNetworkManager::GeoidSeparationMeters before the coordinate
 	 * transform.
 	 *
@@ -70,9 +70,9 @@ public:
 		bool bPreviewOnly);
 
 	/**
-	 * Validate the current selection and a geographic target without drawing or sending anything.
-	 * bForDispatch=false validates preview prerequisites; true additionally requires every selected
-	 * drone to be controllable, anchored, and the backend WebSocket to be connected.
+ * Validate the current selection and a geographic target without drawing or sending anything.
+ * bForDispatch=true validates local dispatch prerequisites only; backend connection and GPS
+ * anchors affect command delivery status but never block the local shadow-drone dispatch.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	FGeographicDispatchResult ValidateGeographicTarget(
@@ -101,6 +101,17 @@ public:
 
 	/** 把当前临时路径打包成 DroneId -> FDronePathSaveData（世界坐标）。 */
 	TMap<int32, FDronePathSaveData> BuildEditingPathsData() const;
+
+	/**
+	 * 编辑模式下把一个 WGS84 经纬高目标点加为所有在编路径的航点（与地图点击加点同样走编队平移）。
+	 * 非编辑模式或无在编路径时返回失败。用于右上角坐标输入面板在编辑模式下的行为。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	FGeographicDispatchResult AddGeographicWaypointInEditMode(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters);
 
 	/** 销毁全部临时路径 Actor（含航点句柄）并清空编辑状态。 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
@@ -301,6 +312,27 @@ private:
 		bool bForDispatch,
 		TArray<FGeographicDispatchSlot>& OutSlots) const;
 
+	/**
+	 * 把 WGS84 经纬高（海拔 MSL）转换为 UE 世界坐标（cm）。
+	 * 供派发规划与编辑模式加航点共用，避免重复坐标转换逻辑。
+	 * 失败时返回 false 并写入 OutError（坐标系不支持/服务未就绪/超范围/转换失败）。
+	 */
+	bool TryConvertGeographicToWorld(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters,
+		FVector& OutWorld,
+		FString& OutError) const;
+
+	/** Builds the same stable primary-first formation targets for every world-space input path. */
+	FGeographicDispatchResult BuildWorldDispatchPlan(
+		const FVector& BaseWorldTarget,
+		TArray<FGeographicDispatchSlot>& OutSlots) const;
+
+	/** Moves shadow drones locally first; sends backend commands only when they are currently possible. */
+	FGeographicDispatchResult ExecuteWorldDispatchPlan(const TArray<FGeographicDispatchSlot>& Slots);
+
 	/** Last preview plan, redrawn every frame until another preview replaces it. */
 	TArray<FGeographicDispatchSlot> ActiveGeographicPreviewSlots;
 
@@ -319,6 +351,16 @@ private:
 	void SetEditActiveAxis(EGizmoAxis NewAxis);
 	bool CanInteractWithEditWaypoint(const ADroneWaypointActor* WaypointActor) const;
 	void AddWaypointToAllEditingPaths(const FVector& WorldLocation);
+
+	// 编辑模式下点击无人机：活跃则冻结（保留路径），已冻结/未加入则激活（复活或新建路径）。
+	// 返回 true 表示本次点击已作为增删处理（不应再当作加航点）。
+	bool ToggleDroneInEditMode(int32 DroneId);
+	// 激活单架无人机：已有(冻结)路径则复活并接续加点；无则新建一条以影子机当前位置为首航点的路径。
+	void AddDroneToEditMode(int32 DroneId);
+	// 冻结单架无人机：保留其临时路径可见但不再加点，并移出选中集合（不销毁，退出编辑时才清）。
+	void FreezeDroneInEditMode(int32 DroneId);
+	// 重算编队参考原点为当前第一条在编路径的起点（增删无人机后调用，避免落点偏移）。
+	void RecomputeEditFormationRefOrigin();
 
 	// 编辑模式相机：进入时切自由相机（WASD 移动 + 按住右键转视角），退出时恢复
 	void EnterEditCamera();
@@ -350,6 +392,11 @@ private:
 
 	// 每条路径首航点的世界坐标（编队平移基准），与 EditingPaths 同序
 	TArray<FVector> EditingPathOrigins;
+
+	// 每条路径当前是否活跃（接收新航点），与 EditingPaths 同序。
+	// 取消选中无人机 = 冻结(false)，路径保留可见但不再加点；重新选中 = 复活(true)。
+	// 只有退出编辑模式(ClearEditingPaths)才真正销毁所有路径。
+	TArray<bool> EditingPathActive;
 
 	// 编队参考原点（第一架影子机的首航点世界坐标）
 	FVector EditFormationRefOrigin = FVector::ZeroVector;
@@ -528,9 +575,6 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "HostileTarget")
 	TSubclassOf<AHostileTargetActor> HostileTargetClass;
-
-	// 防抖：记录已弹出的攻击确认，避免同一目标重复弹窗
-	TSet<int32> PendingAttackConfirmTargets;
 
 	/** 攻击确认弹窗回调（由 PreviewConfirmPopupWidget 的 OnAttackConfirmMade delegate 触发） */
 	UFUNCTION()

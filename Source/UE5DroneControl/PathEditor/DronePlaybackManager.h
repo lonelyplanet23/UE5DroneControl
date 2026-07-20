@@ -80,6 +80,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Drone|Playback")
 	void EnsurePlaybackDrones(int32 Count);
 
+	/**
+	 * 全局停止：停掉 World 内所有 ADronePlaybackManager 的播放，并停止且销毁
+	 * 所有仍存在的 ADronePathActor（含卡在循环中的路径及其可视化）。
+	 * 作为统一的全局停止入口，供派发面板全局停止按钮与 JSON 播放面板共用。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Drone|Playback")
+	static void StopAndClearAllInWorld(UWorld* World);
+
 	virtual void Tick(float DeltaTime) override;
 
 protected:

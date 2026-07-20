@@ -9,6 +9,7 @@
 class USphereComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UPointLightComponent;
 
 /**
  * 敌对目标点 Actor
@@ -30,7 +31,7 @@ public:
 
 	/** 发现半径（厘米） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HostileTarget", meta = (ClampMin = "100.0", UIMin = "100.0"))
-	float DiscoveryRadius = 800.0f;
+	float DiscoveryRadius = 3000.0f;
 
 	/** 是否已被发现（任何无人机发现过） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "HostileTarget")
@@ -61,6 +62,10 @@ public:
 	/** 编号标签 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UTextRenderComponent> LabelComponent;
+
+	/** 红色点光源，让目标在暗色地形或三维瓦片上也容易辨认。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UPointLightComponent> MarkerLight;
 
 	// ----- 方法 -----
 

@@ -51,7 +51,9 @@ enum class EUELocalDroneState : uint8
 	TargetDetectedPending   UMETA(DisplayName = "目标确认待命"),
 	LocalAttacking          UMETA(DisplayName = "攻击中（UE预演）"),
 	LocalAttackCompleted    UMETA(DisplayName = "UE攻击完成"),
-	TargetDeclined          UMETA(DisplayName = "用户拒绝攻击")
+	TargetDeclined          UMETA(DisplayName = "用户拒绝攻击"),
+	/** 仅供本地预演测试使用：允许离线影子机参与巡逻目标识别。 */
+	LocalPatrolling         UMETA(DisplayName = "本地巡逻预演")
 };
 
 /**

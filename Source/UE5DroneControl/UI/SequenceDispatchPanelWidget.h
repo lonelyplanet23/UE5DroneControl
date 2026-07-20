@@ -5,6 +5,7 @@
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "Components/ComboBoxString.h"
 #include "PathEditor/DronePathSaveLibrary.h"
+#include "PathEditor/DronePathActor.h"
 #include "PreviewConfirmPopupWidget.h"
 #include "SequenceDispatchPanelWidget.generated.h"
 
@@ -32,6 +33,10 @@ public:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UButton* OpenButton;
+
+	/** 全局停止按钮：始终可见，停止并清除全世界所有播放与路径 Actor。 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UButton* GlobalStopButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UCanvasPanel* FileListPanel;
@@ -63,6 +68,10 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UComboBoxString* ModeComboBox;
 
+	/** 勾选后，本地预演中的 patrol 路径也会参与目标识别；仅用于 UE 场景测试。 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UCheckBox* LocalPatrolSimulationToggle;
+
 	/** 自动分配勾选框：勾选后跳过手动匹配，由后端匈牙利算法分配无人机 */
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UCheckBox* AutoAssignCheckBox;
@@ -78,10 +87,6 @@ public:
 	/** 播放按钮：弹出三选弹窗（预演/派发/取消），仅编辑模式可见。 */
 	UPROPERTY(meta = (BindWidgetOptional))
 	class UButton* PlayEditPathButton;
-
-	/** 停止按钮：终止所有影子机播放并销毁临时路径，仅编辑模式可见。 */
-	UPROPERTY(meta = (BindWidgetOptional))
-	class UButton* StopEditPathButton;
 
 	/** 循环播放勾选框：勾选=所有临时路径循环，仅作用运行副本，不写回磁盘。仅编辑模式可见。 */
 	UPROPERTY(meta = (BindWidgetOptional))
@@ -132,11 +137,50 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<ADronePathActor>> ActiveDispatchPathActors;
 
+	// 当前由“本地巡逻模拟”接管的无人机。只在选择 patrol 且勾选开关后填充。
+	TSet<int32> LocalPatrolSimulationDroneIds;
+
+	// 在线真机派发：spawn 但未启动的路径，等后端 assembly_complete 后再启动。
+	struct FPendingArrivalPath
+	{
+		TWeakObjectPtr<ADronePathActor> PathActor;
+		TWeakObjectPtr<APawn> ShadowPawn;
+	};
+	TArray<FPendingArrivalPath> PendingArrivalPaths;
+
+	// 集结完成/超时事件早到兜底：事件在路径入队前到达时置位，
+	// 路径入队后（StartShadowDronePlayback）若已置位则立即放行，避免路径永久搁浅。
+	// 每次派发响应时复位，防止上一批的完成信号误放行下一批。
+	bool bAssemblyReleasePending = false;
+
+	// 集结事件订阅句柄（NativeDestruct 中移除）
+	FDelegateHandle AssemblyCompleteHandle;
+	FDelegateHandle AssemblyTimeoutHandle;
+
 	// 清除上次派发留下的 PathActor
 	void ClearActiveDispatchPaths();
 
+	// 本地预演测试通道：把影子机标记为可参与巡逻目标识别，停止/结束时复位。
+	void BeginLocalPatrolSimulation(const TMap<int32, FDronePathSaveData>& PreviewMap);
+	void EndLocalPatrolSimulation(bool bForceClearAllLocalStates = false);
+	bool IsLocalPatrolSimulationEnabled() const;
+
 	// 派发成功后：为每个影子机 spawn DronePathActor 并驱动移动
 	void StartShadowDronePlayback();
+
+	// 判定一架无人机是否为"在线真机、需等待到位"：Online 且镜像机已有 GPS 锚点。
+	bool IsOnlineRealDrone(int32 DroneId) const;
+
+	// 启动所有待到位路径（解除跟随镜像 + StartMovement），并清空待启动列表。
+	void StartPendingArrivalPaths();
+
+	// 后端集结完成 / 超时：放行等待中的路径。
+	void OnAssemblyCompleteForDispatch(const FString& ArrayId);
+	void OnAssemblyTimeoutForDispatch(const FString& ArrayId, int32 ReadyCount, int32 TotalCount);
+
+	// 派发路径的执行状态变化回调：路径 Completed 时销毁该 Actor 并从跟踪列表移除。
+	// 非动态多播委托，用 AddUObject 绑定。
+	void OnDispatchPathExecutionStateChanged(ADronePathActor* PathActor, EDronePathExecutionState NewState);
 
 	static bool bStaticPanelInteractive;
 
@@ -154,6 +198,9 @@ private:
 	void OnOpenButtonClicked();
 
 	UFUNCTION()
+	void OnGlobalStopClicked();
+
+	UFUNCTION()
 	void OnDispatchClicked();
 
 	UFUNCTION()
@@ -164,6 +211,9 @@ private:
 
 	UFUNCTION()
 	void OnModeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void OnLocalPatrolSimulationToggleChanged(bool bIsChecked);
 
 	UFUNCTION()
 	void OnDispatchResponse(bool bSuccess, const FString& ResponseBody);
@@ -181,10 +231,6 @@ private:
 	// 播放按钮：弹出三选弹窗
 	UFUNCTION()
 	void OnPlayEditPathClicked();
-
-	// 停止按钮：终止影子机播放 + 销毁临时路径 + 复位
-	UFUNCTION()
-	void OnStopEditPathClicked();
 
 	// 循环勾选框：设置所有临时路径循环状态（仅运行副本）
 	UFUNCTION()
