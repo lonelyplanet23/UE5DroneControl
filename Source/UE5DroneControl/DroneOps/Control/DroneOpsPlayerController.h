@@ -10,6 +10,9 @@
 #include "Camera/CameraActor.h"
 #include "PathEditor/DroneWaypointActor.h"
 #include "PathEditor/DronePathSaveLibrary.h"
+#include "DroneOps/Core/HostileTargetActor.h"
+#include "DroneOps/Core/HostileTargetManager.h"
+#include "UI/PreviewConfirmPopupWidget.h"
 #include "DroneOpsPlayerController.generated.h"
 
 class UDroneRegistrySubsystem;
@@ -17,6 +20,7 @@ class ADronePathActor;
 class ADroneWaypointActor;
 class AMultiDroneCharacter;
 class UUserWidget;
+class UDroneInfoPanelWidget;
 
 /**
  * Delegate for when drone info panel is requested by middle click.
@@ -43,10 +47,10 @@ public:
 	 * Dispatch (or preview) a geographic target for the currently selected drone(s).
 	 *
 	 * The primary selected drone is placed exactly at the input lon/lat/alt point; any other
-	 * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
-	 * by ascending DroneId for a stable layout. Each drone subtracts its own GPS anchor before
-	 * the command is sent, and exactly one logical command is sent per drone (the backend owns
-	 * reliable resend). Altitude is treated as height above mean sea level and converted to
+ * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
+ * by ascending DroneId for a stable layout. Shadow drones always move locally; when the backend
+ * is connected and a drone has a GPS anchor, one corresponding command is also sent. Altitude is
+ * treated as height above mean sea level and converted to
 	 * ellipsoid height via UDroneNetworkManager::GeoidSeparationMeters before the coordinate
 	 * transform.
 	 *
@@ -66,9 +70,9 @@ public:
 		bool bPreviewOnly);
 
 	/**
-	 * Validate the current selection and a geographic target without drawing or sending anything.
-	 * bForDispatch=false validates preview prerequisites; true additionally requires every selected
-	 * drone to be controllable, anchored, and the backend WebSocket to be connected.
+ * Validate the current selection and a geographic target without drawing or sending anything.
+ * bForDispatch=true validates local dispatch prerequisites only; backend connection and GPS
+ * anchors affect command delivery status but never block the local shadow-drone dispatch.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	FGeographicDispatchResult ValidateGeographicTarget(
@@ -78,30 +82,30 @@ public:
 		double AltitudeMslMeters,
 		bool bForDispatch) const;
 
-	/**
-	 * Dispatches one exact geographic target per selected drone. Unlike the shared-target API,
-	 * this path never adds formation offsets: every DroneId goes to its own supplied coordinate.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "DroneOps")
-	FGeographicDispatchResult DispatchPerDroneGeographicTargets(
-		EGeographicCoordinateSystem CoordinateSystem,
-		const TArray<FDroneGeographicTarget>& Targets,
-		bool bPreviewOnly);
+/**
+ * Dispatches one exact geographic target per selected drone. Unlike the shared-target API,
+ * this path never adds formation offsets: every DroneId goes to its own supplied coordinate.
+ */
+UFUNCTION(BlueprintCallable, Category = "DroneOps")
+FGeographicDispatchResult DispatchPerDroneGeographicTargets(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FDroneGeographicTarget>& Targets,
+    bool bPreviewOnly);
 
-	/** Validates an exact per-drone target set without drawing markers or sending commands. */
-	UFUNCTION(BlueprintCallable, Category = "DroneOps")
-	FGeographicDispatchResult ValidatePerDroneGeographicTargets(
-		EGeographicCoordinateSystem CoordinateSystem,
-		const TArray<FDroneGeographicTarget>& Targets,
-		bool bForDispatch) const;
+/** Validates an exact per-drone target set without drawing markers or sending commands. */
+UFUNCTION(BlueprintCallable, Category = "DroneOps")
+FGeographicDispatchResult ValidatePerDroneGeographicTargets(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FDroneGeographicTarget>& Targets,
+    bool bForDispatch) const;
 
 	/** Number of drones currently selected for dispatch (multi-selection, or 0). */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	int32 GetSelectedDroneCountForDispatch() const;
 
-	/** Unique selected DroneIds in ascending order, used by deterministic per-drone UI rows. */
-	UFUNCTION(BlueprintCallable, Category = "DroneOps")
-	TArray<int32> GetSelectedDroneIdsForDispatch() const;
+/** Unique selected DroneIds in ascending order, used by deterministic per-drone UI rows. */
+UFUNCTION(BlueprintCallable, Category = "DroneOps")
+TArray<int32> GetSelectedDroneIdsForDispatch() const;
 
 	// ---- 预演关卡路径编辑模式（供 SequenceDispatchPanelWidget 调用）----
 
@@ -119,8 +123,6 @@ public:
 	/** 把当前临时路径打包成 DroneId -> FDronePathSaveData（世界坐标）。 */
 	TMap<int32, FDronePathSaveData> BuildEditingPathsData() const;
 
-<<<<<<< HEAD
-=======
 	/**
 	 * 编辑模式下把一个 WGS84 经纬高目标点加为所有在编路径的航点（与地图点击加点同样走编队平移）。
 	 * 非编辑模式或无在编路径时返回失败。用于右上角坐标输入面板在编辑模式下的行为。
@@ -132,22 +134,77 @@ public:
 		double Latitude,
 		double AltitudeMslMeters);
 
-	/**
-	 * Atomically appends an ordered geographic waypoint batch to every active editing path.
-	 * All coordinates are converted before any path is mutated. This method never sends backend commands.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
-	FGeographicDispatchResult AddGeographicWaypointsInEditMode(
-		EGeographicCoordinateSystem CoordinateSystem,
-		const TArray<FGeographicCoordinate3D>& Coordinates);
+/**
+ * Atomically appends an ordered geographic waypoint batch to every active editing path.
+ * All coordinates are converted before any path is mutated. This method never sends backend commands.
+ */
+UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+FGeographicDispatchResult AddGeographicWaypointsInEditMode(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FGeographicCoordinate3D>& Coordinates);
 
->>>>>>> 77cb3cc (7.22需求)
 	/** 销毁全部临时路径 Actor（含航点句柄）并清空编辑状态。 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
 	void ClearEditingPaths();
 
 	UFUNCTION(BlueprintPure, Category = "DroneOps|PathEdit")
 	bool IsPathEditMode() const { return bPathEditMode; }
+
+	/** 设置某条临时路径的循环开关（预演关卡，每条路径独立）。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	bool SetEditingPathClosedLoop(int32 DroneId, bool bClosedLoop);
+
+	/** 一次性设置全部临时路径的循环开关。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	void SetAllEditingPathsClosedLoop(bool bClosedLoop);
+
+	// ---- 编队旋转预览（JSON 路径：运行锚点平移 + 水平旋转 Gizmo）----
+
+	/**
+	 * 编队旋转的几何变换：把编辑系节点坐标先相对源锚点旋转（仅水平面绕 Z），再平移到目标基准位置。
+	 * 高度(Z)保持不变，节点相对距离不变。预演与派发共用此函数，保证结果完全一致。
+	 */
+	static FVector ApplyFormationTransform(const FVector& NodeEditLocation, const FVector& RefEditOrigin, const FVector& TargetBase, float YawDegrees);
+
+	/**
+	 * 解析运行锚点无人机：优先主选中，其次最小可用 DroneId；都没有则返回 false。
+	 * OutAnchorWorld = 该无人机当前世界位置。
+	 */
+	bool ResolveRunAnchorDrone(int32& OutDroneId, FVector& OutAnchorWorld);
+
+	/**
+	 * 开始 JSON 编队旋转预览：生成预览路径可视化 + 锚点旋转环 Gizmo。角度从 0 开始。
+	 * 失败（无有效运行锚点）返回 false。
+	 */
+	bool BeginFormationRotatePreview(const FDronePathsSaveData& PathsData);
+
+	/** 结束编队旋转预览：销毁预览可视化与 Gizmo。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	void EndFormationRotatePreview();
+
+	bool IsFormationRotateActive() const { return bFormationRotateActive; }
+	float GetFormationYawDegrees() const { return FormationYawDegrees; }
+	FVector GetFormationRunAnchorWorld() const { return FormationRunAnchorWorld; }
+	FVector GetFormationRefEditOrigin() const { return FormationRefEditOrigin; }
+	int32 GetFormationRunAnchorDroneId() const { return FormationRunAnchorDroneId; }
+
+	// ===== 敌对目标点管理 =====
+
+	/** 在鼠标位置放置敌对目标点（Ctrl+Shift+左键，避免占用框选快捷键） */
+	UFUNCTION(BlueprintCallable, Category = "HostileTarget")
+	void SpawnHostileTarget();
+
+	/** 删除选中的敌对目标点 */
+	UFUNCTION(BlueprintCallable, Category = "HostileTarget")
+	void RemoveHostileTarget(AHostileTargetActor* Target);
+
+	/** 获取敌对目标点管理器 */
+	UFUNCTION(BlueprintPure, Category = "HostileTarget")
+	class UHostileTargetManager* GetHostileTargetManager() const;
+
+	/** 获取当前选中的目标点（高亮） */
+	UFUNCTION(BlueprintPure, Category = "HostileTarget")
+	AHostileTargetActor* GetSelectedHostileTarget() const { return SelectedHostileTarget; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -212,6 +269,16 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	bool GetWorldLocationUnderCursor(FVector& OutLocation) const;
 
+	// ===== 敌对目标点发现检测 =====
+	/** Tick中调用：检测所有巡逻无人机是否发现目标 */
+	void CheckHostileTargetDetection();
+
+	/** 处理无人机发现目标的逻辑（弹窗、分配） */
+	void HandleTargetDiscovery(int32 DroneId, int32 TargetId);
+
+	/** 获取鼠标下的敌对目标点 */
+	AHostileTargetActor* GetHostileTargetUnderCursor() const;
+
 public:
 	/**
 	 * Event broadcast when user clicks middle mouse button while hovering a drone.
@@ -224,13 +291,36 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
 	TSubclassOf<UUserWidget> DroneOpsHUDWidgetClass;
 
+	/** 框选矩形 Widget 类，在 BP_DroneOpsPlayerController 中赋值 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
+	TSubclassOf<UUserWidget> BoxSelectWidgetClass;
+
+	/** 运行时框选矩形 Widget 实例 */
+	UPROPERTY()
+	UUserWidget* BoxSelectWidgetInstance = nullptr;
+
 	/** Class of the drone info panel widget */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
-	TSubclassOf<UUserWidget> DroneInfoPanelWidgetClass;
+	TSubclassOf<UDroneInfoPanelWidget> DroneInfoPanelWidgetClass;
 
 	/** 主菜单关卡名称，B 键跳转目标 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Navigation")
 	FName MainMenuLevelName = FName("MainMenu");
+
+	/** 框选是否正在进行中（供 Widget 蓝图读取驱动矩形显示） */
+	UPROPERTY(BlueprintReadOnly, Category = "BoxSelect")
+	bool bIsBoxSelectingBP = false;
+
+	/** 框选起点（逻辑像素，viewport-relative，供 Widget 蓝图读取） */
+	UPROPERTY(BlueprintReadOnly, Category = "BoxSelect")
+	FVector2D BoxSelectStartLogical = FVector2D::ZeroVector;
+
+	/** 框选当前终点（逻辑像素，viewport-relative，供 Widget 蓝图读取） */
+	UPROPERTY(BlueprintReadOnly, Category = "BoxSelect")
+	FVector2D BoxSelectEndLogical = FVector2D::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HostileTarget")
+	TSubclassOf<UPreviewConfirmPopupWidget> PreviewConfirmPopupClass;
 
 private:
 #if WITH_DEV_AUTOMATION_TESTS
@@ -252,15 +342,13 @@ private:
 		bool bForDispatch,
 		TArray<FGeographicDispatchSlot>& OutSlots) const;
 
-<<<<<<< HEAD
-=======
-	FGeographicDispatchResult BuildPerDroneGeographicDispatchPlan(
-		EGeographicCoordinateSystem CoordinateSystem,
-		const TArray<FDroneGeographicTarget>& Targets,
-		bool bForDispatch,
-		TArray<FGeographicDispatchSlot>& OutSlots) const;
+FGeographicDispatchResult BuildPerDroneGeographicDispatchPlan(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FDroneGeographicTarget>& Targets,
+    bool bForDispatch,
+    TArray<FGeographicDispatchSlot>& OutSlots) const;
 
-	bool ValidateDispatchDrone(int32 DroneId, FString& OutError) const;
+bool ValidateDispatchDrone(int32 DroneId, FString& OutError) const;
 
 	/**
 	 * 把 WGS84 经纬高（海拔 MSL）转换为 UE 世界坐标（cm）。
@@ -283,7 +371,6 @@ private:
 	/** Moves shadow drones locally first; sends backend commands only when they are currently possible. */
 	FGeographicDispatchResult ExecuteWorldDispatchPlan(const TArray<FGeographicDispatchSlot>& Slots);
 
->>>>>>> 77cb3cc (7.22需求)
 	/** Last preview plan, redrawn every frame until another preview replaces it. */
 	TArray<FGeographicDispatchSlot> ActiveGeographicPreviewSlots;
 
@@ -302,6 +389,16 @@ private:
 	void SetEditActiveAxis(EGizmoAxis NewAxis);
 	bool CanInteractWithEditWaypoint(const ADroneWaypointActor* WaypointActor) const;
 	void AddWaypointToAllEditingPaths(const FVector& WorldLocation);
+
+	// 编辑模式下点击无人机：活跃则冻结（保留路径），已冻结/未加入则激活（复活或新建路径）。
+	// 返回 true 表示本次点击已作为增删处理（不应再当作加航点）。
+	bool ToggleDroneInEditMode(int32 DroneId);
+	// 激活单架无人机：已有(冻结)路径则复活并接续加点；无则新建一条以影子机当前位置为首航点的路径。
+	void AddDroneToEditMode(int32 DroneId);
+	// 冻结单架无人机：保留其临时路径可见但不再加点，并移出选中集合（不销毁，退出编辑时才清）。
+	void FreezeDroneInEditMode(int32 DroneId);
+	// 重算编队参考原点为当前第一条在编路径的起点（增删无人机后调用，避免落点偏移）。
+	void RecomputeEditFormationRefOrigin();
 
 	// 编辑模式相机：进入时切自由相机（WASD 移动 + 按住右键转视角），退出时恢复
 	void EnterEditCamera();
@@ -334,8 +431,51 @@ private:
 	// 每条路径首航点的世界坐标（编队平移基准），与 EditingPaths 同序
 	TArray<FVector> EditingPathOrigins;
 
+	// 每条路径当前是否活跃（接收新航点），与 EditingPaths 同序。
+	// 取消选中无人机 = 冻结(false)，路径保留可见但不再加点；重新选中 = 复活(true)。
+	// 只有退出编辑模式(ClearEditingPaths)才真正销毁所有路径。
+	TArray<bool> EditingPathActive;
+
 	// 编队参考原点（第一架影子机的首航点世界坐标）
 	FVector EditFormationRefOrigin = FVector::ZeroVector;
+
+	// ---- 编队旋转预览状态 ----
+	// 预览路径可视化 Actor（只显示不移动），BeginFormationRotatePreview 生成，End 清理。
+	UPROPERTY()
+	TArray<TObjectPtr<ADronePathActor>> FormationPreviewActors;
+
+	// 锚点旋转环 Gizmo。
+	UPROPERTY()
+	TObjectPtr<class AFormationRotationGizmoActor> FormationGizmoActor = nullptr;
+
+	// 当前加载的 JSON 路径数据（原始，只读，不修改）。
+	FDronePathsSaveData FormationSourcePaths;
+
+	bool bFormationRotateActive = false;
+	// 当前编队水平旋转角（度，绕世界 Z）。
+	float FormationYawDegrees = 0.0f;
+	// 运行锚点无人机当前世界位置（编队平移目标基准）。
+	FVector FormationRunAnchorWorld = FVector::ZeroVector;
+	int32 FormationRunAnchorDroneId = INDEX_NONE;
+	// 源锚点（JSON 中 AnchorDroneId 路径首航点的编辑系坐标）。
+	FVector FormationRefEditOrigin = FVector::ZeroVector;
+
+	// 旋转环拖拽状态。
+	bool bDraggingFormationRing = false;
+	// 旋转环半径（cm），生成 Gizmo 时缓存，用于平面命中判定。
+	float FormationRingRadiusCm = 400.0f;
+	// 编队旋转灵敏度：每单位水平鼠标增量对应的偏航角（度）。
+	UPROPERTY(EditAnywhere, Category = "PathEdit")
+	float FormationRotateDegPerMouseUnit = 4.0f;
+
+	void RefreshFormationPreview();
+	void HandleFormationRingPressed();
+	void UpdateFormationRingDrag();
+	void EndFormationRingDrag();
+	// 鼠标反投影到锚点水平面，返回落点离锚点的距离(cm)。用于按下时判定是否点中旋转环。
+	bool ComputeCursorRadiusOnAnchorPlane(float& OutRadiusCm) const;
+	// 光标是否落在旋转环附近（平面半径判定，命中可靠，不依赖细碰撞体）。
+	bool IsCursorOnFormationRing() const;
 
 	UPROPERTY()
 	TObjectPtr<ADroneWaypointActor> EditSelectedWaypoint = nullptr;
@@ -346,7 +486,7 @@ private:
 
 	// 编辑时地图点击加点的默认段速度（m/s）
 	UPROPERTY(EditAnywhere, Category = "PathEdit")
-	float EditDefaultSegmentSpeed = 5.0f;
+	float EditDefaultSegmentSpeed = 1.0f;
 
 	// gizmo 拖拽灵敏度
 	UPROPERTY(EditAnywhere, Category = "PathEdit")
@@ -384,7 +524,7 @@ private:
 
 	/** Current open info panel, if any */
 	UPROPERTY()
-	UUserWidget* CurrentDroneInfoPanel = nullptr;
+	TObjectPtr<UDroneInfoPanelWidget> CurrentDroneInfoPanel = nullptr;
 
 	/** Drone currently bound to the open information panel. */
 	int32 CurrentDroneInfoDroneId = 0;
@@ -394,6 +534,8 @@ private:
 	float DroneInfoPanelRefreshIntervalSec = 0.2f;
 
 	FTimerHandle DroneInfoRefreshTimerHandle;
+
+	void OnDroneInfoPanelClosed();
 
 	/** Shadow drones that received vertical input on the previous controller tick. */
 	TArray<TWeakObjectPtr<AMultiDroneCharacter>> VerticallyControlledDrones;
@@ -417,6 +559,26 @@ private:
 
 	/** Whether Shift is held — used for multi-select on click */
 	bool bShiftHeld = false;
+
+	// ---- 框选状态 ----
+	/** Shift+左键按下时记录起始屏幕坐标，等待 OnPrimaryReleased 决定是框选还是短点击 */
+	bool bIsBoxSelecting = false;
+	FVector2D BoxSelectStartScreen = FVector2D::ZeroVector;
+	/** 框选拖拽期间每帧更新的当前鼠标位置，提交时用此值而非释放后重新读取 */
+	FVector2D BoxSelectCurrentScreen = FVector2D::ZeroVector;
+	/** 拖拽超过此像素距离后才触发框选，否则视为短点击 */
+	static constexpr float BoxSelectThresholdPx = 5.0f;
+
+	/** 根据起止屏幕矩形对场景中所有影子机做一次切换并提交最终选中集合 */
+	void CommitBoxSelect(FVector2D StartScreen, FVector2D EndScreen);
+
+	/** 框选完成逻辑（由 OnPrimaryReleased 和 Tick 共同调用，内置幂等保护） */
+	void FinishBoxSelectIfPending();
+
+	/** 通知框选 Widget 显示/更新/隐藏（内部通过反射调用蓝图函数） */
+	void NotifyBoxSelectShow();
+	void NotifyBoxSelectUpdate(FVector2D Start, FVector2D End);
+	void NotifyBoxSelectHide();
 
 	/** Last drone ID the user explicitly switched to (key 0/1 or click). F restores this. -1 = never set. */
 	int32 LastFollowedDroneId = -1;
@@ -443,4 +605,16 @@ private:
 
 	UFUNCTION()
 	void OnTestArrayTaskComplete(bool bSuccess, const FString& ResponseBody);
+
+	// ===== 敌对目标点成员 =====
+
+	UPROPERTY()
+	TObjectPtr<AHostileTargetActor> SelectedHostileTarget = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "HostileTarget")
+	TSubclassOf<AHostileTargetActor> HostileTargetClass;
+
+	/** 攻击确认弹窗回调（由 PreviewConfirmPopupWidget 的 OnAttackConfirmMade delegate 触发） */
+	UFUNCTION()
+	void OnAttackConfirmMade(int32 DroneId, int32 TargetId, bool bAttack);
 };

@@ -24,7 +24,7 @@ port_map:
   1:
     send_port: 8889
     recv_port: 8888
-    ros_topic_prefix: "/px4_1"
+    ros_topic_prefix: ""
   2:
     send_port: 8891
     recv_port: 8890
@@ -48,7 +48,7 @@ port_map:
 
 # Jetson 端转发配置（后端发送 UDP 的目标）
 jetson:
-  host: "192.168.30.104"    # Jetson 的局域网 IP
+  host: "192.168.10.1"      # 当前 Jetson 在无人机局域网中的 IP
 
 storage:
   path: "./data/drones.json"

@@ -49,6 +49,9 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UDroneNetworkManager::Deinitialize()
 {
+	// 确保隔离状态清理（避免泄漏到下次初始化）
+	bStrictLocalPreviewIsolation = false;
+
 	StopPolling();
 
 	if (WsClient)
@@ -57,6 +60,74 @@ void UDroneNetworkManager::Deinitialize()
 	}
 
 	Super::Deinitialize();
+}
+
+// ---- Strict Local Preview Isolation ----
+
+const FString& UDroneNetworkManager::GetIsolationBlockedMessage()
+{
+	static const FString Msg = TEXT("纯本地预演模式已阻止后端通信");
+	return Msg;
+}
+
+bool UDroneNetworkManager::CheckIsolationBlocked(const TCHAR* CallerContext) const
+{
+	if (bStrictLocalPreviewIsolation)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] %s blocked: strict local preview isolation is active"), CallerContext);
+		return true;
+	}
+	return false;
+}
+
+void UDroneNetworkManager::SetStrictLocalPreviewIsolation(bool bEnable)
+{
+	if (bStrictLocalPreviewIsolation == bEnable)
+	{
+		return;
+	}
+
+	bStrictLocalPreviewIsolation = bEnable;
+
+	if (bEnable)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] ===== Strict Local Preview Isolation ENABLED ====="));
+
+		// 1. 停止轮询
+		StopPolling();
+
+		// 2. 取消所有在途 HTTP 请求
+		if (HttpClient)
+		{
+			HttpClient->CancelAllPendingRequests();
+		}
+
+		// 3. 断开 WebSocket（保存并禁用自动重连）
+		if (WsClient)
+		{
+			bSavedAutoReconnect = WsClient->bAutoReconnect;
+			WsClient->Disconnect(); // Disconnect 内部会把 bAutoReconnect 设为 false
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] ===== Strict Local Preview Isolation DISABLED ====="));
+
+		// 1. 恢复 WebSocket 自动重连并连接
+		if (WsClient)
+		{
+			WsClient->bAutoReconnect = bSavedAutoReconnect;
+			WsClient->Connect();
+		}
+
+		// 2. 恢复定时轮询
+		StartPolling();
+
+		// 3. 立即同步一次无人机列表
+		PollDroneList();
+	}
+
+	OnIsolationStateChanged.Broadcast(bEnable);
 }
 
 // ---- Polling ----
@@ -84,6 +155,12 @@ void UDroneNetworkManager::StopPolling()
 
 void UDroneNetworkManager::PollDroneList()
 {
+	if (bStrictLocalPreviewIsolation)
+	{
+		// 隔离模式下静默跳过轮询（定时器已停止，此为防御性检查）
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		return;
@@ -271,6 +348,10 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 			Desc.TopicPrefix = Prefix;
 		}
 
+		// Video deliberately travels with the REST drone descriptor rather than
+		// with the high-frequency telemetry WebSocket.
+		Obj->TryGetStringField(TEXT("video_url"), Desc.VideoUrl);
+
 		Registry->RegisterDrone(Desc);
 
 		FString TaskStateText;
@@ -285,8 +366,18 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 				TaskState.Mode = DroneCommandModeFromProtocolString(TaskModeText);
 			}
 			Obj->TryGetStringField(TEXT("task_array_id"), TaskState.ArrayId);
+			if (!Obj->TryGetNumberField(TEXT("task_current_wp"), TaskState.CurrentWaypoint))
+			{
+				Obj->TryGetNumberField(TEXT("current_waypoint"), TaskState.CurrentWaypoint);
+			}
+			if (!Obj->TryGetNumberField(TEXT("task_waypoint_count"), TaskState.WaypointCount))
+			{
+				Obj->TryGetNumberField(TEXT("total_waypoints"), TaskState.WaypointCount);
+			}
+			Obj->TryGetStringField(TEXT("task_detail"), TaskState.Detail);
+			Obj->TryGetNumberField(TEXT("task_updated_at"), TaskState.UpdatedAt);
 			Registry->UpdateTaskState(Id, TaskState);
-		}
+        }
 
 		FString Status;
 		if (Obj->TryGetStringField(TEXT("status"), Status))
@@ -307,12 +398,19 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 		}
 	}
 
+	// 后端不存在的无人机直接从本地注销，避免面板显示失联的历史记录
+	TArray<int32> ToRemove;
 	for (const FDroneDescriptor& LocalDesc : Registry->GetAllDroneDescriptors())
 	{
 		if (LocalDesc.DroneId > 0 && !SeenBackendIds.Contains(LocalDesc.DroneId))
 		{
-			Registry->MarkDroneAvailability(LocalDesc.DroneId, EDroneAvailability::Lost);
+			ToRemove.Add(LocalDesc.DroneId);
 		}
+	}
+	for (int32 RemovedId : ToRemove)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Drone %d no longer in backend, unregistering"), RemovedId);
+		Registry->UnregisterDrone(RemovedId);
 	}
 }
 
@@ -367,8 +465,14 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		FDroneTaskStateSnapshot TaskState;
 		Root->TryGetNumberField(TEXT("drone_id"), TaskState.DroneId);
 		Root->TryGetStringField(TEXT("array_id"), TaskState.ArrayId);
-		Root->TryGetNumberField(TEXT("current_wp"), TaskState.CurrentWaypoint);
-		Root->TryGetNumberField(TEXT("waypoint_count"), TaskState.WaypointCount);
+		if (!Root->TryGetNumberField(TEXT("current_wp"), TaskState.CurrentWaypoint))
+		{
+			Root->TryGetNumberField(TEXT("current_waypoint"), TaskState.CurrentWaypoint);
+		}
+		if (!Root->TryGetNumberField(TEXT("waypoint_count"), TaskState.WaypointCount))
+		{
+			Root->TryGetNumberField(TEXT("total_waypoints"), TaskState.WaypointCount);
+		}
 		Root->TryGetStringField(TEXT("detail"), TaskState.Detail);
 		Root->TryGetNumberField(TEXT("updated_at"), TaskState.UpdatedAt);
 
@@ -418,18 +522,40 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		double Speed = 0;
 		Root->TryGetNumberField(TEXT("speed"), Speed);
 		Snap.Velocity = FVector(Speed, 0, 0); // scalar speed stored in X component
+		
+		// ===== 解析 GPS 和电量 =====
+		// 使用新增的独立字段，不再借用 GeographicLocation.Z
+    	double GpsLat = 0, GpsLon = 0, GpsAlt = 0;
+    	Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
+    	Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
+    	Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+    	int32 Battery = -1;
+    	Root->TryGetNumberField(TEXT("battery"), Battery);
+    
+    	// 如果 telemetry 未携带 GPS/电量，保留缓存中的旧值
+    	FDroneTelemetrySnapshot ExistingSnap;
+    	if (Registry->GetTelemetry(DroneId, ExistingSnap))
+    	{
+        	if (GpsLat == 0 && GpsLon == 0 && GpsAlt == 0) {
+            	GpsLat = ExistingSnap.GpsLatitude;
+            	GpsLon = ExistingSnap.GpsLongitude;
+            	GpsAlt = ExistingSnap.GpsAltitude;
+        	}
+        	if (Battery < 0) {
+                Battery = ExistingSnap.BatteryPercent;
+            }
+    	}
+    
+    	Snap.GpsLatitude = GpsLat;
+    	Snap.GpsLongitude = GpsLon;
+    	Snap.GpsAltitude = GpsAlt;
+    	Snap.BatteryPercent = Battery;
 
-		int32 Battery = -1;
-		Root->TryGetNumberField(TEXT("battery"), Battery);
 		Snap.Battery = Battery;
 
 		Root->TryGetBoolField(TEXT("armed"), Snap.bArmed);
 		Root->TryGetBoolField(TEXT("offboard"), Snap.bOffboard);
 		Root->TryGetBoolField(TEXT("gps_fix"), Snap.bGpsFix);
-		double GpsLat = 0.0, GpsLon = 0.0, GpsAlt = 0.0;
-		Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
-		Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
-		Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
 		Snap.GeographicLocation = FVector(GpsLat, GpsLon, GpsAlt);
 		Snap.Altitude = static_cast<float>(GpsAlt);
 
@@ -467,6 +593,26 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		}
 
 		OnDroneWsEvent.Broadcast(DroneId, Event, GpsLat, GpsLon, GpsAlt);
+
+		// ===== 将 GPS 写入 Registry 快照 =====
+    	// 确保 UI 列表能通过 GetTelemetry 读到 GPS 数据
+    	if (Event == TEXT("power_on") || Event == TEXT("reconnect"))
+    	{
+        	UDroneRegistrySubsystem* Registry = GetGameInstance()
+            	? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+            	: nullptr;
+        	if (Registry)
+        	{
+            	FDroneTelemetrySnapshot Snap;
+            	Registry->GetTelemetry(DroneId, Snap);
+            	Snap.DroneId = DroneId;
+            	Snap.GpsLatitude = GpsLat;
+            	Snap.GpsLongitude = GpsLon;
+            	Snap.GpsAltitude = GpsAlt;
+            	Snap.LastUpdateTime = FPlatformTime::Seconds();
+            	Registry->UpdateTelemetry(DroneId, Snap);
+        	}
+    	}
 		return;
 	}
 
@@ -583,12 +729,18 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		OnAssignmentResult.Broadcast(ArrayId, Assignments);
 		return;
 	}
+
 }
 
 // ---- Control commands ----
 
 void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetWorldLocation, EDroneCommandMode Mode)
 {
+	if (CheckIsolationBlocked(TEXT("SendMoveCommand")))
+	{
+		return;
+	}
+
 	if (!WsClient || !WsClient->IsConnected())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] WS not connected, move command dropped"));
@@ -609,6 +761,11 @@ void UDroneNetworkManager::SendMoveCommand(int32 DroneId, const FVector& TargetW
 
 void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool bPause)
 {
+	if (CheckIsolationBlocked(TEXT("SendPauseCommand")))
+	{
+		return;
+	}
+
 	if (!WsClient || !WsClient->IsConnected())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] WS not connected, pause command dropped"));
@@ -632,6 +789,12 @@ void UDroneNetworkManager::SendPauseCommand(const TArray<int32>& DroneIds, bool 
 
 void UDroneNetworkManager::RegisterDroneToBackend(int32 Slot, const FString& IpAddress, FOnHttpResponse OnComplete)
 {
+	if (CheckIsolationBlocked(TEXT("RegisterDroneToBackend")))
+	{
+		OnComplete.ExecuteIfBound(false, GetIsolationBlockedMessage());
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] RegisterDroneToBackend: HttpClient not ready"));
@@ -671,6 +834,12 @@ void UDroneNetworkManager::RegisterDroneToBackend(int32 Slot, const FString& IpA
 
 void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& PathMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign)
 {
+	if (CheckIsolationBlocked(TEXT("SendArrayTask")))
+	{
+		OnComplete.ExecuteIfBound(false, GetIsolationBlockedMessage());
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] SendArrayTask: HttpClient not ready"));
@@ -737,6 +906,12 @@ void UDroneNetworkManager::SendArrayTask(const TMap<int32, ADronePathActor*>& Pa
 
 void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign)
 {
+	if (CheckIsolationBlocked(TEXT("SendArrayTaskFromData")))
+	{
+		OnComplete.ExecuteIfBound(false, GetIsolationBlockedMessage());
+		return;
+	}
+
 	if (!HttpClient)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] SendArrayTaskFromData: HttpClient not ready"));

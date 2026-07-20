@@ -104,6 +104,12 @@ struct DroneStatus {
     GpsAnchor anchor;
     std::string control_ack_command_id;
     uint64_t control_ack_sequence = 0;
+    
+    // ===== GET /api/drones =====
+    std::string task_state = "standby";
+    std::string task_error_detail;
+    int task_current_wp = 0;
+    int task_total_wp = 0;
 };
 
 struct AssemblyProgress {

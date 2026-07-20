@@ -38,11 +38,31 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void Delete(const FString& Path, FOnHttpResponse OnComplete);
 
+	/**
+	 * Cancel all in-flight HTTP requests and invoke their callbacks with (false, "cancelled").
+	 * Used by strict local preview isolation to immediately cut off pending backend communication.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Network")
+	void CancelAllPendingRequests();
+
+	/** Number of HTTP requests currently in flight. */
+	UFUNCTION(BlueprintPure, Category = "Network")
+	int32 GetPendingRequestCount() const;
+
 private:
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> MakeRequest(
 		const FString& Verb, const FString& Path, const FString& Body);
 
+	/** Track an in-flight request for later cancellation. */
+	void TrackRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request);
+
+	/** Remove completed requests from the tracking list. */
+	void PruneCompletedRequests();
+
 	void HandleResponse(
 		FHttpRequestPtr Request, FHttpResponsePtr Response,
 		bool bConnected, FOnHttpResponse OnComplete);
+
+	/** All in-flight HTTP requests, pruned on each new request and on cancel. */
+	TArray<TSharedPtr<IHttpRequest, ESPMode::ThreadSafe>> InFlightRequests;
 };

@@ -1,14 +1,18 @@
 #include "DronePathPlaybackWidget.h"
 
 #include "Components/Button.h"
+#include "Components/CheckBox.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
+#include "PathEditor/DronePathActor.h"
 #include "PathEditor/DronePathSaveLibrary.h"
 #include "PathEditor/DronePlaybackManager.h"
 #include "PathFileListItemWidget.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
 
 void UDronePathPlaybackWidget::NativeConstruct()
 {
@@ -25,6 +29,11 @@ void UDronePathPlaybackWidget::NativeConstruct()
 	if (StopButton)
 	{
 		StopButton->OnClicked.AddDynamic(this, &UDronePathPlaybackWidget::StopCurrentPlayback);
+	}
+	if (LoopCheckBox)
+	{
+		LoopCheckBox->OnCheckStateChanged.AddDynamic(this, &UDronePathPlaybackWidget::OnLoopCheckChanged);
+		LoopCheckBox->SetIsEnabled(false); // 未选文件时不可用
 	}
 
 	RefreshFileList();
@@ -123,14 +132,10 @@ void UDronePathPlaybackWidget::PlaySelectedFile()
 
 void UDronePathPlaybackWidget::StopCurrentPlayback()
 {
-	if (PlaybackManager && IsValid(PlaybackManager))
-	{
-		PlaybackManager->StopPlayback();
-		SetStatusMessage(TEXT("Playback stopped"));
-		return;
-	}
-
-	SetStatusMessage(TEXT("No active playback"));
+	// 统一走全局停止入口：停掉所有 manager 并销毁所有路径 Actor，
+	// 覆盖"循环路径永不 Completed"与"播放/停止分属不同实例"的情况。
+	ADronePlaybackManager::StopAndClearAllInWorld(GetWorld());
+	SetStatusMessage(TEXT("Playback stopped"));
 }
 
 void UDronePathPlaybackWidget::SelectFile(const FString& FilePath)
@@ -150,7 +155,76 @@ void UDronePathPlaybackWidget::SelectFile(const FString& FilePath)
 		SelectedFileText->SetText(FText::FromString(FPaths::GetCleanFilename(SelectedFilePath)));
 	}
 
+	// 同步循环勾选框到该文件当前的循环状态。
+	UpdateLoopCheckBoxFromSelectedFile();
+
 	SetStatusMessage(FString::Printf(TEXT("Selected %s"), *FPaths::GetCleanFilename(SelectedFilePath)));
+}
+
+void UDronePathPlaybackWidget::UpdateLoopCheckBoxFromSelectedFile()
+{
+	if (!LoopCheckBox)
+	{
+		return;
+	}
+
+	if (SelectedFilePath.IsEmpty())
+	{
+		LoopCheckBox->SetIsEnabled(false);
+		return;
+	}
+
+	FDronePathsSaveData LoadedData;
+	bool bAnyLoop = false;
+	if (UDronePathSaveLibrary::LoadPathsFromJson(SelectedFilePath, LoadedData))
+	{
+		// 该文件里只要有一条路径开了循环，就显示为勾选。
+		for (const FDronePathSaveData& Path : LoadedData.Paths)
+		{
+			if (Path.bClosedLoop)
+			{
+				bAnyLoop = true;
+				break;
+			}
+		}
+	}
+
+	LoopCheckBox->SetIsEnabled(true);
+	// 直接设状态，不触发写回：SetIsChecked 不会广播 OnCheckStateChanged。
+	LoopCheckBox->SetIsChecked(bAnyLoop);
+}
+
+void UDronePathPlaybackWidget::OnLoopCheckChanged(bool bIsChecked)
+{
+	if (SelectedFilePath.IsEmpty())
+	{
+		SetStatusMessage(TEXT("请先选择一个路径文件"));
+		return;
+	}
+
+	FDronePathsSaveData LoadedData;
+	if (!UDronePathSaveLibrary::LoadPathsFromJson(SelectedFilePath, LoadedData))
+	{
+		SetStatusMessage(TEXT("读取文件失败，无法修改循环状态"));
+		return;
+	}
+
+	// 把该文件里所有路径的循环状态统一设为勾选值，并写回同一个文件。
+	for (FDronePathSaveData& Path : LoadedData.Paths)
+	{
+		Path.bClosedLoop = bIsChecked;
+	}
+
+	if (UDronePathSaveLibrary::SavePathsDataToFile(SelectedFilePath, LoadedData))
+	{
+		SetStatusMessage(bIsChecked
+			? FString::Printf(TEXT("已设为循环播放：%s"), *FPaths::GetCleanFilename(SelectedFilePath))
+			: FString::Printf(TEXT("已取消循环：%s"), *FPaths::GetCleanFilename(SelectedFilePath)));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("写回文件失败"));
+	}
 }
 
 ADronePlaybackManager* UDronePathPlaybackWidget::GetOrCreatePlaybackManager()

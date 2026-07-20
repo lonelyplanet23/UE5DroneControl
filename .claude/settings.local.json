@@ -34,7 +34,11 @@
       "Bash(\"C:\\\\Program Files\\\\Epic Games\\\\UE_5.7\\\\Engine\\\\Build\\\\BatchFiles\\\\Build.bat\" UE5DroneControlEditor Win64 DebugGame -Project=\"D:\\\\RedAlert\\\\UE5DroneControl\\\\UE5DroneControl.uproject\" -WaitMutex)",
       "Read(//c/Program Files/**)",
       "Read(//c/Program Files/Epic Games/UE_5.7/Engine/Build/**)",
-      "Bash(reg query *)"
+      "Bash(reg query *)",
+      "Bash(find /c/Users/qianhan/UE5DroneControl -type f \\\\\\(-name *.md -o -name *.txt -o -name *requirement* -o -name *spec* \\\\\\))",
+      "Bash(find /c/Users/qianhan/UE5DroneControl -path /c/Users/qianhan/UE5DroneControl/Intermediate -prune -o -path /c/Users/qianhan/UE5DroneControl/Saved -prune -o -type f \\\\\\(-name *需求* -o -name *架构* -o -name *接口* \\\\\\) -print)",
+      "Bash(find c:UsersqianhanUE5DroneControl -name *BoxSelect* -o -name *box_select*)",
+      "Bash(ls *.uproject)"
     ],
     "additionalDirectories": [
       "\\tmp",

@@ -119,6 +119,8 @@ bool UDronePathSaveLibrary::SavePathsToJson(const TMap<int32, ADronePathActor*>&
 	}
 
 	FDronePathsSaveData SaveData;
+	// 编辑关卡固定使用 DroneId=1 作为源锚点无人机。
+	SaveData.AnchorDroneId = 1;
 	SaveData.Paths.Reserve(PathMap.Num());
 
 	for (const TPair<int32, ADronePathActor*>& PathPair : PathMap)
@@ -156,6 +158,19 @@ bool UDronePathSaveLibrary::SavePathsToJson(const TMap<int32, ADronePathActor*>&
 	{
 		UE_LOG(LogDronePathSaveLibrary, Warning, TEXT("SavePathsToJson failed because no valid non-empty paths were available to save. SaveDirectory='%s'"), *SaveDirectory);
 		return false;
+	}
+
+	// 校验源锚点路径是否存在（PathId == AnchorDroneId 且有航点）。缺失时仅告警，不阻断保存。
+	const bool bHasAnchorPath = SaveData.Paths.ContainsByPredicate(
+		[&SaveData](const FDronePathSaveData& PathData)
+		{
+			return PathData.PathId == SaveData.AnchorDroneId && PathData.Waypoints.Num() > 0;
+		});
+	if (!bHasAnchorPath)
+	{
+		UE_LOG(LogDronePathSaveLibrary, Warning,
+			TEXT("SavePathsToJson: source anchor path (DroneId=%d) is missing or empty. Rotation/translation in preview may fall back to the first path."),
+			SaveData.AnchorDroneId);
 	}
 
 	const FString SaveFilePath = BuildDronePathSaveFilePath(SaveDirectory, FileName);
@@ -230,6 +245,18 @@ bool UDronePathSaveLibrary::SaveAllPathsInWorldToJson(UObject* WorldContextObjec
 	}
 
 	return SavePathsToJson(PathMap, FileName);
+}
+
+bool UDronePathSaveLibrary::SavePathsDataToFile(const FString& FilePath, const FDronePathsSaveData& Data)
+{
+	if (FilePath.IsEmpty())
+	{
+		UE_LOG(LogDronePathSaveLibrary, Warning, TEXT("SavePathsDataToFile failed because FilePath is empty."));
+		return false;
+	}
+
+	// 直接覆盖指定文件（不做 DronePaths 目录拼接）。复用统一的写盘逻辑。
+	return WriteDronePathsSaveDataToJson(Data, FilePath);
 }
 
 bool UDronePathSaveLibrary::LoadPathsFromJson(const FString& FilePath, FDronePathsSaveData& OutData)

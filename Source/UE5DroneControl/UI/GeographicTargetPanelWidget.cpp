@@ -134,6 +134,7 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	WidgetTree->RootWidget = RootCanvas;
 
 	OpenButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("OpenButton"));
+	OpenButton->SetBackgroundColor(FLinearColor(0.08f, 0.42f, 0.64f, 0.95f));
 	UImage* CoordinateIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("CoordinateIcon"));
 	if (UTexture2D* LocationTexture = LoadObject<UTexture2D>(
 			nullptr, TEXT("/Game/SpaceGUI/textures/Icons/64/t_Location_64.t_Location_64")))
@@ -160,25 +161,15 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	}
 
 	UBorder* BodyBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PanelBody"));
-<<<<<<< HEAD
-	BodyBorder->SetBrushColor(FLinearColor(0.025f, 0.035f, 0.055f, 0.96f));
-	BodyBorder->SetPadding(FMargin(16.0f));
-=======
 	BodyBorder->SetBrushColor(PanelBackground);
 	BodyBorder->SetPadding(FMargin(18.0f, 16.0f));
->>>>>>> 77cb3cc (7.22需求)
 	PanelBody = BodyBorder;
 	if (UCanvasPanelSlot* BodySlot = RootCanvas->AddChildToCanvas(BodyBorder))
 	{
 		BodySlot->SetAnchors(FAnchors(1.0f, 0.0f));
 		BodySlot->SetAlignment(FVector2D(1.0f, 0.0f));
-<<<<<<< HEAD
-		BodySlot->SetPosition(FVector2D(-24.0f, 80.0f));
-		BodySlot->SetSize(FVector2D(420.0f, 390.0f));
-=======
 		BodySlot->SetPosition(FVector2D(-28.0f, 84.0f));
 		BodySlot->SetSize(FVector2D(600.0f, 600.0f));
->>>>>>> 77cb3cc (7.22需求)
 	}
 
 	UScrollBox* PanelScroll = WidgetTree->ConstructWidget<UScrollBox>(
@@ -187,19 +178,6 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	BodyBorder->AddChild(PanelScroll);
 	UVerticalBox* Content = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("PanelContent"));
-<<<<<<< HEAD
-	BodyBorder->AddChild(Content);
-	AddPaddedChild(Content, MakeText(WidgetTree, TEXT("TitleText"), TEXT("WGS84 经纬高目标派发")), FMargin(0.0f, 0.0f, 0.0f, 8.0f));
-
-	auto AddInputRow = [this, Content](
-		const FName RowName,
-		const FName LabelName,
-		const FString& Label,
-		const FName InputName,
-		const FString& Hint,
-		TObjectPtr<UEditableTextBox>& OutInput,
-		TObjectPtr<UTextBlock>* OutLabel = nullptr)
-=======
 	PanelScroll->AddChild(Content);
 	UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(
 		UHorizontalBox::StaticClass(), TEXT("HeaderRow"));
@@ -212,7 +190,6 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 		TEXT("粘贴经纬高，一次预览或派发到所选无人机"));
 	StyleText(SubtitleText, 12, SecondaryText);
 	if (UHorizontalBoxSlot* HeaderCopySlot = HeaderRow->AddChildToHorizontalBox(HeaderCopy))
->>>>>>> 77cb3cc (7.22需求)
 	{
 		HeaderCopySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	}
@@ -227,28 +204,6 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	}
 	AddPaddedChild(Content, HeaderRow, FMargin(0.0f, 0.0f, 0.0f, 14.0f));
 
-<<<<<<< HEAD
-		USizeBox* LabelSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		LabelSize->SetWidthOverride(200.0f);
-		LabelSize->AddChild(LabelText);
-		Row->AddChildToHorizontalBox(LabelSize);
-
-		OutInput = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), InputName);
-		OutInput->SetHintText(FText::FromString(Hint));
-		if (UHorizontalBoxSlot* InputSlot = Row->AddChildToHorizontalBox(OutInput))
-		{
-			InputSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		}
-		AddPaddedChild(Content, Row);
-	};
-
-	UHorizontalBox* CoordRow = WidgetTree->ConstructWidget<UHorizontalBox>(
-		UHorizontalBox::StaticClass(), TEXT("CoordinateSystemRow"));
-	USizeBox* CoordLabelSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-	CoordLabelSize->SetWidthOverride(200.0f);
-	CoordLabelSize->AddChild(MakeText(WidgetTree, TEXT("CoordinateSystemLabel"), TEXT("坐标系")));
-	CoordRow->AddChildToHorizontalBox(CoordLabelSize);
-=======
 	UTextBlock* SettingsHeading = MakeText(WidgetTree, TEXT("SettingsHeading"), TEXT("目标设置"));
 	StyleText(SettingsHeading, 12, AccentText, true);
 	AddPaddedChild(Content, SettingsHeading, FMargin(2.0f, 0.0f, 0.0f, 5.0f));
@@ -263,7 +218,6 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	UTextBlock* CoordinateSystemLabel = MakeText(WidgetTree, TEXT("CoordinateSystemLabel"), TEXT("坐标系"));
 	StyleText(CoordinateSystemLabel, 12, SecondaryText);
 	AddPaddedChild(CoordColumn, CoordinateSystemLabel, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
->>>>>>> 77cb3cc (7.22需求)
 	CoordSystemComboBox = WidgetTree->ConstructWidget<UComboBoxString>(
 		UComboBoxString::StaticClass(), TEXT("CoordSystemComboBox"));
 	CoordSystemComboBox->SetContentPadding(FMargin(10.0f, 7.0f));
@@ -273,10 +227,6 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 		CoordColumnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		CoordColumnSlot->SetPadding(FMargin(0.0f, 0.0f, 6.0f, 0.0f));
 	}
-<<<<<<< HEAD
-	AddPaddedChild(Content, CoordRow);
-=======
->>>>>>> 77cb3cc (7.22需求)
 
 	UVerticalBox* ModeColumn = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("DispatchModeColumn"));
@@ -294,10 +244,6 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	}
 	AddPaddedChild(Content, SettingsCard, FMargin(0.0f, 0.0f, 0.0f, 10.0f));
 
-<<<<<<< HEAD
-	SelectedCountText = MakeText(WidgetTree, TEXT("SelectedCountText"), TEXT("已选中无人机：0"));
-	AddPaddedChild(Content, SelectedCountText, FMargin(0.0f, 8.0f, 0.0f, 4.0f));
-=======
 	UBorder* UniformCard = MakeCard(WidgetTree, TEXT("UniformTargetCard"));
 	UniformTargetRow = UniformCard;
 	UVerticalBox* UniformContent = WidgetTree->ConstructWidget<UVerticalBox>(
@@ -403,33 +349,24 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	StyleText(SelectedCountText, 13, AccentText, true);
 	SelectionSummary->AddChild(SelectedCountText);
 	AddPaddedChild(Content, SelectionSummary, FMargin(0.0f, 0.0f, 0.0f, 8.0f));
->>>>>>> 77cb3cc (7.22需求)
 
 	UHorizontalBox* ActionRow = WidgetTree->ConstructWidget<UHorizontalBox>(
 		UHorizontalBox::StaticClass(), TEXT("ActionRow"));
 	PreviewButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("PreviewButton"));
-<<<<<<< HEAD
-	PreviewButton->AddChild(MakeText(WidgetTree, TEXT("PreviewButtonText"), TEXT("位置预览")));
-=======
 	PreviewButton->SetBackgroundColor(FLinearColor(0.08f, 0.28f, 0.40f, 1.0f));
 	UTextBlock* PreviewButtonText = MakeText(WidgetTree, TEXT("PreviewButtonText"), TEXT("位置预览"));
 	StyleText(PreviewButtonText, 14, PrimaryText, true);
 	PreviewButton->AddChild(PreviewButtonText);
->>>>>>> 77cb3cc (7.22需求)
 	if (UHorizontalBoxSlot* PreviewSlot = ActionRow->AddChildToHorizontalBox(PreviewButton))
 	{
 		PreviewSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		PreviewSlot->SetPadding(FMargin(0.0f, 0.0f, 4.0f, 0.0f));
 	}
 	DispatchButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("DispatchButton"));
-<<<<<<< HEAD
-	DispatchButton->AddChild(MakeText(WidgetTree, TEXT("DispatchButtonText"), TEXT("派发")));
-=======
 	DispatchButton->SetBackgroundColor(FLinearColor(0.04f, 0.48f, 0.54f, 1.0f));
 	UTextBlock* DispatchButtonText = MakeText(WidgetTree, TEXT("DispatchButtonText"), TEXT("派发目标"));
 	StyleText(DispatchButtonText, 14, PrimaryText, true);
 	DispatchButton->AddChild(DispatchButtonText);
->>>>>>> 77cb3cc (7.22需求)
 	if (UHorizontalBoxSlot* DispatchSlot = ActionRow->AddChildToHorizontalBox(DispatchButton))
 	{
 		DispatchSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -441,10 +378,7 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	StatusPanel = StatusCard;
 	StatusCard->SetPadding(FMargin(12.0f, 9.0f));
 	StatusText = MakeText(WidgetTree, TEXT("StatusText"), TEXT("请先选择无人机"));
-<<<<<<< HEAD
-=======
 	StyleText(StatusText, 12, FLinearColor(0.72f, 0.80f, 0.88f, 1.0f));
->>>>>>> 77cb3cc (7.22需求)
 	StatusText->SetAutoWrapText(true);
 	StatusCard->AddChild(StatusText);
 	AddPaddedChild(Content, StatusCard, FMargin(0.0f));
@@ -885,13 +819,9 @@ void UGeographicTargetPanelWidget::RefreshAvailability()
 			}
 			else
 			{
-				const FGeographicDispatchResult DispatchReadiness = Controller->ValidateGeographicTarget(
-					CoordinateSystem, Longitude, Latitude, AltitudeMsl, true);
-				bCanDispatch = DispatchReadiness.bSuccess;
-				if (!bCanDispatch)
-				{
-					BlockingMessage = DispatchReadiness.Message;
-				}
+				// A local shadow-drone dispatch is always meaningful. Backend connection and GPS anchors
+				// only decide whether the same target can also be sent right now, not whether the button works.
+				bCanDispatch = true;
 			}
 		}
 	}
@@ -1079,6 +1009,17 @@ void UGeographicTargetPanelWidget::RunDispatch(bool bPreviewOnly)
 	if (!TryReadTarget(Longitude, Latitude, AltitudeMsl, InputError))
 	{
 		SetStatusMessage(InputError);
+		return;
+	}
+
+	// 编辑模式下：坐标输入不派发无人机飞过去，而是在所有在编路径上加一个航点。
+	// 预览(bPreviewOnly)仍走常规坐标预览（画标记，不改路径）。
+	if (!bPreviewOnly && Controller->IsPathEditMode())
+	{
+		const FGeographicDispatchResult EditResult = Controller->AddGeographicWaypointInEditMode(
+			GetSelectedCoordinateSystem(), Longitude, Latitude, AltitudeMsl);
+		LastReadinessMessage.Reset();
+		SetStatusMessage(EditResult.Message);
 		return;
 	}
 

@@ -50,7 +50,22 @@ public:
 
     void CheckTimeouts(int timeout_sec);
 
+    // UDP 是无连接协议。对 Offline/Lost 设备重新发送安全 hold 心跳，
+    // 让 Jetson 能重新发现后端；真正恢复 Online 仍以收到遥测为准。
+    std::vector<int> RefreshDisconnectedConnections();
+
     GpsAnchorManager& GetAnchorManager() { return anchor_manager_; }
+
+    //===== task_state callback =====
+    using TaskStateCallback = std::function<void(int drone_id, 
+                                                 const std::string& state,
+                                                 const std::string& detail,
+                                                 int current_wp, 
+                                                 int total_wp)>;
+    void SetTaskStateCallback(TaskStateCallback cb);
+    void SetDroneTaskState(int drone_id, const std::string& state,
+                           const std::string& detail = "",
+                           int current_wp = 0, int total_wp = 0);
 
 private:
     DroneContext* GetContext(int drone_id);
@@ -71,4 +86,6 @@ private:
     StateChangeCallback state_change_cb_;
     AlertCallback alert_cb_;
     AssemblyCallback assembly_cb_;
+
+    TaskStateCallback task_state_cb_;
 };

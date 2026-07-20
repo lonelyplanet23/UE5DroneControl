@@ -122,7 +122,7 @@ private:
     void CheckAvoidanceLoop();
     void RestoreExpiredAvoidanceTargets(const std::chrono::steady_clock::time_point& now);
     void EmitTaskState(int drone_id, const std::string& state,
-                       const std::string& detail = "");
+                       const std::string& detail = "", int current_wp = -1);
     static std::string RunningStateForMode(const std::string& mode);
 
     double arrival_threshold_m_;
@@ -146,6 +146,7 @@ private:
         double base_ned_n = 0, base_ned_e = 0, base_ned_d = 0;
         double ned_n = 0, ned_e = 0, ned_d = 0;
         bool avoidance_active = false;
+		std::string previous_task_state;
         std::chrono::steady_clock::time_point avoidance_restore_at{};
         std::chrono::steady_clock::time_point avoidance_cooldown_until{};
     };
@@ -156,4 +157,5 @@ private:
     AvoidanceStats avoidance_stats_;
 
     std::thread avoidance_thread_;
+
 };

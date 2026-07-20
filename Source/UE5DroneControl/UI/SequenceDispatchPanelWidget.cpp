@@ -15,6 +15,7 @@
 #include "DroneOps/Network/DroneNetworkManager.h"
 #include "DroneOps/Control/DroneOpsPlayerController.h"
 #include "PathEditor/DronePathActor.h"
+#include "PathEditor/DronePlaybackManager.h"
 #include "PreviewConfirmPopupWidget.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -55,6 +56,10 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 	{
 		OpenButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnOpenButtonClicked);
 	}
+	if (GlobalStopButton)
+	{
+		GlobalStopButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnGlobalStopClicked);
+	}
 	if (DispatchButton)
 	{
 		DispatchButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnDispatchClicked);
@@ -72,6 +77,11 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 		AutoAssignCheckBox->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnAutoAssignCheckChanged);
 		bAutoAssignEnabled = AutoAssignCheckBox->IsChecked();
 	}
+	if (LocalPatrolSimulationToggle)
+	{
+		LocalPatrolSimulationToggle->OnCheckStateChanged.AddDynamic(
+			this, &USequenceDispatchPanelWidget::OnLocalPatrolSimulationToggleChanged);
+	}
 	if (PathEditToggle)
 	{
 		PathEditToggle->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnPathEditToggleChanged);
@@ -79,8 +89,17 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 	if (SavePathButton)
 	{
 		SavePathButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnSavePathClicked);
-		SavePathButton->SetVisibility(ESlateVisibility::Collapsed);
 	}
+	if (PlayEditPathButton)
+	{
+		PlayEditPathButton->OnClicked.AddDynamic(this, &USequenceDispatchPanelWidget::OnPlayEditPathClicked);
+	}
+	if (EditLoopCheckBox)
+	{
+		EditLoopCheckBox->OnCheckStateChanged.AddDynamic(this, &USequenceDispatchPanelWidget::OnEditLoopCheckChanged);
+	}
+	// 初始隐藏全部编辑相关控件（保存/播放/停止/循环），进入编辑模式再显示。
+	SetEditControlsVisible(false);
 	PopulateModeComboBox();
 
 	if (UGameInstance* GI = GetGameInstance())
@@ -89,6 +108,10 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 		{
 			AssignmentResultHandle = NetMgr->OnAssignmentResult.AddUObject(
 				this, &USequenceDispatchPanelWidget::HandleAssignmentResult);
+			AssemblyCompleteHandle = NetMgr->OnAssemblyComplete.AddUObject(
+				this, &USequenceDispatchPanelWidget::OnAssemblyCompleteForDispatch);
+			AssemblyTimeoutHandle = NetMgr->OnAssemblyTimeout.AddUObject(
+				this, &USequenceDispatchPanelWidget::OnAssemblyTimeoutForDispatch);
 		}
 	}
 
@@ -97,6 +120,10 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 
 void USequenceDispatchPanelWidget::NativeDestruct()
 {
+	// 面板销毁：清理编队旋转预览可视化与 Gizmo
+	StopFormationRotatePreview();
+	EndLocalPatrolSimulation(true);
+
 	// 编辑中被销毁：清理临时路径，避免残留
 	if (bInPathEditMode)
 	{
@@ -107,16 +134,27 @@ void USequenceDispatchPanelWidget::NativeDestruct()
 		bInPathEditMode = false;
 	}
 
-	if (AssignmentResultHandle.IsValid())
+	if (UGameInstance* GI = GetGameInstance())
 	{
-		if (UGameInstance* GI = GetGameInstance())
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 		{
-			if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+			// 三个句柄各自独立移除，互不依赖，避免订阅模式变化时漏移除造成悬挂订阅。
+			if (AssignmentResultHandle.IsValid())
 			{
 				NetMgr->OnAssignmentResult.Remove(AssignmentResultHandle);
+				AssignmentResultHandle.Reset();
+			}
+			if (AssemblyCompleteHandle.IsValid())
+			{
+				NetMgr->OnAssemblyComplete.Remove(AssemblyCompleteHandle);
+				AssemblyCompleteHandle.Reset();
+			}
+			if (AssemblyTimeoutHandle.IsValid())
+			{
+				NetMgr->OnAssemblyTimeout.Remove(AssemblyTimeoutHandle);
+				AssemblyTimeoutHandle.Reset();
 			}
 		}
-		AssignmentResultHandle.Reset();
 	}
 
 	Super::NativeDestruct();
@@ -191,6 +229,9 @@ void USequenceDispatchPanelWidget::OnOpenButtonClicked()
 
 void USequenceDispatchPanelWidget::OnBackClicked()
 {
+	// 离开匹配界面：收起编队旋转预览
+	StopFormationRotatePreview();
+
 	if (CurrentState == ESequencePanelState::Matching)
 	{
 		MatchedPairs.Empty();
@@ -240,6 +281,8 @@ void USequenceDispatchPanelWidget::ScanDronePathFiles()
 
 void USequenceDispatchPanelWidget::OnFileSelected(const FString& FilePath)
 {
+	StopFormationRotatePreview();
+
 	LoadedPathsData = FDronePathsSaveData();
 	if (!UDronePathSaveLibrary::LoadPathsFromJson(FilePath, LoadedPathsData))
 	{
@@ -257,7 +300,58 @@ void USequenceDispatchPanelWidget::OnFileSelected(const FString& FilePath)
 	SelectedPathIndex = INDEX_NONE;
 	PopulateMatchingView();
 	SetPanelState(ESequencePanelState::Matching);
-	SetStatusMessage(FString::Printf(TEXT("已加载 %d 条路径，先点击 Path，再点击无人机分配"), LoadedPathsData.Paths.Num()));
+
+	// 生成预览可视化 + 锚点旋转环 Gizmo：可实时拖动旋转整组路径。
+	StartFormationRotatePreview();
+
+	SetStatusMessage(FString::Printf(TEXT("已加载 %d 条路径，先点击 Path，再点击无人机分配（可拖动锚点旋转环旋转编队）"), LoadedPathsData.Paths.Num()));
+}
+
+void USequenceDispatchPanelWidget::StartFormationRotatePreview()
+{
+	if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+	{
+		if (!PC->BeginFormationRotatePreview(LoadedPathsData))
+		{
+			SetStatusMessage(TEXT("未找到可用的运行锚点无人机，无法生成旋转预览（请选中一架无人机）"));
+		}
+	}
+}
+
+void USequenceDispatchPanelWidget::StopFormationRotatePreview()
+{
+	if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+	{
+		PC->EndFormationRotatePreview();
+	}
+}
+
+FVector USequenceDispatchPanelWidget::GetSourceAnchorEditOrigin() const
+{
+	// 源锚点：JSON 中 AnchorDroneId 对应路径的首航点；缺失退回第一条有效路径首航点。
+	const FDronePathSaveData* AnchorPath = LoadedPathsData.Paths.FindByPredicate(
+		[this](const FDronePathSaveData& P)
+		{
+			return P.PathId == LoadedPathsData.AnchorDroneId && P.Waypoints.Num() > 0;
+		});
+	if (!AnchorPath)
+	{
+		AnchorPath = LoadedPathsData.Paths.FindByPredicate(
+			[](const FDronePathSaveData& P) { return P.Waypoints.Num() > 0; });
+	}
+	return AnchorPath ? AnchorPath->Waypoints[0].Location : FVector::ZeroVector;
+}
+
+FDronePathSaveData USequenceDispatchPanelWidget::BuildTransformedPath(const FDronePathSaveData& SourcePath, const FVector& TargetBase, float YawDegrees) const
+{
+	// 拷贝原始路径 -> 运行副本；只变换坐标，绝不修改原始 JSON 数据。
+	FDronePathSaveData Result = SourcePath;
+	const FVector RefEditOrigin = GetSourceAnchorEditOrigin();
+	for (FDroneWaypointSaveData& Wp : Result.Waypoints)
+	{
+		Wp.Location = ADroneOpsPlayerController::ApplyFormationTransform(Wp.Location, RefEditOrigin, TargetBase, YawDegrees);
+	}
+	return Result;
 }
 
 void USequenceDispatchPanelWidget::PopulateMatchingView()
@@ -449,6 +543,12 @@ void USequenceDispatchPanelWidget::OnAutoAssignCheckChanged(bool bIsChecked)
 
 void USequenceDispatchPanelWidget::OnDispatchClicked()
 {
+	UE_LOG(LogTemp, Warning, TEXT("[Dispatch] OnDispatchClicked entered: matched=%d paths=%d autoAssign=%d"),
+		MatchedPairs.Num(), LoadedPathsData.Paths.Num(), bAutoAssignEnabled ? 1 : 0);
+
+	// 新一轮派发开始：复位集结早到兜底标志，避免上一批的完成信号误放行本批。
+	bAssemblyReleasePending = false;
+
 	if (!bAutoAssignEnabled && MatchedPairs.Num() != LoadedPathsData.Paths.Num())
 	{
 		SetStatusMessage(TEXT("请先完成所有路径匹配"));
@@ -470,6 +570,12 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 	UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>();
 	if (!NetMgr) return;
 
+	if (!NetMgr->CanSendToBackend())
+	{
+		SetStatusMessage(UDroneNetworkManager::GetIsolationBlockedMessage());
+		return;
+	}
+
 	UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>();
 	if (!Registry) return;
 
@@ -489,17 +595,33 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 		}
 	}
 
-	// Find reference drone: lowest DroneId among matched drones
+	// 参考无人机 = 预演用的运行锚点无人机（主选中，无选中则最小可用 DroneId），
+	// 保证派发与本地预演用同一个锚点，落点一致（验收12）。旋转角也取自同一预览状态。
+	ADroneOpsPlayerController* OpsPC = GetDroneOpsController();
+	const bool bFormationActive = OpsPC && OpsPC->IsFormationRotateActive();
+
 	int32 RefDroneId = MAX_int32;
-	for (const auto& Pair : DispatchMap)
+	float Yaw = 0.0f;
+	if (bFormationActive)
 	{
-		if (Pair.Key < RefDroneId)
+		RefDroneId = OpsPC->GetFormationRunAnchorDroneId();
+		Yaw = OpsPC->GetFormationYawDegrees();
+	}
+
+	// 回退：编队预览未激活时（理论上不会发生），用匹配无人机里最小 DroneId。
+	if (RefDroneId == MAX_int32 || RefDroneId <= 0)
+	{
+		RefDroneId = MAX_int32;
+		for (const auto& Pair : DispatchMap)
 		{
-			RefDroneId = Pair.Key;
+			if (Pair.Key < RefDroneId)
+			{
+				RefDroneId = Pair.Key;
+			}
 		}
 	}
 
-	// Get reference drone's GPS anchor (UE world location, cm)
+	// 参考锚点：真机优先用该运行锚点无人机的 GPS 锚点（Cesium 世界坐标）。
 	FVector RefAnchor = FVector::ZeroVector;
 	bool bHasAnchor = false;
 	if (AActor* ReceiverActor = Registry->GetReceiverActor(RefDroneId))
@@ -516,32 +638,43 @@ void USequenceDispatchPanelWidget::OnDispatchClicked()
 
 	if (!bHasAnchor)
 	{
-		SetStatusMessage(FString::Printf(TEXT("参考机 DroneId=%d 尚未获得GPS锚点，请等待上电信息"), RefDroneId));
-		return;
+		// 无 GPS 锚点（如假后端 mock_server）：回退用运行锚点世界位置，
+		// 与本地预演完全一致（GetFormationRunAnchorWorld() 即该无人机影子机当前位置）。
+		if (bFormationActive)
+		{
+			RefAnchor = OpsPC->GetFormationRunAnchorWorld();
+			bHasAnchor = true;
+		}
+		else if (APawn* ShadowPawn = Registry->GetSenderPawn(RefDroneId))
+		{
+			RefAnchor = ShadowPawn->GetActorLocation();
+			bHasAnchor = true;
+		}
+
+		if (bHasAnchor)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Dispatch] No GPS anchor for DroneId=%d; using run-anchor world location (debug)."), RefDroneId);
+			SetStatusMessage(FString::Printf(TEXT("锚点机 DroneId=%d 无GPS锚点，使用运行锚点位置派发（调试模式）"), RefDroneId));
+		}
 	}
 
-	// Get reference path's first waypoint as the coordinate origin in edit-map space
-	const FDronePathSaveData& RefPath = DispatchMap[RefDroneId];
-	if (RefPath.Waypoints.IsEmpty())
+	if (!bHasAnchor)
 	{
-		SetStatusMessage(TEXT("参考机路径没有航点"));
+		SetStatusMessage(FString::Printf(TEXT("锚点机 DroneId=%d 尚未获得GPS锚点，且无影子机可用"), RefDroneId));
 		return;
 	}
-	const FVector RefEditOrigin = RefPath.Waypoints[0].Location;
 
-	// Remap all waypoints: offset relative to ref path origin, then add ref anchor
+	// Remap all waypoints: 以源锚点为几何参考做水平旋转，再平移到参考机 GPS 锚点(Cesium 世界)。
+	// 旋转角与源锚点原点与本地预演完全一致，仅平移基准不同（预演=运行锚点，派发=GPS 锚点）。
+	// 全部作用于运行副本，不修改原始 JSON。
 	TMap<int32, FDronePathSaveData> RemappedMap;
 	for (auto& Pair : DispatchMap)
 	{
-		FDronePathSaveData Remapped = Pair.Value;
-		for (FDroneWaypointSaveData& Wp : Remapped.Waypoints)
-		{
-			// (EditMap_Waypoint - EditMap_RefOrigin) gives shape-relative offset
-			// Add RefAnchor to place in Cesium world space
-			Wp.Location = (Wp.Location - RefEditOrigin) + RefAnchor;
-		}
-		RemappedMap.Add(Pair.Key, Remapped);
+		RemappedMap.Add(Pair.Key, BuildTransformedPath(Pair.Value, RefAnchor, Yaw));
 	}
+
+	// 派发前收起旋转环：已派发的路径不再允许拖动旋转，避免目标突然跳变。
+	StopFormationRotatePreview();
 
 	FOnHttpResponse Callback;
 	Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnDispatchResponse);
@@ -582,26 +715,26 @@ void USequenceDispatchPanelWidget::DispatchWithAutoAssign(UDroneNetworkManager* 
 		return;
 	}
 
-	// 以第一条路径的首航点为编辑系原点，整体平移到参考机锚点（与手动模式的重映射一致）
-	const FDronePathSaveData& RefPath = LoadedPathsData.Paths[0];
-	if (RefPath.Waypoints.IsEmpty())
+	// 当前编队旋转角（与本地预演一致）；无预览时按 0 度处理（纯平移）。
+	float Yaw = 0.0f;
+	if (ADroneOpsPlayerController* PC = GetDroneOpsController())
 	{
-		SetStatusMessage(TEXT("第一条路径没有航点"));
-		return;
+		if (PC->IsFormationRotateActive())
+		{
+			Yaw = PC->GetFormationYawDegrees();
+		}
 	}
-	const FVector RefEditOrigin = RefPath.Waypoints[0].Location;
 
-	// PathId -> 重映射后的路径；drone_id 由后端分配
+	// PathId -> 运行副本：以源锚点为几何参考旋转，再整体平移到参考机 GPS 锚点；drone_id 由后端分配。
+	// 与手动派发/本地预演使用完全一致的旋转 + 源锚点原点，仅平移基准不同。不修改原始 JSON。
 	TMap<int32, FDronePathSaveData> RemappedByPathId;
 	for (const FDronePathSaveData& Path : LoadedPathsData.Paths)
 	{
-		FDronePathSaveData Remapped = Path;
-		for (FDroneWaypointSaveData& Wp : Remapped.Waypoints)
-		{
-			Wp.Location = (Wp.Location - RefEditOrigin) + RefAnchor;
-		}
-		RemappedByPathId.Add(Path.PathId, Remapped);
+		RemappedByPathId.Add(Path.PathId, BuildTransformedPath(Path, RefAnchor, Yaw));
 	}
+
+	// 派发前收起旋转环。
+	StopFormationRotatePreview();
 
 	FOnHttpResponse Callback;
 	Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnDispatchResponse);
@@ -659,6 +792,14 @@ void USequenceDispatchPanelWidget::OnModeSelectionChanged(FString SelectedItem, 
 	DispatchMode = DroneCommandModeFromProtocolString(SelectedItem);
 }
 
+void USequenceDispatchPanelWidget::OnLocalPatrolSimulationToggleChanged(bool bIsChecked)
+{
+	if (!bIsChecked)
+	{
+		EndLocalPatrolSimulation();
+	}
+}
+
 void USequenceDispatchPanelWidget::OnDispatchResponse(bool bSuccess, const FString& ResponseBody)
 {
 	if (bSuccess)
@@ -701,26 +842,45 @@ void USequenceDispatchPanelWidget::OnLocalPreviewClicked()
 		return;
 	}
 
-	// 不发送后端请求，直接用匹配结果驱动影子机本地播放
+	// 运行锚点（影子机当前世界位置）+ 当前编队旋转角，作为本地预演的放置基准。
+	ADroneOpsPlayerController* PC = GetDroneOpsController();
+	if (!PC || !PC->IsFormationRotateActive())
+	{
+		SetStatusMessage(TEXT("无有效运行锚点，无法预演（请选中一架无人机后重新加载路径）"));
+		return;
+	}
+	const FVector RunAnchor = PC->GetFormationRunAnchorWorld();
+	const float Yaw = PC->GetFormationYawDegrees();
+
+	// 不发送后端请求，直接用匹配结果驱动影子机本地播放。
+	// 应用与派发完全一致的旋转 + 平移，仅作用于运行副本，不修改原始 JSON。
 	TMap<int32, FDronePathSaveData> PreviewMap;
 	for (const auto& Pair : MatchedPairs)
 	{
 		if (LoadedPathsData.Paths.IsValidIndex(Pair.Key))
 		{
-			PreviewMap.Add(Pair.Value, LoadedPathsData.Paths[Pair.Key]);
+			PreviewMap.Add(Pair.Value, BuildTransformedPath(LoadedPathsData.Paths[Pair.Key], RunAnchor, Yaw));
 		}
 	}
 
+	// 预演开始前收起旋转环，避免执行中继续拖动导致目标跳变。
+	StopFormationRotatePreview();
+
 	PendingRemappedMap = PreviewMap;
 	StartShadowDronePlayback();
+	BeginLocalPatrolSimulation(PreviewMap);
 
-	SetStatusMessage(TEXT("本地预演已开始（未向后端发送指令）"));
+	SetStatusMessage(IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol
+		? TEXT("本地巡逻模拟已开始：影子机可识别目标（未向后端发送指令）")
+		: TEXT("本地预演已开始（未向后端发送指令）"));
 	MatchedPairs.Empty();
 	SetPanelState(ESequencePanelState::Collapsed);
 }
 
 void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
 {
+	EndLocalPatrolSimulation(true);
+
 	for (ADronePathActor* PathActor : ActiveDispatchPathActors)
 	{
 		if (IsValid(PathActor))
@@ -732,9 +892,193 @@ void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
 	ActiveDispatchPathActors.Empty();
 }
 
+void USequenceDispatchPanelWidget::OnGlobalStopClicked()
+{
+	// 1. 全局停止并销毁所有 manager 与路径 Actor（含卡在循环中的 JSON 播放）。
+	ADronePlaybackManager::StopAndClearAllInWorld(GetWorld());
+
+	// 2. 本面板派发路径 Actor 已被上面销毁，仅清引用。
+	ActiveDispatchPathActors.Empty();
+	EndLocalPatrolSimulation(true);
+
+	// 3. 若在编辑模式：清理临时路径并复位编辑状态与 UI。
+	if (bInPathEditMode)
+	{
+		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+		{
+			PC->EndPathEditMode();
+			PC->ClearEditingPaths();
+		}
+		ResetPathEditState();
+	}
+
+	// 4. 清空待发送缓存与待启动缓存。
+	PendingRemappedMap.Empty();
+	PendingArrivalPaths.Empty();
+	bAssemblyReleasePending = false;
+
+	SetStatusMessage(TEXT("已全局停止并清除所有路径"));
+}
+
+void USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged(ADronePathActor* PathActor, EDronePathExecutionState NewState)
+{
+	// 仅在路径播放完成时自动清除（循环路径永不 Completed，保留至全局停止）。
+	if (NewState != EDronePathExecutionState::Completed || !IsValid(PathActor))
+	{
+		return;
+	}
+
+	ActiveDispatchPathActors.Remove(PathActor);
+	PathActor->StopMovement();
+	PathActor->Destroy();
+
+	if (ActiveDispatchPathActors.IsEmpty())
+	{
+		EndLocalPatrolSimulation();
+	}
+}
+
+bool USequenceDispatchPanelWidget::IsLocalPatrolSimulationEnabled() const
+{
+	return LocalPatrolSimulationToggle && LocalPatrolSimulationToggle->IsChecked();
+}
+
+void USequenceDispatchPanelWidget::BeginLocalPatrolSimulation(const TMap<int32, FDronePathSaveData>& PreviewMap)
+{
+	if (DispatchMode != EDroneCommandMode::Patrol || !IsLocalPatrolSimulationEnabled())
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+	if (!Registry)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[LocalPatrolSimulation] Drone registry unavailable"));
+		return;
+	}
+
+	for (const TPair<int32, FDronePathSaveData>& Pair : PreviewMap)
+	{
+		if (Pair.Key <= 0 || Pair.Value.Waypoints.IsEmpty())
+		{
+			continue;
+		}
+
+		Registry->UpdateLocalState(Pair.Key, EUELocalDroneState::LocalPatrolling);
+		LocalPatrolSimulationDroneIds.Add(Pair.Key);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[LocalPatrolSimulation] Enabled for %d local preview drone(s)"),
+		LocalPatrolSimulationDroneIds.Num());
+}
+
+void USequenceDispatchPanelWidget::EndLocalPatrolSimulation(bool bForceClearAllLocalStates)
+{
+	if (LocalPatrolSimulationDroneIds.IsEmpty())
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+	if (Registry)
+	{
+		for (int32 DroneId : LocalPatrolSimulationDroneIds)
+		{
+			FDroneTelemetrySnapshot Snapshot;
+			if (!Registry->GetTelemetry(DroneId, Snapshot))
+			{
+				continue;
+			}
+
+			const bool bShouldClear = bForceClearAllLocalStates ||
+				Snapshot.LocalState == EUELocalDroneState::LocalPatrolling;
+			if (bShouldClear)
+			{
+				Registry->UpdateLocalState(DroneId, EUELocalDroneState::None);
+			}
+		}
+	}
+
+	LocalPatrolSimulationDroneIds.Empty();
+}
+
+bool USequenceDispatchPanelWidget::IsOnlineRealDrone(int32 DroneId) const
+{
+	UGameInstance* GI = GetGameInstance();
+	UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+	if (!Registry)
+	{
+		return false;
+	}
+
+	FDroneTelemetrySnapshot Snap;
+	if (!Registry->GetTelemetry(DroneId, Snap) || Snap.Availability != EDroneAvailability::Online)
+	{
+		return false;
+	}
+
+	// 镜像机存在且已拿到 GPS 锚点，才有真实位置可供影子机跟随等待。
+	if (ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(Registry->GetReceiverActor(DroneId)))
+	{
+		return Receiver->bHasGpsAnchor;
+	}
+	return false;
+}
+
+void USequenceDispatchPanelWidget::StartPendingArrivalPaths()
+{
+	for (const FPendingArrivalPath& Pending : PendingArrivalPaths)
+	{
+		ADronePathActor* PathActor = Pending.PathActor.Get();
+		APawn* ShadowPawn = Pending.ShadowPawn.Get();
+		if (!IsValid(PathActor) || !IsValid(ShadowPawn))
+		{
+			continue;
+		}
+
+		if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
+		{
+			Shadow->bFollowingMirror = false;
+		}
+		PathActor->StartMovement(ShadowPawn);
+	}
+	PendingArrivalPaths.Empty();
+	bAssemblyReleasePending = false;
+}
+
+void USequenceDispatchPanelWidget::OnAssemblyCompleteForDispatch(const FString& ArrayId)
+{
+	if (PendingArrivalPaths.IsEmpty())
+	{
+		// 事件早于路径入队到达：记下完成信号，待 StartShadowDronePlayback 入队后立即放行。
+		bAssemblyReleasePending = true;
+		return;
+	}
+	StartPendingArrivalPaths();
+	SetStatusMessage(TEXT("集结完成，真机已到位，开始沿路径播放"));
+}
+
+void USequenceDispatchPanelWidget::OnAssemblyTimeoutForDispatch(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
+{
+	// 兜底：集结超时也放行，避免路径永久卡在等待。
+	if (PendingArrivalPaths.IsEmpty())
+	{
+		// 事件早于路径入队到达：记下放行信号，待入队后立即放行。
+		bAssemblyReleasePending = true;
+		return;
+	}
+	StartPendingArrivalPaths();
+	SetStatusMessage(FString::Printf(TEXT("集结超时（%d/%d），仍启动路径播放"), ReadyCount, TotalCount));
+}
+
 void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 {
 	ClearActiveDispatchPaths();
+
+	// 清除上一批遗留的待启动项，避免新旧混放（ClearActiveDispatchPaths 已销毁其路径 Actor）。
+	PendingArrivalPaths.Empty();
 
 	if (PendingRemappedMap.IsEmpty())
 	{
@@ -764,10 +1108,15 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 		APawn* ShadowPawn = Registry->GetSenderPawn(DroneId);
 		if (!IsValid(ShadowPawn)) continue;
 
-		// 停止跟随镜像机，否则 Tick 会每帧把影子机拉回镜像机位置
-		if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
+		const bool bWaitForArrival = IsOnlineRealDrone(DroneId);
+
+		// 离线 / mock：立即停止跟随镜像机；在线真机：保持跟随，等集结完成再解除。
+		if (!bWaitForArrival)
 		{
-			Shadow->bFollowingMirror = false;
+			if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
+			{
+				Shadow->bFollowingMirror = false;
+			}
 		}
 
 		// Spawn DronePathActor
@@ -781,7 +1130,7 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 		PathActor->bClosedLoop = PathData.bClosedLoop;
 
 		// segmentSpeed=0 表示"使用默认速度"，DronePathActor 需要 >0 的速度才能正常计算 duration
-		constexpr float DefaultSpeedMps = 5.0f;
+		const float DefaultSpeedMps = ADronePathActor::GetDefaultSegmentSpeedMps();
 
 		for (int32 i = 0; i < PathData.Waypoints.Num(); ++i)
 		{
@@ -796,15 +1145,38 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 		}
 
 		PathActor->RefreshPath();
-		PathActor->StartMovement(ShadowPawn);
+		PathActor->OnExecutionStateChanged.AddUObject(
+			this, &USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged);
 
 		ActiveDispatchPathActors.Add(PathActor);
 
-		UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Shadow drone DroneId=%d started playback along path %d"),
-			DroneId, PathData.PathId);
+		if (bWaitForArrival)
+		{
+			// 在线真机：先不启动，等 assembly_complete 放行。
+			FPendingArrivalPath Pending;
+			Pending.PathActor = PathActor;
+			Pending.ShadowPawn = ShadowPawn;
+			PendingArrivalPaths.Add(Pending);
+
+			UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Online drone DroneId=%d path %d spawned, waiting for assembly_complete"),
+				DroneId, PathData.PathId);
+		}
+		else
+		{
+			PathActor->StartMovement(ShadowPawn);
+			UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Shadow drone DroneId=%d started playback along path %d"),
+				DroneId, PathData.PathId);
+		}
 	}
 
 	PendingRemappedMap.Empty();
+
+	// 兜底：若集结完成/超时事件在入队前已到达，此处立即放行等待中的在线真机路径。
+	if (bAssemblyReleasePending && !PendingArrivalPaths.IsEmpty())
+	{
+		StartPendingArrivalPaths();
+		SetStatusMessage(TEXT("集结已完成（事件早到），开始沿路径播放"));
+	}
 }
 
 // ================= 路径编辑模式 =================
@@ -835,10 +1207,11 @@ void USequenceDispatchPanelWidget::OnPathEditToggleChanged(bool bIsChecked)
 			}
 		}
 
+		// 不再要求先选中无人机：可空手进入，进入后点击场景中的无人机动态增删。
 		ADroneOpsPlayerController* PC = GetDroneOpsController();
-		if (!PC || DroneIds.IsEmpty() || !PC->BeginPathEditMode(DroneIds))
+		if (!PC || !PC->BeginPathEditMode(DroneIds))
 		{
-			SetStatusMessage(TEXT("请先选择无人机再进入编辑模式"));
+			SetStatusMessage(TEXT("无法进入编辑模式"));
 			// 复位 Toggle（避免递归：SetIsChecked 不触发 OnCheckStateChanged）
 			if (PathEditToggle)
 			{
@@ -848,11 +1221,15 @@ void USequenceDispatchPanelWidget::OnPathEditToggleChanged(bool bIsChecked)
 		}
 
 		bInPathEditMode = true;
-		if (SavePathButton)
+		// 进入编辑模式：显示保存/播放/停止/循环控件，循环框复位为未勾选。
+		SetEditControlsVisible(true);
+		if (EditLoopCheckBox)
 		{
-			SavePathButton->SetVisibility(ESlateVisibility::Visible);
+			EditLoopCheckBox->SetIsChecked(false);
 		}
-		SetStatusMessage(FString::Printf(TEXT("编辑模式：%d 架无人机，点击地图加航点，拖拽 gizmo 微调"), DroneIds.Num()));
+		SetStatusMessage(DroneIds.IsEmpty()
+			? FString(TEXT("编辑模式：点击无人机加入编辑，点地图加航点，拖拽 gizmo 微调"))
+			: FString::Printf(TEXT("编辑模式：%d 架无人机，点击无人机可增减，点地图加航点，拖拽 gizmo 微调"), DroneIds.Num()));
 	}
 	else
 	{
@@ -861,18 +1238,18 @@ void USequenceDispatchPanelWidget::OnPathEditToggleChanged(bool bIsChecked)
 			return;
 		}
 
+		// 取消编辑模式 = 直接退出并清空（等同三选弹窗的"取消"）：
+		// 销毁临时 ADronePathActor、航点 Actor 与缓存数据，场景不残留。
 		bInPathEditMode = false;
-		if (SavePathButton)
-		{
-			SavePathButton->SetVisibility(ESlateVisibility::Collapsed);
-		}
 
 		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
 		{
 			PC->EndPathEditMode();
+			PC->ClearEditingPaths();
 		}
 
-		ShowPreviewConfirmPopup();
+		ResetPathEditState();
+		SetStatusMessage(TEXT("已退出编辑模式，临时路径已清理"));
 	}
 }
 
@@ -889,6 +1266,44 @@ void USequenceDispatchPanelWidget::OnSavePathClicked()
 	SetStatusMessage(bHasSavedPreviewData
 		? FString::Printf(TEXT("已保存 %d 条路径到内存"), SavedPreviewData.Num())
 		: TEXT("没有可保存的航点"));
+}
+
+void USequenceDispatchPanelWidget::OnPlayEditPathClicked()
+{
+	if (!bInPathEditMode)
+	{
+		return;
+	}
+
+	// 播放：弹出三选弹窗（预演/派发/取消），沿用现有逻辑。
+	ShowPreviewConfirmPopup();
+}
+
+void USequenceDispatchPanelWidget::OnEditLoopCheckChanged(bool bIsChecked)
+{
+	// 只作用于临时路径的运行副本：同步设置所有临时 ADronePathActor 的循环状态。
+	if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+	{
+		PC->SetAllEditingPathsClosedLoop(bIsChecked);
+	}
+	SetStatusMessage(bIsChecked ? TEXT("临时路径：循环播放") : TEXT("临时路径：单次播放"));
+}
+
+void USequenceDispatchPanelWidget::SetEditControlsVisible(bool bVisible)
+{
+	const ESlateVisibility Vis = bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed;
+	if (SavePathButton)
+	{
+		SavePathButton->SetVisibility(Vis);
+	}
+	if (PlayEditPathButton)
+	{
+		PlayEditPathButton->SetVisibility(Vis);
+	}
+	if (EditLoopCheckBox)
+	{
+		EditLoopCheckBox->SetVisibility(Vis);
+	}
 }
 
 TMap<int32, FDronePathSaveData> USequenceDispatchPanelWidget::ResolvePreviewDispatchMap()
@@ -916,13 +1331,8 @@ void USequenceDispatchPanelWidget::ShowPreviewConfirmPopup()
 {
 	if (!PreviewConfirmPopupClass)
 	{
-		// 没配置弹窗类：默认取消并清理，避免临时路径残留
-		SetStatusMessage(TEXT("未配置确认弹窗，已取消并清理临时路径"));
-		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
-		{
-			PC->ClearEditingPaths();
-		}
-		ResetPathEditState();
+		// 没配置弹窗类：仅提示，保留编辑模式与临时路径（用停止/取消编辑来清理）。
+		SetStatusMessage(TEXT("未配置确认弹窗，请在面板蓝图设置 PreviewConfirmPopupClass"));
 		return;
 	}
 
@@ -938,18 +1348,12 @@ void USequenceDispatchPanelWidget::ShowPreviewConfirmPopup()
 
 void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice Choice)
 {
-	ADroneOpsPlayerController* PC = GetDroneOpsController();
-
 	switch (Choice)
 	{
 	case EPreviewConfirmChoice::LocalPreview:
 	{
+		// 播放（本地预演）：保留临时路径与编辑模式，可继续调整/再播放/停止。
 		TMap<int32, FDronePathSaveData> Map = ResolvePreviewDispatchMap();
-		// 先销毁编辑用临时路径，再用数据驱动影子机
-		if (PC)
-		{
-			PC->ClearEditingPaths();
-		}
 		if (Map.IsEmpty())
 		{
 			SetStatusMessage(TEXT("没有可预演的路径"));
@@ -957,16 +1361,15 @@ void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice 
 		}
 		PendingRemappedMap = Map;
 		StartShadowDronePlayback();
-		SetStatusMessage(TEXT("本地预演已开始（未向后端发送指令）"));
+		BeginLocalPatrolSimulation(Map);
+		SetStatusMessage(IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol
+			? TEXT("本地巡逻模拟已开始：影子机可识别目标（未向后端发送指令，点停止结束）")
+			: TEXT("本地预演已开始（未向后端发送指令，点停止结束）"));
 		break;
 	}
 	case EPreviewConfirmChoice::Dispatch:
 	{
 		TMap<int32, FDronePathSaveData> Map = ResolvePreviewDispatchMap();
-		if (PC)
-		{
-			PC->ClearEditingPaths();
-		}
 		if (Map.IsEmpty())
 		{
 			SetStatusMessage(TEXT("没有可派发的路径"));
@@ -981,7 +1384,14 @@ void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice 
 			break;
 		}
 
-		// 临时路径已是预演世界坐标，直接发送，不做 anchor 重映射
+		if (!NetMgr->CanSendToBackend())
+		{
+			SetStatusMessage(UDroneNetworkManager::GetIsolationBlockedMessage());
+			break;
+		}
+
+		// 临时路径已是预演世界坐标，直接发送，不做 anchor 重映射。
+		// 保留临时路径与编辑模式，派发成功后回调里再驱动影子机本地预演。
 		FOnHttpResponse Callback;
 		Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnEditDispatchResponse);
 		PendingRemappedMap = Map;
@@ -993,16 +1403,11 @@ void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice 
 	case EPreviewConfirmChoice::Cancel:
 	default:
 	{
-		if (PC)
-		{
-			PC->ClearEditingPaths();
-		}
-		SetStatusMessage(TEXT("已取消，临时路径已清理"));
+		// 弹窗内取消：什么都不做，停留在编辑模式（临时路径保留）。
+		SetStatusMessage(TEXT("已取消播放，继续编辑"));
 		break;
 	}
 	}
-
-	ResetPathEditState();
 }
 
 void USequenceDispatchPanelWidget::ResetPathEditState()
@@ -1010,9 +1415,11 @@ void USequenceDispatchPanelWidget::ResetPathEditState()
 	bInPathEditMode = false;
 	bHasSavedPreviewData = false;
 	SavedPreviewData.Empty();
-	if (SavePathButton)
+	// 隐藏全部编辑控件（保存/播放/停止/循环）。
+	SetEditControlsVisible(false);
+	if (EditLoopCheckBox)
 	{
-		SavePathButton->SetVisibility(ESlateVisibility::Collapsed);
+		EditLoopCheckBox->SetIsChecked(false);
 	}
 	if (PathEditToggle && PathEditToggle->IsChecked())
 	{

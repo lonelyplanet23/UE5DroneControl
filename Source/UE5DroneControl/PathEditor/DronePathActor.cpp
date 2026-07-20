@@ -26,6 +26,33 @@ namespace DronePathVisual
 	constexpr float BasicShapeCylinderRadiusCm = 50.0f;
 	constexpr float CentimetersPerMeter = 100.0f;
 	constexpr float MinSegmentDurationSeconds = 0.01f;
+	// 所有未明确设置速度的路径段统一使用的缺省速度 (m/s)。
+	constexpr float DefaultSegmentSpeedMps = 1.0f;
+
+	// 无人机模型应始终保持水平。路径段只有水平分量时才更新 Yaw；
+	// 纯升降段没有可用的水平朝向，因此保留当前 Yaw，避免 Rotation()
+	// 把垂直方向转换成 +/-90 度 Pitch，或把 Yaw 意外重置为 0。
+	void OrientActorToHorizontalTravel(AActor* Actor, const FVector& TravelDirection)
+	{
+		if (!IsValid(Actor))
+		{
+			return;
+		}
+
+		FRotator NewRotation(0.0f, Actor->GetActorRotation().Yaw, 0.0f);
+		const FVector HorizontalDirection(TravelDirection.X, TravelDirection.Y, 0.0f);
+		if (!HorizontalDirection.IsNearlyZero())
+		{
+			NewRotation.Yaw = HorizontalDirection.Rotation().Yaw;
+		}
+
+		Actor->SetActorRotation(NewRotation);
+	}
+}
+
+float ADronePathActor::GetDefaultSegmentSpeedMps()
+{
+	return DronePathVisual::DefaultSegmentSpeedMps;
 }
 
 ADronePathActor::ADronePathActor()
@@ -69,6 +96,11 @@ ADronePathActor::ADronePathActor()
 	}
 
 	WaypointActorClass = ADroneWaypointActor::StaticClass();
+
+	// ===== 初始化暂停变量 =====
+    PausedSegmentIndex = 0;
+    PausedElapsedTime = 0.0f;
+    bIsPaused = false;
 }
 
 int32 ADronePathActor::AddWaypoint(const FVector& Location, float SegmentSpeed)
@@ -213,7 +245,15 @@ void ADronePathActor::AddWaypointAtEnd()
 		NewLocation = LastLocation + (Direction * DefaultWaypointSpacing);
 	}
 
-	const float NewSegmentSpeed = Waypoints.IsEmpty() ? 0.0f : FMath::Clamp(Waypoints.Last().SegmentSpeed, 0.0f, 15.0f);
+	// 新增路径点默认沿用上一段速度；若上一段无有效速度或这是首段之后的第一段，使用缺省 1m/s。
+	float NewSegmentSpeed = DronePathVisual::DefaultSegmentSpeedMps;
+	if (!Waypoints.IsEmpty())
+	{
+		const float PreviousSpeed = Waypoints.Last().SegmentSpeed;
+		NewSegmentSpeed = (PreviousSpeed > KINDA_SMALL_NUMBER)
+			? FMath::Clamp(PreviousSpeed, 0.0f, 15.0f)
+			: DronePathVisual::DefaultSegmentSpeedMps;
+	}
 	AddWaypoint(NewLocation, NewSegmentSpeed);
 }
 
@@ -370,6 +410,7 @@ void ADronePathActor::StartMovement(AActor* DroneActor)
 	PrecomputeSegmentDurations();
 
 	CurrentSegmentIndex = 1;
+	bReturningToStart = false;
 	SegmentStartTime = World->GetTimeSeconds();
 	SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex) ? SegmentDurations[CurrentSegmentIndex] : DronePathVisual::MinSegmentDurationSeconds;
 	bIsMoving = true;
@@ -421,6 +462,7 @@ bool ADronePathActor::ResumeMovement(AActor* DroneActor, int32 SegmentIndex, flo
 	PrecomputeSegmentDurations();
 
 	CurrentSegmentIndex = SegmentIndex;
+	bReturningToStart = false;
 	SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex) ? SegmentDurations[CurrentSegmentIndex] : DronePathVisual::MinSegmentDurationSeconds;
 
 	const float SafeDuration = FMath::Max(SegmentDuration, DronePathVisual::MinSegmentDurationSeconds);
@@ -437,12 +479,9 @@ bool ADronePathActor::ResumeMovement(AActor* DroneActor, int32 SegmentIndex, flo
 	DroneActor->SetActorLocation(ResumeLocation);
 
 	const FVector TravelDirection = EndLocation - StartLocation;
-	if (bOrientControlledDroneToPath && !TravelDirection.IsNearlyZero())
+	if (bOrientControlledDroneToPath)
 	{
-		FRotator NewRot = TravelDirection.Rotation();
-		NewRot.Pitch = 0.0f;
-		NewRot.Roll = 0.0f;
-		DroneActor->SetActorRotation(NewRot);
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, TravelDirection);
 	}
 
 	SetActorTickEnabled(true);
@@ -968,6 +1007,24 @@ void ADronePathActor::PrecomputeSegmentDurations()
 
 		SegmentDurations[WaypointIndex] = FMath::Max(ComputedDuration, DronePathVisual::MinSegmentDurationSeconds);
 	}
+
+	// 循环闭合段：最后一个节点 -> 第一个节点。速度沿用最后一段速度，缺省 1m/s，保证 >0。
+	ClosedLoopSegmentDuration = 0.0f;
+	if (bClosedLoop && Waypoints.Num() > 2)
+	{
+		const FVector LastLocation = GetWaypointWorldLocation(Waypoints.Num() - 1);
+		const FVector FirstLocation = GetWaypointWorldLocation(0);
+		const float DistanceMeters = FVector::Distance(LastLocation, FirstLocation) / DronePathVisual::CentimetersPerMeter;
+
+		float ClosingSpeed = Waypoints.Last().SegmentSpeed;
+		if (ClosingSpeed <= KINDA_SMALL_NUMBER)
+		{
+			ClosingSpeed = DronePathVisual::DefaultSegmentSpeedMps;
+		}
+
+		const float ComputedDuration = DistanceMeters / ClosingSpeed;
+		ClosedLoopSegmentDuration = FMath::Max(ComputedDuration, DronePathVisual::MinSegmentDurationSeconds);
+	}
 }
 
 void ADronePathActor::TickMovement()
@@ -987,7 +1044,8 @@ void ADronePathActor::TickMovement()
 		return;
 	}
 
-	if (!Waypoints.IsValidIndex(CurrentSegmentIndex) || CurrentSegmentIndex <= 0)
+	// 正常段要求 CurrentSegmentIndex>=1；闭合段（bReturningToStart）不依赖 CurrentSegmentIndex。
+	if (!bReturningToStart && (!Waypoints.IsValidIndex(CurrentSegmentIndex) || CurrentSegmentIndex <= 0))
 	{
 		StopMovementInternal(false);
 		SetPathStatus(EPathStatus::Standby);
@@ -999,18 +1057,20 @@ void ADronePathActor::TickMovement()
 	const float SafeDuration = FMath::Max(SegmentDuration, DronePathVisual::MinSegmentDurationSeconds);
 	const float Alpha = FMath::Clamp((Now - SegmentStartTime) / SafeDuration, 0.0f, 1.0f);
 
-	const FVector StartLocation = GetWaypointWorldLocation(CurrentSegmentIndex - 1);
-	const FVector EndLocation = GetWaypointWorldLocation(CurrentSegmentIndex);
+	// 闭合段：最后节点 -> 首节点；正常段：上一节点 -> 当前节点。
+	const FVector StartLocation = bReturningToStart
+		? GetWaypointWorldLocation(Waypoints.Num() - 1)
+		: GetWaypointWorldLocation(CurrentSegmentIndex - 1);
+	const FVector EndLocation = bReturningToStart
+		? GetWaypointWorldLocation(0)
+		: GetWaypointWorldLocation(CurrentSegmentIndex);
 	const FVector NewLocation = FMath::Lerp(StartLocation, EndLocation, Alpha);
 	DroneActor->SetActorLocation(NewLocation);
 
 	const FVector TravelDirection = EndLocation - StartLocation;
-	if (bOrientControlledDroneToPath && !TravelDirection.IsNearlyZero())
+	if (bOrientControlledDroneToPath)
 	{
-		FRotator NewRot = TravelDirection.Rotation();
-		NewRot.Pitch = 0.0f;
-		NewRot.Roll = 0.0f;
-		DroneActor->SetActorRotation(NewRot);
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, TravelDirection);
 	}
 
 	{
@@ -1029,9 +1089,29 @@ void ADronePathActor::TickMovement()
 		return;
 	}
 
+	// 闭合段抵达首节点：重置回第一段，继续循环（不瞬移，下一帧从首节点继续 Lerp）。
+	if (bReturningToStart)
+	{
+		bReturningToStart = false;
+		CurrentSegmentIndex = 1;
+		SegmentStartTime = Now;
+		SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex) ? SegmentDurations[CurrentSegmentIndex] : DronePathVisual::MinSegmentDurationSeconds;
+		return;
+	}
+
 	++CurrentSegmentIndex;
 	if (CurrentSegmentIndex >= Waypoints.Num())
 	{
+		// 循环路径：进入"最后节点 -> 首节点"的闭合段，平滑飞回，绝不瞬移。
+		if (bClosedLoop && Waypoints.Num() > 2)
+		{
+			bReturningToStart = true;
+			SegmentStartTime = Now;
+			SegmentDuration = FMath::Max(ClosedLoopSegmentDuration, DronePathVisual::MinSegmentDurationSeconds);
+			return;
+		}
+
+		// 非循环路径：到达最后一个节点后结束并保持悬停。
 		SnapControlledDroneToPathEnd();
 		CompleteExecution();
 		ReceivePathMovementFinished(DroneActor);
@@ -1045,6 +1125,7 @@ void ADronePathActor::TickMovement()
 void ADronePathActor::StopMovementInternal(bool bClearControlledDrone)
 {
 	bIsMoving = false;
+	bReturningToStart = false;
 	CurrentSegmentIndex = INDEX_NONE;
 	SegmentStartTime = 0.0f;
 	SegmentDuration = 0.0f;
@@ -1070,10 +1151,7 @@ void ADronePathActor::SnapControlledDroneToPathStart() const
 	if (bOrientControlledDroneToPath && Waypoints.Num() > 1)
 	{
 		const FVector ForwardDirection = GetWaypointWorldLocation(1) - StartLocation;
-		if (!ForwardDirection.IsNearlyZero())
-		{
-			DroneActor->SetActorRotation(ForwardDirection.Rotation());
-		}
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, ForwardDirection);
 	}
 }
 
@@ -1091,10 +1169,7 @@ void ADronePathActor::SnapControlledDroneToPathEnd() const
 	if (bOrientControlledDroneToPath && Waypoints.Num() > 1)
 	{
 		const FVector EndDirection = EndLocation - GetWaypointWorldLocation(Waypoints.Num() - 2);
-		if (!EndDirection.IsNearlyZero())
-		{
-			DroneActor->SetActorRotation(EndDirection.Rotation());
-		}
+		DronePathVisual::OrientActorToHorizontalTravel(DroneActor, EndDirection);
 	}
 }
 
@@ -1155,6 +1230,85 @@ void ADronePathActor::ApplyColorToMaterial(UMaterialInstanceDynamic* MaterialIns
 	MaterialInstance->SetVectorParameterValue(DronePathVisual::BaseColorParameterName, FLinearColor(ColorVector.X, ColorVector.Y, ColorVector.Z));
 	MaterialInstance->SetVectorParameterValue(DronePathVisual::EmissiveColorParameterName, FLinearColor(EmissiveColorVector.X, EmissiveColorVector.Y, EmissiveColorVector.Z));
 	MaterialInstance->SetVectorParameterValue(DronePathVisual::TintParameterName, FLinearColor(ColorVector.X, ColorVector.Y, ColorVector.Z));
+}
+
+// 暂停/恢复路径移动
+
+void ADronePathActor::PauseMovement()
+{
+    if (!bIsMoving)
+    {
+        UE_LOG(LogDronePathActor, Verbose, TEXT("PauseMovement: %s not moving"), *GetName());
+        return;
+    }
+
+    bIsPaused = true;
+    bIsMoving = false;
+    SetActorTickEnabled(false);
+
+    // 记录暂停时的段索引和已用时间，以便恢复
+    UWorld* World = GetWorld();
+    if (World && CurrentSegmentIndex > 0)
+    {
+        const float Elapsed = World->GetTimeSeconds() - SegmentStartTime;
+        PausedSegmentIndex = CurrentSegmentIndex;
+        PausedElapsedTime = Elapsed;
+    }
+
+    UE_LOG(LogDronePathActor, Log, TEXT("PauseMovement: %s paused at segment %d"),
+        *GetName(), CurrentSegmentIndex);
+}
+
+void ADronePathActor::ResumeMovement()
+{
+    if (!bIsPaused)
+    {
+        UE_LOG(LogDronePathActor, Verbose, TEXT("ResumeMovement: %s not paused"), *GetName());
+        return;
+    }
+
+    if (!IsValid(ControlledDrone.Get()))
+    {
+        UE_LOG(LogDronePathActor, Warning, TEXT("ResumeMovement: %s has no controlled drone"),
+            *GetName());
+        bIsPaused = false;
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        bIsPaused = false;
+        return;
+    }
+
+    // 从暂停位置恢复
+    const int32 ResumeSegment = PausedSegmentIndex > 0 ? PausedSegmentIndex : 1;
+    const float RemainingTime = SegmentDuration - PausedElapsedTime;
+
+    if (Waypoints.Num() < 2 || !Waypoints.IsValidIndex(ResumeSegment))
+    {
+        UE_LOG(LogDronePathActor, Warning, TEXT("ResumeMovement: %s invalid segment %d"),
+            *GetName(), ResumeSegment);
+        bIsPaused = false;
+        return;
+    }
+
+    // 恢复移动
+    bIsPaused = false;
+    bIsMoving = true;
+    CurrentSegmentIndex = ResumeSegment;
+    SegmentStartTime = World->GetTimeSeconds() - PausedElapsedTime;
+    SegmentDuration = SegmentDurations.IsValidIndex(CurrentSegmentIndex)
+        ? SegmentDurations[CurrentSegmentIndex]
+        : DronePathVisual::MinSegmentDurationSeconds;
+
+    SetActorTickEnabled(true);
+    SetPathStatus(EPathStatus::InFlight);
+    SetExecutionState(EDronePathExecutionState::Running);
+
+    UE_LOG(LogDronePathActor, Log, TEXT("ResumeMovement: %s resumed at segment %d"),
+        *GetName(), CurrentSegmentIndex);
 }
 
 int32 ADronePathActor::GetSplineSegmentCount() const

@@ -39,6 +39,43 @@ public:
     UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
     class UButton* ModeButton = nullptr;
 
+    // ==================== 新增控件 ====================
+    /** 【新增】连接状态（独立显示）- 显示“在线/离线/失联” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* ConnectionStatusText = nullptr;
+
+    /** 【新增】任务状态（独立显示）- 显示“待命/巡逻中/攻击中/暂停/异常…” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* TaskStatusText = nullptr;
+
+    /** 【新增】GPS经纬度 - 显示“经度: xxx.xxxxxx  纬度: xxx.xxxxxx” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* GpsText = nullptr;
+
+    /** 【新增】海拔 - 显示“海拔: xxx.x m” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* AltitudeText = nullptr;
+
+    /** 【新增】电量 - 显示“xx%”或“未知” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* BatteryText = nullptr;
+
+    /** 【新增】航点进度 - 显示“航点: 3 / 10” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* WaypointText = nullptr;
+
+    /** 【新增】当前目标点编号 - 显示“目标点: 3” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* TargetIndexText = nullptr;
+
+    /** 【新增】最近更新时间 - 显示“2.5s 前” */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* UpdateTimeText = nullptr;
+
+    /** 状态数据来源：后端同步或 UE 本地预演。 */
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidgetOptional))
+    UTextBlock* StatusSourceText = nullptr;
+
     /** 设置无人机数据 */
     UFUNCTION(BlueprintCallable, Category = "UI")
     void SetDroneData(const FString& Name, bool bOnline);
@@ -53,7 +90,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UI")
     void SetDroneDataWithModeAndAvailability(int32 InDroneId, const FString& Name, EDroneAvailability Availability, EDroneCommandMode InMode);
 
+    // ==================== 新增方法 ====================
+    /** 【新增】完整状态设置方法：一次性设置连接状态、GPS、电量、任务状态、航点、更新时间（需求1全部10项 + 需求3/4状态覆盖） */
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void SetDroneFullState(int32 InDroneId, const FDroneTelemetrySnapshot& Snapshot);
+
+    /** 只更新 DroneId 和任务模式显示，不覆盖连接状态等其他字段 */
+    void SetCommandMode(int32 InDroneId, EDroneCommandMode InMode);
+
 protected:
+    virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override;
 
 private:
@@ -64,4 +110,10 @@ private:
     void OnModeButtonClicked();
 
     void UpdateModeText();
+
+    /**
+     * 当蓝图未绑定新增控件时，在代码里创建并挂载。
+     * 只对指针仍为 nullptr 的字段创建控件，不覆盖已绑定的控件。
+     */
+    void BuildRuntimeCard();
 };

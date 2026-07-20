@@ -12,6 +12,8 @@ Usage:
 import asyncio
 import json
 import math
+import os
+import socket
 import threading
 import time
 from flask import Flask, jsonify, request
@@ -25,7 +27,20 @@ DRONES = [
      "ue_receive_port": 8890, "topic_prefix": "/px4_2"},
 ]
 
-# ---- HTTP server (Flask, port 8080) ----
+def _choose_port(preferred_port: int) -> int:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", preferred_port))
+            return preferred_port
+    except OSError:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+
+HTTP_PORT = _choose_port(int(os.getenv("MOCK_HTTP_PORT", "8080")))
+WS_PORT = _choose_port(int(os.getenv("MOCK_WS_PORT", "8081")))
+
+# ---- HTTP server (Flask) ----
 app = Flask(__name__)
 
 @app.route("/api/drones", methods=["GET"])
@@ -181,7 +196,7 @@ def test_telemetry_clear():
     return jsonify({"ok": True})
 
 def run_http():
-    app.run(host="127.0.0.1", port=8080, use_reloader=False)
+    app.run(host="127.0.0.1", port=HTTP_PORT, use_reloader=False)
 
 # ---- WebSocket server (websockets, port 8081) ----
 ws_clients = set()
@@ -294,13 +309,13 @@ async def run_ws():
     global _ws_loop
     _ws_loop = asyncio.get_running_loop()
     import websockets
-    async with websockets.serve(ws_handler, "127.0.0.1", 8081):
-        print("[WS] WebSocket server on ws://127.0.0.1:8081/ws")
+    async with websockets.serve(ws_handler, "127.0.0.1", WS_PORT):
+        print(f"[WS] WebSocket server on ws://127.0.0.1:{WS_PORT}/ws")
         await telemetry_push_zero()
 
 if __name__ == "__main__":
-    print("[HTTP] Starting REST server on http://127.0.0.1:8080")
+    print(f"[HTTP] Starting REST server on http://127.0.0.1:{HTTP_PORT}")
     threading.Thread(target=run_http, daemon=True).start()
     time.sleep(0.5)  # Give Flask time to start
-    print("[WS] Starting WebSocket server on ws://127.0.0.1:8081/ws")
+    print(f"[WS] Starting WebSocket server on ws://127.0.0.1:{WS_PORT}/ws")
     asyncio.run(run_ws())

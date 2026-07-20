@@ -245,6 +245,27 @@ HttpServer::HttpServer(const AppConfig& config,
     });
 
     LoadDrones();
+
+    // DroneManager 的状态更新也要汇入同一份任务缓存，再由 PublishTaskState
+    // 对 REST 初始加载和 WebSocket 实时更新使用完全一致的协议字段。
+    drone_mgr_.SetTaskStateCallback([this](int drone_id, const std::string& state,
+                                           const std::string& detail,
+                                           int current_wp, int total_wp) {
+		DroneTaskState merged;
+		{
+			std::lock_guard<std::mutex> lock(task_state_mutex_);
+			if (const auto it = task_states_.find(drone_id); it != task_states_.end()) {
+				merged = it->second;
+			}
+		}
+		merged.drone_id = drone_id;
+		merged.state = state;
+		merged.detail = detail;
+		merged.current_wp = current_wp;
+		merged.waypoint_count = total_wp;
+		PublishTaskState(merged);
+    });
+
 }
 
 HttpServer::~HttpServer()
@@ -367,6 +388,8 @@ http::response<http::string_body> HttpServer::HandleHttp(
             return MakeResponse(req, 200, json_stringify(ApiDeleteDrone(id)));
         if (method == "GET"  && PathMatch(path, "/api/drones/", "/anchor", id))
             return MakeResponse(req, 200, json_stringify(ApiGetAnchor(id)));
+        if (method == "POST" && path == "/api/drones/refresh")
+            return MakeResponse(req, 200, json_stringify(ApiRefreshDrones()));
         if (method == "POST" && path == "/api/arrays")
             return MakeResponse(req, 201, json_stringify(ApiCreateArray(require_object(body, "body"))));
         if (method == "POST" && PathMatch(path, "/api/arrays/", "/stop", id))
@@ -475,9 +498,27 @@ boost::json::value HttpServer::ApiListDrones() {
             {"topic_prefix", topic_prefix},
             {"bit_index", rec.slot > 0 ? rec.slot - 1 : 0},
             {"mavlink_system_id", rec.slot},
+            // task_state/task_detail/current waypoint above are the single
+            // authoritative task cache also used by drone_task_state WS pushes.
         });
     }
     return arr;
+}
+
+boost::json::value HttpServer::ApiRefreshDrones()
+{
+    const auto refreshed_ids = drone_mgr_.RefreshDisconnectedConnections();
+    boost::json::array ids;
+    for (const int id : refreshed_ids) {
+        ids.push_back(id);
+    }
+    spdlog::info("[HTTP] Connection refresh requested; probing {} disconnected drone(s)",
+                 refreshed_ids.size());
+    return boost::json::object{
+        {"ok", true},
+        {"message", "safe hold probes sent; a drone becomes online only after telemetry is received"},
+        {"refreshed_drone_ids", std::move(ids)},
+    };
 }
 
 boost::json::value HttpServer::ApiRegisterDrone(const boost::json::object& body) {

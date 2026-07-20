@@ -21,6 +21,7 @@ public class UE5DroneControl : ModuleRules
 			"GameplayStateTreeModule",
 			"Niagara",
 			"UMG",
+			"WebBrowserWidget",
 			"Sockets",
             "Networking",
 			"Slate",

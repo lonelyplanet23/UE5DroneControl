@@ -174,8 +174,10 @@ void UdpReceiver::HandleReceive(PortListener& listener,
                 }
             }
 
-            spdlog::debug("[UdpReceiver] Slot {} recv {}B: NED({:.2f},{:.2f},{:.2f}) bat={} gps_fix={}",
+            spdlog::debug("[UdpReceiver] Slot {} recv {}B from {}:{}: NED({:.2f},{:.2f},{:.2f}) bat={} gps_fix={}",
                          listener.slot, bytes_transferred,
+                         listener.remote_endpoint.address().to_string(),
+                         listener.remote_endpoint.port(),
                          tel.position_ned[0], tel.position_ned[1], tel.position_ned[2],
                          tel.battery, tel.gps_fix);
 

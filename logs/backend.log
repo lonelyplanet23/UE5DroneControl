@@ -1,115 +1,422 @@
-[2026-05-07 08:41:05.496] [info] [:] Logger initialized. Level=info, File=./logs/backend.log
-[2026-05-07 08:41:05.496] [info] [:] ============================================
-[2026-05-07 08:41:05.496] [info] [:]   Drone Backend v1.0.0
-[2026-05-07 08:41:05.496] [info] [:]   HTTP :8080  WS :8081
-[2026-05-07 08:41:05.497] [info] [:] ============================================
-[2026-05-07 08:41:05.497] [info] [:] DroneManager created
-[2026-05-07 08:41:05.497] [info] [:] [UdpReceiver] Slot 1: listening port 8888 for drone 1
-[2026-05-07 08:41:05.497] [info] [:] [UdpReceiver] Slot 2: listening port 8890 for drone 2
-[2026-05-07 08:41:05.497] [info] [:] [UdpReceiver] Slot 3: listening port 8892 for drone 3
-[2026-05-07 08:41:05.498] [info] [:] [UdpReceiver] Slot 4: listening port 8894 for drone 4
-[2026-05-07 08:41:05.498] [info] [:] [UdpReceiver] Slot 5: listening port 8896 for drone 5
-[2026-05-07 08:41:05.498] [info] [:] [UdpReceiver] Slot 6: listening port 8898 for drone 6
-[2026-05-07 08:41:05.499] [info] [:] [UdpSender] Drone 1 target set: 192.168.30.104:8889
-[2026-05-07 08:41:05.500] [info] [:] [UdpSender] Drone 2 target set: 192.168.30.104:8891
-[2026-05-07 08:41:05.500] [info] [:] [UdpSender] Drone 3 target set: 192.168.30.104:8893
-[2026-05-07 08:41:05.500] [info] [:] [UdpSender] Drone 4 target set: 192.168.30.104:8895
-[2026-05-07 08:41:05.501] [info] [:] [UdpSender] Drone 5 target set: 192.168.30.104:8897
-[2026-05-07 08:41:05.501] [info] [:] [UdpSender] Drone 6 target set: 192.168.30.104:8899
-[2026-05-07 08:41:05.501] [info] [:] [UdpReceiver] Listening on port 8888
-[2026-05-07 08:41:05.502] [info] [:] [UdpReceiver] Listening on port 8890
-[2026-05-07 08:41:05.502] [info] [:] [UdpReceiver] Listening on port 8892
-[2026-05-07 08:41:05.502] [info] [:] [UdpReceiver] Listening on port 8894
-[2026-05-07 08:41:05.503] [info] [:] [UdpReceiver] Listening on port 8896
-[2026-05-07 08:41:05.503] [info] [:] [UdpReceiver] Listening on port 8898
-[2026-05-07 08:41:05.504] [info] [:] Backend started. Press Ctrl+C to stop.
-[2026-05-07 08:41:05.505] [info] [:] [HTTP] Listening on 0.0.0.0:8080
-[2026-05-07 08:41:05.505] [info] [:] [WS] Listening on 0.0.0.0:8081
-[2026-05-07 08:41:05.525] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:05.526] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:05.635] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:05.637] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:05.742] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:05.744] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:05.851] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:05.853] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:05.958] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:05.959] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.067] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.068] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.173] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.174] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.282] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.284] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.390] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.392] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.499] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.501] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.606] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.608] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.714] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.715] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.823] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:06.825] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.935] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:06.937] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.043] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.046] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.153] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.155] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.262] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.264] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.369] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.374] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.478] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.479] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.587] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.588] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.697] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.697] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.805] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.807] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:07.914] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:07.916] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.022] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.023] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.132] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.133] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.241] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.242] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.351] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.360] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.459] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.461] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.569] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.570] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.678] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.679] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.789] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.790] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:08.898] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:08.901] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.006] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.007] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.114] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.115] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.223] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.228] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.334] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.335] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.445] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.446] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.549] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.558] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.653] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.656] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.764] [warning] [:] Telemetry for unregistered slot 1
-[2026-05-07 08:41:09.769] [warning] [:] Telemetry for unregistered slot 2
-[2026-05-07 08:41:09.770] [info] [:] Shutdown signal received...
-[2026-05-07 08:41:10.562] [info] [:] Shutting down...
-[2026-05-07 08:41:10.565] [info] [:] [UdpReceiver] Stopped
-[2026-05-07 08:41:10.565] [info] [:] [Heartbeat] All stopped
-[2026-05-07 08:41:10.626] [info] [:] Backend shutdown complete.
-[2026-05-07 08:41:10.629] [info] [:] DroneManager destroyed
-[2026-05-07 08:41:10.629] [info] [:] [Heartbeat] All stopped
-[2026-05-07 08:41:10.629] [info] [:] [UdpSender] Destroyed
+[2026-07-13 11:31:10.229] [info] [:] Logger initialized. Level=debug, File=./logs/backend.log
+[2026-07-13 11:31:10.229] [info] [:] ============================================
+[2026-07-13 11:31:10.229] [info] [:]   Drone Backend v1.0.0
+[2026-07-13 11:31:10.229] [info] [:]   HTTP :8080  WS :8081
+[2026-07-13 11:31:10.230] [info] [:] ============================================
+[2026-07-13 11:31:10.234] [info] [:] [UdpSender] JSON protocol session_id=backend-1783913470230417-c7cd415d
+[2026-07-13 11:31:10.234] [info] [:] DroneManager created
+[2026-07-13 11:31:10.234] [info] [:] Drone 1 added: slot=1 name=d1
+[2026-07-13 11:31:10.235] [info] [:] [Storage] Loaded 1 drones from ./data/drones.json
+[2026-07-13 11:31:10.235] [info] [:] [UdpReceiver] Slot 1: listening port 8888 for drone 1
+[2026-07-13 11:31:10.235] [info] [:] [UdpReceiver] Slot 2: listening port 8890 for drone 2
+[2026-07-13 11:31:10.235] [info] [:] [UdpReceiver] Slot 3: listening port 8892 for drone 3
+[2026-07-13 11:31:10.235] [info] [:] [UdpReceiver] Slot 4: listening port 8894 for drone 4
+[2026-07-13 11:31:10.236] [info] [:] [UdpReceiver] Slot 5: listening port 8896 for drone 5
+[2026-07-13 11:31:10.236] [info] [:] [UdpReceiver] Slot 6: listening port 8898 for drone 6
+[2026-07-13 11:31:10.238] [info] [:] [UdpSender] Drone 1 target set: 192.168.10.1:8889
+[2026-07-13 11:31:10.238] [info] [:] [UdpSender] Drone 2 target set: 192.168.10.1:8891
+[2026-07-13 11:31:10.238] [info] [:] [UdpSender] Drone 3 target set: 192.168.10.1:8893
+[2026-07-13 11:31:10.239] [info] [:] [UdpSender] Drone 4 target set: 192.168.10.1:8895
+[2026-07-13 11:31:10.239] [info] [:] [UdpSender] Drone 5 target set: 192.168.10.1:8897
+[2026-07-13 11:31:10.239] [info] [:] [UdpSender] Drone 6 target set: 192.168.10.1:8899
+[2026-07-13 11:31:10.240] [info] [:] [UdpReceiver] Listening on port 8888
+[2026-07-13 11:31:10.240] [info] [:] [UdpReceiver] Listening on port 8890
+[2026-07-13 11:31:10.241] [info] [:] [UdpReceiver] Listening on port 8892
+[2026-07-13 11:31:10.241] [info] [:] [UdpReceiver] Listening on port 8894
+[2026-07-13 11:31:10.242] [info] [:] [UdpReceiver] Listening on port 8896
+[2026-07-13 11:31:10.242] [info] [:] [UdpReceiver] Listening on port 8898
+[2026-07-13 11:31:10.243] [info] [:] Backend started. Press Ctrl+C to stop.
+[2026-07-13 11:31:10.246] [info] [:] [HTTP] Listening on 0.0.0.0:8080
+[2026-07-13 11:31:10.246] [info] [:] [WS] Listening on 0.0.0.0:8081
+[2026-07-13 11:31:13.502] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.503] [info] [:] [StateMachine] Offline -> Online (PowerOn)
+[2026-07-13 11:31:13.503] [debug] [:] [WS Push] event=power_on drone=d1 anchor_valid=false
+[2026-07-13 11:31:13.504] [info] [:] [UdpSender] Drone 1 target set: 192.168.10.1:8889
+[2026-07-13 11:31:13.504] [info] [:] [Heartbeat] Started drone 1 slot 1 -> 192.168.10.1:8889 interval=200ms repeat=5
+[2026-07-13 11:31:13.505] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=1/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:13.719] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=2/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:13.770] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.771] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.771] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.772] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.772] [debug] [:] [UdpReceiver] Slot 1 recv 395B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.772] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.773] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.773] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.774] [debug] [:] [UdpReceiver] Slot 1 recv 398B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.774] [debug] [:] [UdpReceiver] Slot 1 recv 395B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.780] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.781] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:13.935] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=3/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:14.000] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.000] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.95) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.001] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.001] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.005] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.006] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.014] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.015] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.070] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.072] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.075] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.122] [debug] [:] [UdpReceiver] Slot 1 recv 395B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.123] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.127] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.128] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.129] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.129] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.130] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.130] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.131] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.131] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.131] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.138] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=4/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:14.144] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:14.340] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=5/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:14.543] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=6/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:14.745] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=7/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:14.947] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=8/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:15.151] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=9/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:15.355] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=10/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:15.560] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=11/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:15.772] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=12/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:15.989] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=13/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:16.205] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=14/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:16.410] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=15/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:16.612] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=16/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:16.814] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=17/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:17.017] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=18/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:17.219] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=19/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:17.435] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=20/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:17.640] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=21/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:17.855] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=22/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:18.059] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=23/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:18.261] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=24/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:18.463] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=25/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:18.665] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=26/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:18.868] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=27/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:19.083] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=28/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:19.299] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=29/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:19.501] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=30/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:19.703] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=31/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:19.905] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=32/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:20.120] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=33/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:20.323] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=34/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:20.526] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=35/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:20.727] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=36/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:20.930] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=37/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:21.133] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=38/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:21.335] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=39/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:21.537] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=40/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:21.741] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=41/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:21.830] [debug] [:] [UdpReceiver] Slot 1 recv 396B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:21.830] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:21.831] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:21.915] [debug] [:] [UdpReceiver] Slot 1 recv 395B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:21.916] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.96) bat=-1 gps_fix=false
+[2026-07-13 11:31:21.945] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=42/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:22.146] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=43/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:22.349] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=44/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:22.552] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=45/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:22.753] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=46/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:22.957] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=47/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:23.176] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=48/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:23.377] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=49/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:23.579] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=50/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:23.782] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=51/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:23.986] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=52/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:24.202] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=53/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:24.405] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=54/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:24.608] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=55/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:24.811] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=56/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:25.012] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=57/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:25.217] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=58/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:25.419] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=59/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:25.620] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=60/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:25.822] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=61/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:26.024] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=62/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:26.226] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=63/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:26.429] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=64/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:26.630] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=65/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:26.833] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=66/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:27.036] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=67/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:27.238] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=68/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:27.441] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=69/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:27.643] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=70/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:27.845] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=71/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:28.050] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=72/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:28.252] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=73/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:28.467] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=74/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:28.682] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=75/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:28.885] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=76/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:29.112] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=77/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:29.413] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=78/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:29.617] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=79/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:29.818] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=80/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:30.034] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=81/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:30.237] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=82/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:31:30.439] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=83/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:30.641] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=84/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:30.843] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=85/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:31.046] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=86/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:31.262] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=87/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:31.465] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=88/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:31.667] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=89/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:31.883] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=90/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:32.085] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=91/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:32.287] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505064 mode=hold repeat=92/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:31:32.474] [warning] [:] [StateMachine] Online -> Lost (10s timeout)
+[2026-07-13 11:31:32.490] [info] [:] [Heartbeat] Stopped drone 1
+[2026-07-13 11:31:32.491] [debug] [:] [WS Push] event=lost_connection drone=d1 anchor_valid=false
+[2026-07-13 11:31:32.491] [debug] [:] [WS Push] alert=lost_connection drone=d1 value=0
+[2026-07-13 11:32:26.269] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.270] [info] [:] [StateMachine] Lost -> Online (Reconnect)
+[2026-07-13 11:32:26.270] [warning] [:] Drone 1 reconnected: cleared commands tied to old power-on NED origin
+[2026-07-13 11:32:26.270] [debug] [:] [WS Push] event=reconnect drone=d1 anchor_valid=false
+[2026-07-13 11:32:26.271] [info] [:] [UdpSender] Drone 1 target set: 192.168.10.1:8889
+[2026-07-13 11:32:26.272] [info] [:] [Heartbeat] Started drone 1 slot 1 -> 192.168.10.1:8889 interval=200ms repeat=5
+[2026-07-13 11:32:26.273] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=1/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:26.273] [debug] [:] [UdpReceiver] Slot 1 recv 385B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.274] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.275] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.278] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.474] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=2/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:26.554] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.563] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.563] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.571] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.571] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.572] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.573] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.577] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.578] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.579] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.580] [debug] [:] [UdpReceiver] Slot 1 recv 387B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.584] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.587] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.587] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.590] [debug] [:] [UdpReceiver] Slot 1 recv 385B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.612] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.613] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.614] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.615] [debug] [:] [UdpReceiver] Slot 1 recv 394B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.616] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.616] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.617] [debug] [:] [UdpReceiver] Slot 1 recv 387B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.617] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.618] [debug] [:] [UdpReceiver] Slot 1 recv 386B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.619] [debug] [:] [UdpReceiver] Slot 1 recv 388B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.619] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.620] [debug] [:] [UdpReceiver] Slot 1 recv 397B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.621] [debug] [:] [UdpReceiver] Slot 1 recv 388B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.623] [debug] [:] [UdpReceiver] Slot 1 recv 388B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.624] [debug] [:] [UdpReceiver] Slot 1 recv 388B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.625] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.629] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.629] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.630] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.631] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.632] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.633] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.640] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.641] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.641] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.650] [debug] [:] [UdpReceiver] Slot 1 recv 395B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.651] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.651] [debug] [:] [UdpReceiver] Slot 1 recv 388B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.652] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.653] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.678] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=3/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:26.712] [debug] [:] [UdpReceiver] Slot 1 recv 388B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.755] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.757] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.761] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.762] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.763] [debug] [:] [UdpReceiver] Slot 1 recv 391B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.764] [debug] [:] [UdpReceiver] Slot 1 recv 393B: NED(-5.69,13.47,-3.94) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.764] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.765] [debug] [:] [UdpReceiver] Slot 1 recv 392B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.766] [debug] [:] [UdpReceiver] Slot 1 recv 383B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.766] [debug] [:] [UdpReceiver] Slot 1 recv 390B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.767] [debug] [:] [UdpReceiver] Slot 1 recv 388B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.803] [debug] [:] [UdpReceiver] Slot 1 recv 385B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:26.880] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=4/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:26.881] [debug] [:] [UdpReceiver] Slot 1 recv 389B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.097] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=5/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:27.127] [debug] [:] [UdpReceiver] Slot 1 recv 620B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.128] [info] [:] [ControlAck] drone=1 session=backend-1783913470230417-c7cd415d command_id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 sequence=1783913473505065 mode=hold confirmed_packets=3
+[2026-07-13 11:32:27.128] [debug] [:] [UdpReceiver] Slot 1 recv 619B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.264] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.93) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.276] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.300] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=6/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:27.420] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.496] [debug] [:] [UdpReceiver] Slot 1 recv 626B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.503] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=7/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:27.580] [debug] [:] [UdpReceiver] Slot 1 recv 618B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.705] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=8/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:27.832] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.835] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.875] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:27.909] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=9/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:28.111] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=10/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:28.145] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:28.146] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:28.203] [debug] [:] [UdpReceiver] Slot 1 recv 626B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:28.315] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=11/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:28.333] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:28.375] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:28.518] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=12/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:28.649] [debug] [:] [UdpReceiver] Slot 1 recv 626B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:28.650] [debug] [:] [UdpReceiver] Slot 1 recv 622B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:28.721] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=13/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:28.924] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=14/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:29.127] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=15/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:29.330] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=16/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:29.534] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=17/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:29.737] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=18/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:29.952] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=19/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:30.169] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=20/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:30.372] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=21/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:30.574] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=22/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:30.778] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=23/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:30.994] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=24/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:31.197] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=25/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:31.398] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=26/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:31.601] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=27/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:31.805] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=28/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:32.008] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=29/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:32.211] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=30/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:32.413] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=31/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:32.615] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=32/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:32.818] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=33/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:33.023] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=34/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:33.226] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=35/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:33.442] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=36/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:33.646] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=37/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:33.849] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=38/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:34.050] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=39/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:34.252] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=40/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:34.468] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=41/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:34.671] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=42/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:34.874] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=43/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:35.076] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=44/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:35.280] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=45/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:35.482] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=46/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:35.685] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=47/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:35.890] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=48/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:35.982] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:35.983] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:35.983] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.105] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=49/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:36.229] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.230] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.242] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.243] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.245] [debug] [:] [UdpReceiver] Slot 1 recv 619B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.308] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=50/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:36.513] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=51/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:36.577] [debug] [:] [UdpReceiver] Slot 1 recv 622B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.579] [debug] [:] [UdpReceiver] Slot 1 recv 626B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.580] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.584] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.584] [debug] [:] [UdpReceiver] Slot 1 recv 628B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.585] [debug] [:] [UdpReceiver] Slot 1 recv 627B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.588] [debug] [:] [UdpReceiver] Slot 1 recv 627B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.589] [debug] [:] [UdpReceiver] Slot 1 recv 631B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.589] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.604] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.604] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.605] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.92) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.606] [debug] [:] [UdpReceiver] Slot 1 recv 626B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.606] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.607] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.607] [debug] [:] [UdpReceiver] Slot 1 recv 618B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.608] [debug] [:] [UdpReceiver] Slot 1 recv 622B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.608] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.609] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.609] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.609] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.610] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.610] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.611] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.611] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.611] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.612] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.612] [debug] [:] [UdpReceiver] Slot 1 recv 627B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.613] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.613] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.613] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.613] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.614] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.615] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.620] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.620] [debug] [:] [UdpReceiver] Slot 1 recv 624B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.621] [debug] [:] [UdpReceiver] Slot 1 recv 626B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.621] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.621] [debug] [:] [UdpReceiver] Slot 1 recv 622B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.622] [debug] [:] [UdpReceiver] Slot 1 recv 621B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.622] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.622] [debug] [:] [UdpReceiver] Slot 1 recv 625B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.623] [debug] [:] [UdpReceiver] Slot 1 recv 619B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.623] [debug] [:] [UdpReceiver] Slot 1 recv 626B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.624] [debug] [:] [UdpReceiver] Slot 1 recv 620B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.625] [debug] [:] [UdpReceiver] Slot 1 recv 620B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.625] [debug] [:] [UdpReceiver] Slot 1 recv 623B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.677] [debug] [:] [UdpReceiver] Slot 1 recv 617B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.716] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=52/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:36.775] [debug] [:] [UdpReceiver] Slot 1 recv 614B: NED(-5.69,13.47,-3.91) bat=-1 gps_fix=false
+[2026-07-13 11:32:36.918] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=53/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:37.119] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=54/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:37.336] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=55/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:37.537] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=56/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:37.740] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=57/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:37.945] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=58/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:38.150] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=59/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:38.351] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=60/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:38.553] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=61/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:38.756] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=62/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:38.959] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=63/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:39.162] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=64/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:39.364] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=65/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:39.567] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=66/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:39.771] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=67/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:39.973] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=68/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:40.177] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=69/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:40.394] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=70/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:40.599] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=71/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:40.802] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=72/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:41.018] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=73/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:41.220] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=74/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:41.424] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=75/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:41.626] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=76/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:41.831] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=77/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:42.033] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=78/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:42.235] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=79/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:42.439] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=80/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:42.655] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=81/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:42.860] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=82/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:43.076] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=83/0 NED=(0.000,0.000,0.000) bytes=461 -> 192.168.10.1:8889
+[2026-07-13 11:32:43.279] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=84/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:43.483] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=85/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:43.700] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=86/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:43.904] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=87/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:44.120] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=88/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:44.336] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=89/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:44.539] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=90/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:44.744] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=91/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:44.946] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=92/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:45.149] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=93/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:45.352] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=94/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:45.555] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=95/0 NED=(0.000,0.000,0.000) bytes=463 -> 192.168.10.1:8889
+[2026-07-13 11:32:45.756] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=96/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:45.962] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=97/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:46.164] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=98/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:46.367] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=99/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:46.570] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=100/0 NED=(0.000,0.000,0.000) bytes=465 -> 192.168.10.1:8889
+[2026-07-13 11:32:46.771] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=101/0 NED=(0.000,0.000,0.000) bytes=465 -> 192.168.10.1:8889
+[2026-07-13 11:32:46.976] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=102/0 NED=(0.000,0.000,0.000) bytes=464 -> 192.168.10.1:8889
+[2026-07-13 11:32:47.179] [debug] [:] [UdpSender] JSON drone=1 slot=1 id=backend-1783913470230417-c7cd415d-d1-s1783913473505065 mode=hold repeat=103/0 NED=(0.000,0.000,0.000) bytes=465 -> 192.168.10.1:8889
+[2026-07-13 11:32:47.364] [warning] [:] [StateMachine] Online -> Lost (10s timeout)
+[2026-07-13 11:32:47.394] [info] [:] [Heartbeat] Stopped drone 1
+[2026-07-13 11:32:47.395] [debug] [:] [WS Push] event=lost_connection drone=d1 anchor_valid=false
+[2026-07-13 11:32:47.395] [debug] [:] [WS Push] alert=lost_connection drone=d1 value=0

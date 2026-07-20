@@ -105,6 +105,7 @@ private:
     boost::json::value ApiUpdateDrone(const std::string& id, const boost::json::object& body);
     boost::json::value ApiDeleteDrone(const std::string& id);
     boost::json::value ApiGetAnchor(const std::string& id);
+    boost::json::value ApiRefreshDrones();
     boost::json::value ApiCreateArray(const boost::json::object& body);
     boost::json::value ApiPreviewArray(const boost::json::object& body);
     boost::json::value ApiStopArray(const std::string& id);

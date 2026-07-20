@@ -7,6 +7,7 @@ void UDroneHttpClient::Get(const FString& Path, FOnHttpResponse OnComplete)
 	auto Req = MakeRequest(TEXT("GET"), Path, TEXT(""));
 	Req->OnProcessRequestComplete().BindUObject(
 		this, &UDroneHttpClient::HandleResponse, OnComplete);
+	TrackRequest(Req);
 	Req->ProcessRequest();
 }
 
@@ -15,6 +16,7 @@ void UDroneHttpClient::Post(const FString& Path, const FString& JsonBody, FOnHtt
 	auto Req = MakeRequest(TEXT("POST"), Path, JsonBody);
 	Req->OnProcessRequestComplete().BindUObject(
 		this, &UDroneHttpClient::HandleResponse, OnComplete);
+	TrackRequest(Req);
 	Req->ProcessRequest();
 }
 
@@ -23,6 +25,7 @@ void UDroneHttpClient::Put(const FString& Path, const FString& JsonBody, FOnHttp
 	auto Req = MakeRequest(TEXT("PUT"), Path, JsonBody);
 	Req->OnProcessRequestComplete().BindUObject(
 		this, &UDroneHttpClient::HandleResponse, OnComplete);
+	TrackRequest(Req);
 	Req->ProcessRequest();
 }
 
@@ -31,6 +34,7 @@ void UDroneHttpClient::Delete(const FString& Path, FOnHttpResponse OnComplete)
 	auto Req = MakeRequest(TEXT("DELETE"), Path, TEXT(""));
 	Req->OnProcessRequestComplete().BindUObject(
 		this, &UDroneHttpClient::HandleResponse, OnComplete);
+	TrackRequest(Req);
 	Req->ProcessRequest();
 }
 
@@ -73,4 +77,51 @@ void UDroneHttpClient::HandleResponse(
 	}
 
 	OnComplete.ExecuteIfBound(true, Body);
+}
+
+void UDroneHttpClient::TrackRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request)
+{
+	PruneCompletedRequests();
+	InFlightRequests.Add(Request);
+}
+
+void UDroneHttpClient::PruneCompletedRequests()
+{
+	InFlightRequests.RemoveAll([](const TSharedPtr<IHttpRequest, ESPMode::ThreadSafe>& Req)
+	{
+		return !Req.IsValid() || Req->GetStatus() == EHttpRequestStatus::Succeeded
+			|| Req->GetStatus() == EHttpRequestStatus::Failed;
+	});
+}
+
+void UDroneHttpClient::CancelAllPendingRequests()
+{
+	int32 Cancelled = 0;
+	for (const TSharedPtr<IHttpRequest, ESPMode::ThreadSafe>& Req : InFlightRequests)
+	{
+		if (Req.IsValid() && Req->GetStatus() == EHttpRequestStatus::Processing)
+		{
+			Req->CancelRequest();
+			++Cancelled;
+		}
+	}
+	InFlightRequests.Empty();
+
+	if (Cancelled > 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneHttpClient] CancelAllPendingRequests: cancelled %d in-flight request(s)"), Cancelled);
+	}
+}
+
+int32 UDroneHttpClient::GetPendingRequestCount() const
+{
+	int32 Count = 0;
+	for (const TSharedPtr<IHttpRequest, ESPMode::ThreadSafe>& Req : InFlightRequests)
+	{
+		if (Req.IsValid() && Req->GetStatus() == EHttpRequestStatus::Processing)
+		{
+			++Count;
+		}
+	}
+	return Count;
 }

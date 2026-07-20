@@ -158,6 +158,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Drone Path")
 	float GetWaypointSegmentSpeed(int32 Index) const;
 
+	/** 所有未明确设置速度的路径段统一使用的缺省速度 (m/s)。 */
+	UFUNCTION(BlueprintPure, Category = "Drone Path")
+	static float GetDefaultSegmentSpeedMps();
+
 	UFUNCTION(BlueprintCallable, Category = "Drone Path")
 	void ClearWaypoints();
 
@@ -240,6 +244,14 @@ public:
 	void MarkConflictSegment(int32 StartWaypointIndex, int32 EndWaypointIndex);
 	void RefreshConflictVisualization();
 
+	/** 暂停当前路径移动（不销毁，可恢复） */
+	UFUNCTION(BlueprintCallable, Category = "Drone Path|Movement")
+	void PauseMovement();
+
+	/** 恢复暂停的路径移动 */
+	UFUNCTION(BlueprintCallable, Category = "Drone Path|Movement")
+	void ResumeMovement();
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -286,6 +298,12 @@ private:
 	UPROPERTY(Transient)
 	TArray<float> SegmentDurations;
 
+	// 循环闭合段（最后节点 -> 首节点）时长，仅在 bClosedLoop 且节点数 > 2 时有效。
+	float ClosedLoopSegmentDuration = 0.0f;
+
+	// true 表示当前正处于"最后节点平滑飞回首节点"的闭合段插值阶段。
+	bool bReturningToStart = false;
+
 	void NormalizeWaypointIndices();
 	void SyncPathState(bool bRebuildWaypointHandles);
 	void RebuildSplineFromWaypoints();
@@ -318,4 +336,9 @@ private:
 	FTimerHandle ScheduledExecutionTimerHandle;
 	TSet<int32> ConflictedWaypointIndices;
 	TSet<int32> ConflictedSegmentStartIndices;
+
+	// 暂停恢复状态
+    int32 PausedSegmentIndex = 0;
+    float PausedElapsedTime = 0.0f;
+    bool bIsPaused = false;
 };
