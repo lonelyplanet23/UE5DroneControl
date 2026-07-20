@@ -4,6 +4,7 @@
 #include "RealTimeDroneReceiver.h"
 #include "DroneOps/Drone/DroneSelectionComponent.h"
 #include "DroneOps/Drone/DroneCommandSenderComponent.h"
+#include "DroneOps/Drone/DroneGroundProjectionComponent.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "DroneOps/Network/DroneNetworkManager.h"
@@ -28,6 +29,7 @@ AMultiDroneCharacter::AMultiDroneCharacter()
 
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
+	GroundProjectionComponent = CreateDefaultSubobject<UDroneGroundProjectionComponent>(TEXT("GroundProjection"));
 
 	// 确保碰撞设置正确，支持鼠标悬停检测
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())

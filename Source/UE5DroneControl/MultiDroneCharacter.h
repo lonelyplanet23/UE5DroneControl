@@ -10,6 +10,7 @@
 
 class UDroneSelectionComponent;
 class UDroneCommandSenderComponent;
+class UDroneGroundProjectionComponent;
 class UWidgetComponent;
 
 /**
@@ -72,6 +73,9 @@ public:
 	// MultiDroneManager.  We keep a reference so blueprints can call it directly.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDroneCommandSenderComponent> CommandSenderComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UDroneGroundProjectionComponent> GroundProjectionComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UWidgetComponent> SelectionWidgetComponent;

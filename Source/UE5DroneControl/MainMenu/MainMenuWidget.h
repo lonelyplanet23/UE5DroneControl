@@ -109,6 +109,18 @@ public:
 	bool IsOfflineMapEnabled() const;
 
 	// -----------------------------------------------------------------------
+	// 垂直定位射线开关
+	// -----------------------------------------------------------------------
+
+	/** 设置是否显示无人机垂直定位射线（保存到配置文件） */
+	UFUNCTION(BlueprintCallable, Category = "MainMenu|Settings")
+	void SetGroundProjectionRayEnabled(bool bEnabled);
+
+	/** 读取无人机垂直定位射线开关状态（默认开启） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MainMenu|Settings")
+	bool IsGroundProjectionRayEnabled() const;
+
+	// -----------------------------------------------------------------------
 	// 导航（供蓝图按钮 OnClicked 绑定）
 	// -----------------------------------------------------------------------
 

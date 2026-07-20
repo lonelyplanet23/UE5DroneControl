@@ -7,6 +7,7 @@
 #include "GameFramework/SaveGame.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ConfigCacheIni.h"
 #include <fstream>
 #include <string>
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
@@ -266,6 +267,29 @@ bool UMainMenuWidget::IsBackendConnected() const
 	}
 
 	return NetMgr->GetWebSocketClient()->IsConnected();
+}
+
+// ---------------------------------------------------------------------------
+// 垂直定位射线开关
+// ---------------------------------------------------------------------------
+
+void UMainMenuWidget::SetGroundProjectionRayEnabled(bool bEnabled)
+{
+	if (GConfig)
+	{
+		GConfig->SetBool(TEXT("DroneDisplay"), TEXT("bShowGroundProjectionRay"), bEnabled, GGameIni);
+		GConfig->Flush(false, GGameIni);
+	}
+}
+
+bool UMainMenuWidget::IsGroundProjectionRayEnabled() const
+{
+	bool bEnabled = true;
+	if (GConfig)
+	{
+		GConfig->GetBool(TEXT("DroneDisplay"), TEXT("bShowGroundProjectionRay"), bEnabled, GGameIni);
+	}
+	return bEnabled;
 }
 
 // ---------------------------------------------------------------------------

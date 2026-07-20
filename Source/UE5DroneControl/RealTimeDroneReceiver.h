@@ -13,6 +13,7 @@
 
 class UDroneTelemetryComponent;
 class UDroneSelectionComponent;
+class UDroneGroundProjectionComponent;
 
 /**
  * YAML format telemetry data structure
@@ -90,6 +91,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDroneTelemetryComponent> TelemetryComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UDroneGroundProjectionComponent> GroundProjectionComponent;
 
 	// ---- IDroneSelectableInterface ----
 	virtual int32 GetDroneId_Implementation() const override { return DroneId; }

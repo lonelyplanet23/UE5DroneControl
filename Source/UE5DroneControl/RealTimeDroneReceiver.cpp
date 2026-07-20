@@ -1,6 +1,7 @@
 ﻿#include "RealTimeDroneReceiver.h"
 #include "DroneOps/Drone/DroneTelemetryComponent.h"
 #include "DroneOps/Drone/DroneSelectionComponent.h"
+#include "DroneOps/Drone/DroneGroundProjectionComponent.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "DroneOps/Core/ICoordinateService.h"
@@ -29,6 +30,7 @@ ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 
 	TelemetryComponent = CreateDefaultSubobject<UDroneTelemetryComponent>(TEXT("TelemetryComponent"));
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
+	GroundProjectionComponent = CreateDefaultSubobject<UDroneGroundProjectionComponent>(TEXT("GroundProjection"));
 
 	// === 【关键】禁用重力和物理模拟 ===
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
