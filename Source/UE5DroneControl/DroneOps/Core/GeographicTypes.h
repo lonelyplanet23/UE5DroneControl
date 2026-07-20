@@ -19,6 +19,54 @@ enum class EGeographicCoordinateSystem : uint8
 	WGS84 UMETA(DisplayName = "WGS84")
 };
 
+/** A WGS84 three-dimensional coordinate entered as (longitude, latitude, altitude MSL). */
+USTRUCT(BlueprintType)
+struct FGeographicCoordinate3D
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geographic Coordinate")
+	double Longitude = 0.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geographic Coordinate")
+	double Latitude = 0.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geographic Coordinate")
+	double AltitudeMslMeters = 0.0;
+};
+
+/** Exact geographic target assigned to one selected drone. */
+USTRUCT(BlueprintType)
+struct FDroneGeographicTarget
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geographic Dispatch")
+	int32 DroneId = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geographic Dispatch")
+	FGeographicCoordinate3D Coordinate;
+};
+
+/** Shared parser/formatter for copy-pasted (longitude, latitude, altitude) vectors. */
+class UE5DRONECONTROL_API FGeographicCoordinateTextParser
+{
+public:
+	static bool Parse(const FString& Text, FGeographicCoordinate3D& OutCoordinate, FString& OutError);
+
+	/**
+	 * Strictly parses a complete sequence of tuples:
+	 * (longitude,latitude,altitude)(longitude,latitude,altitude)
+	 * Only whitespace may appear between tuples. One invalid tuple rejects the entire batch.
+	 */
+	static bool ParseBatch(
+		const FString& Text,
+		TArray<FGeographicCoordinate3D>& OutCoordinates,
+		FString& OutError);
+
+	static FString Format(const FGeographicCoordinate3D& Coordinate);
+};
+
 /**
  * Result of a geographic target dispatch (or preview) request.
  */

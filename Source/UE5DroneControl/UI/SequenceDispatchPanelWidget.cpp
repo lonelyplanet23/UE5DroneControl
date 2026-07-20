@@ -893,15 +893,20 @@ void USequenceDispatchPanelWidget::OnSavePathClicked()
 
 TMap<int32, FDronePathSaveData> USequenceDispatchPanelWidget::ResolvePreviewDispatchMap()
 {
+	// Editing may continue after "save to memory" (map click, gizmo drag, or geographic batch add).
+	// While edit mode is active, always rebuild from the live path actors so preview and final dispatch
+	// cannot consume a stale snapshot that omits newly appended waypoints or their current order.
+	if (bInPathEditMode)
+	{
+		if (ADroneOpsPlayerController* PC = GetDroneOpsController())
+		{
+			return PC->BuildEditingPathsData();
+		}
+	}
+
 	if (bHasSavedPreviewData && !SavedPreviewData.IsEmpty())
 	{
 		return SavedPreviewData;
-	}
-
-	// 未点保存：实时从当前临时路径构建
-	if (ADroneOpsPlayerController* PC = GetDroneOpsController())
-	{
-		return PC->BuildEditingPathsData();
 	}
 
 	return TMap<int32, FDronePathSaveData>();

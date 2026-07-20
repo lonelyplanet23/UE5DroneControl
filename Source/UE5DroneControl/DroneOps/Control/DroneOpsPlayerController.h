@@ -78,9 +78,30 @@ public:
 		double AltitudeMslMeters,
 		bool bForDispatch) const;
 
+	/**
+	 * Dispatches one exact geographic target per selected drone. Unlike the shared-target API,
+	 * this path never adds formation offsets: every DroneId goes to its own supplied coordinate.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps")
+	FGeographicDispatchResult DispatchPerDroneGeographicTargets(
+		EGeographicCoordinateSystem CoordinateSystem,
+		const TArray<FDroneGeographicTarget>& Targets,
+		bool bPreviewOnly);
+
+	/** Validates an exact per-drone target set without drawing markers or sending commands. */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps")
+	FGeographicDispatchResult ValidatePerDroneGeographicTargets(
+		EGeographicCoordinateSystem CoordinateSystem,
+		const TArray<FDroneGeographicTarget>& Targets,
+		bool bForDispatch) const;
+
 	/** Number of drones currently selected for dispatch (multi-selection, or 0). */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	int32 GetSelectedDroneCountForDispatch() const;
+
+	/** Unique selected DroneIds in ascending order, used by deterministic per-drone UI rows. */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps")
+	TArray<int32> GetSelectedDroneIdsForDispatch() const;
 
 	// ---- 预演关卡路径编辑模式（供 SequenceDispatchPanelWidget 调用）----
 
@@ -98,6 +119,29 @@ public:
 	/** 把当前临时路径打包成 DroneId -> FDronePathSaveData（世界坐标）。 */
 	TMap<int32, FDronePathSaveData> BuildEditingPathsData() const;
 
+<<<<<<< HEAD
+=======
+	/**
+	 * 编辑模式下把一个 WGS84 经纬高目标点加为所有在编路径的航点（与地图点击加点同样走编队平移）。
+	 * 非编辑模式或无在编路径时返回失败。用于右上角坐标输入面板在编辑模式下的行为。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	FGeographicDispatchResult AddGeographicWaypointInEditMode(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters);
+
+	/**
+	 * Atomically appends an ordered geographic waypoint batch to every active editing path.
+	 * All coordinates are converted before any path is mutated. This method never sends backend commands.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+	FGeographicDispatchResult AddGeographicWaypointsInEditMode(
+		EGeographicCoordinateSystem CoordinateSystem,
+		const TArray<FGeographicCoordinate3D>& Coordinates);
+
+>>>>>>> 77cb3cc (7.22需求)
 	/** 销毁全部临时路径 Actor（含航点句柄）并清空编辑状态。 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
 	void ClearEditingPaths();
@@ -208,6 +252,38 @@ private:
 		bool bForDispatch,
 		TArray<FGeographicDispatchSlot>& OutSlots) const;
 
+<<<<<<< HEAD
+=======
+	FGeographicDispatchResult BuildPerDroneGeographicDispatchPlan(
+		EGeographicCoordinateSystem CoordinateSystem,
+		const TArray<FDroneGeographicTarget>& Targets,
+		bool bForDispatch,
+		TArray<FGeographicDispatchSlot>& OutSlots) const;
+
+	bool ValidateDispatchDrone(int32 DroneId, FString& OutError) const;
+
+	/**
+	 * 把 WGS84 经纬高（海拔 MSL）转换为 UE 世界坐标（cm）。
+	 * 供派发规划与编辑模式加航点共用，避免重复坐标转换逻辑。
+	 * 失败时返回 false 并写入 OutError（坐标系不支持/服务未就绪/超范围/转换失败）。
+	 */
+	bool TryConvertGeographicToWorld(
+		EGeographicCoordinateSystem CoordinateSystem,
+		double Longitude,
+		double Latitude,
+		double AltitudeMslMeters,
+		FVector& OutWorld,
+		FString& OutError) const;
+
+	/** Builds the same stable primary-first formation targets for every world-space input path. */
+	FGeographicDispatchResult BuildWorldDispatchPlan(
+		const FVector& BaseWorldTarget,
+		TArray<FGeographicDispatchSlot>& OutSlots) const;
+
+	/** Moves shadow drones locally first; sends backend commands only when they are currently possible. */
+	FGeographicDispatchResult ExecuteWorldDispatchPlan(const TArray<FGeographicDispatchSlot>& Slots);
+
+>>>>>>> 77cb3cc (7.22需求)
 	/** Last preview plan, redrawn every frame until another preview replaces it. */
 	TArray<FGeographicDispatchSlot> ActiveGeographicPreviewSlots;
 
