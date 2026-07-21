@@ -7,12 +7,13 @@ rtspAddress: :8554
 
 webrtc: true
 webrtcAddress: :8889
-# Replace with the MediaMTX host's LAN address for a remote UE client.
-webrtcAdditionalHosts: []
+# MediaMTX runs on the UE/Windows host in the current LAN.
+# This address is advertised to the Jetson/UE WebRTC clients.
+webrtcAdditionalHosts: [192.168.10.30]
 webrtcAllowOrigins: ['*']
 
 pathDefaults:
   source: publisher
 
 paths:
-  all: {}
+  all_others: {}
