@@ -99,6 +99,9 @@ private:
     /** 防止 Refresh 重复点击 */
     bool bRefreshing = false;
 
+    /** 跨刷新持久化每架无人机的折叠状态（key = DroneId） */
+    TMap<int32, bool> CollapseStates;
+
     /** Refresh 按钮点击回调 */
     UFUNCTION()
     void OnRefreshButtonClicked();

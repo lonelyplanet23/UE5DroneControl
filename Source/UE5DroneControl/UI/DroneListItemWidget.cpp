@@ -91,6 +91,10 @@ void UDroneListItemWidget::NativeConstruct()
     {
         SelectButton->OnClicked.AddDynamic(this, &UDroneListItemWidget::OnSelectButtonClicked);
     }
+    if (CollapseButton)
+    {
+        CollapseButton->OnClicked.AddDynamic(this, &UDroneListItemWidget::OnCollapseButtonClicked);
+    }
 }
 
 void UDroneListItemWidget::NativeDestruct()
@@ -192,13 +196,38 @@ void UDroneListItemWidget::BuildRuntimeCard()
             if (UVerticalBoxSlot* ChildSlot = Box->AddChildToVerticalBox(Child)) ChildSlot->SetPadding(ChildPadding);
         };
 
+        // ---- Header 行：名称 + 连接状态 + 折叠按钮 ----
         UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HeaderRow"));
         DroneNameText = MakeText(TEXT("DroneNameText"), TEXT("无人机"), FLinearColor(0.96f, 0.98f, 1.0f, 1.0f));
         if (UHorizontalBoxSlot* ChildSlot = Header->AddChildToHorizontalBox(DroneNameText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         ConnectionStatusText = MakeText(TEXT("ConnectionStatusText"), TEXT("离线"), FLinearColor(0.95f, 0.38f, 0.34f, 1.0f));
         Header->AddChildToHorizontalBox(ConnectionStatusText);
         StatusText = ConnectionStatusText;
+
+        // 折叠/展开箭头按钮
+        CollapseButtonText = MakeText(TEXT("CollapseButtonText"), TEXT("▼"), FLinearColor(0.60f, 0.70f, 0.80f, 1.0f));
+        CollapseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CollapseButton"));
+        {
+            FButtonStyle Style = CollapseButton->GetStyle();
+            Style.Normal.DrawAs    = ESlateBrushDrawType::NoDrawType;
+            Style.Hovered.DrawAs   = ESlateBrushDrawType::NoDrawType;
+            Style.Pressed.DrawAs   = ESlateBrushDrawType::NoDrawType;
+            CollapseButton->SetStyle(Style);
+        }
+        CollapseButton->AddChild(CollapseButtonText);
+        if (UHorizontalBoxSlot* CollapseSlot = Header->AddChildToHorizontalBox(CollapseButton))
+        {
+            CollapseSlot->SetPadding(FMargin(6.0f, 0.0f, 0.0f, 0.0f));
+        }
+
         Add(Content, Header, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
+
+        // ---- 可折叠区域（模式行 → TargetIndexText，不含选中按钮） ----
+        CollapsibleContent = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CollapsibleContent"));
+        auto AddC = [this](UWidget* Child, const FMargin& Pad = FMargin(0.0f, 3.0f))
+        {
+            if (UVerticalBoxSlot* S = CollapsibleContent->AddChildToVerticalBox(Child)) S->SetPadding(Pad);
+        };
 
         UHorizontalBox* TaskRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("TaskRow"));
         TaskRow->AddChildToHorizontalBox(MakeText(TEXT("ModeLabel"), TEXT("模式  "), FLinearColor(0.48f, 0.67f, 0.84f, 1.0f)));
@@ -207,30 +236,33 @@ void UDroneListItemWidget::BuildRuntimeCard()
         TaskRow->AddChildToHorizontalBox(MakeText(TEXT("TaskLabel"), TEXT("任务  "), FLinearColor(0.48f, 0.67f, 0.84f, 1.0f)));
         TaskStatusText = MakeText(TEXT("TaskStatusText"), TEXT("待命"));
         if (UHorizontalBoxSlot* ChildSlot = TaskRow->AddChildToHorizontalBox(TaskStatusText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        Add(Content, TaskRow);
+        AddC(TaskRow);
 
         StatusSourceText = MakeText(TEXT("StatusSourceText"), TEXT("状态来源：后端同步"), FLinearColor(0.48f, 0.67f, 0.84f, 1.0f));
-        Add(Content, StatusSourceText, FMargin(0.0f, 1.0f, 0.0f, 5.0f));
+        AddC(StatusSourceText, FMargin(0.0f, 1.0f, 0.0f, 5.0f));
+
         GpsText = MakeText(TEXT("GpsText"), TEXT("经度 --    纬度 --"));
-        Add(Content, GpsText);
+        AddC(GpsText);
 
         UHorizontalBox* MetricsRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MetricsRow"));
         AltitudeText = MakeText(TEXT("AltitudeText"), TEXT("海拔 -- m"));
         if (UHorizontalBoxSlot* ChildSlot = MetricsRow->AddChildToHorizontalBox(AltitudeText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         BatteryText = MakeText(TEXT("BatteryText"), TEXT("电量 --"));
         MetricsRow->AddChildToHorizontalBox(BatteryText);
-        Add(Content, MetricsRow);
+        AddC(MetricsRow);
 
         UHorizontalBox* ProgressRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ProgressRow"));
         WaypointText = MakeText(TEXT("WaypointText"), TEXT("航点 0 / 0"));
         if (UHorizontalBoxSlot* ChildSlot = ProgressRow->AddChildToHorizontalBox(WaypointText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         UpdateTimeText = MakeText(TEXT("UpdateTimeText"), TEXT("刚刚"), FLinearColor(0.55f, 0.62f, 0.70f, 1.0f));
         ProgressRow->AddChildToHorizontalBox(UpdateTimeText);
-        Add(Content, ProgressRow);
+        AddC(ProgressRow);
 
         TargetIndexText = MakeText(TEXT("TargetIndexText"), TEXT(""));
         TargetIndexText->SetVisibility(ESlateVisibility::Collapsed);
-        Content->AddChildToVerticalBox(TargetIndexText);
+        CollapsibleContent->AddChildToVerticalBox(TargetIndexText);
+
+        Add(Content, CollapsibleContent, FMargin(0.0f));
 
         // ---- 选中按钮行 ----
         UHorizontalBox* SelectRow = WidgetTree->ConstructWidget<UHorizontalBox>(
@@ -365,6 +397,26 @@ void UDroneListItemWidget::UpdateModeText()
     if (ModeText)
     {
         ModeText->SetText(DroneCommandModeToDisplayText(CurrentMode));
+    }
+}
+
+void UDroneListItemWidget::OnCollapseButtonClicked()
+{
+    bIsCollapsed = !bIsCollapsed;
+    ApplyCollapseState();
+}
+
+void UDroneListItemWidget::ApplyCollapseState()
+{
+    if (CollapsibleContent)
+    {
+        CollapsibleContent->SetVisibility(
+            bIsCollapsed ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+    }
+    if (CollapseButtonText)
+    {
+        CollapseButtonText->SetText(
+            FText::FromString(bIsCollapsed ? TEXT("▶") : TEXT("▼")));
     }
 }
 
