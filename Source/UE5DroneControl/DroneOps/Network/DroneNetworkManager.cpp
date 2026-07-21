@@ -32,6 +32,11 @@ void UDroneNetworkManager::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		PollIntervalSec = IniFloat;
 	}
+	bool bIniPreview = false;
+	if (GConfig && GConfig->GetBool(Section, TEXT("bStrictLocalPreview"), bIniPreview, GGameIni))
+	{
+		bStrictLocalPreview = bIniPreview;
+	}
 
 	HttpClient = NewObject<UDroneHttpClient>(this);
 	HttpClient->BaseUrl = BackendBaseUrl;
@@ -128,6 +133,25 @@ void UDroneNetworkManager::SetStrictLocalPreviewIsolation(bool bEnable)
 	}
 
 	OnIsolationStateChanged.Broadcast(bEnable);
+}
+
+void UDroneNetworkManager::RefreshDroneConnections(TFunction<void(bool, const TArray<int32>&)> Callback)
+{
+	if (bStrictLocalPreview || CheckIsolationBlocked(TEXT("RefreshDroneConnections")))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] RefreshDroneConnections blocked by local preview mode"));
+		Callback(false, {});
+		return;
+	}
+
+	if (!HttpClient)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] RefreshDroneConnections: HttpClient not ready"));
+		Callback(false, {});
+		return;
+	}
+
+	HttpClient->PostRefresh(Callback);
 }
 
 // ---- Polling ----

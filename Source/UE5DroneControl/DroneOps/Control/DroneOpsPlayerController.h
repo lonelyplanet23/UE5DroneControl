@@ -617,4 +617,12 @@ bool ValidateDispatchDrone(int32 DroneId, FString& OutError) const;
 	/** 攻击确认弹窗回调（由 PreviewConfirmPopupWidget 的 OnAttackConfirmMade delegate 触发） */
 	UFUNCTION()
 	void OnAttackConfirmMade(int32 DroneId, int32 TargetId, bool bAttack);
+
+	/**
+	 * 响应 DroneRegistrySubsystem::OnMultiSelectionChanged 委托。
+	 * UI 面板通过 AddToMultiSelection/RemoveFromMultiSelection 更改注册表后，
+	 * 此回调同步 SelectedDroneId/SelectedDroneActor 并刷新场景所有影子机的高亮状态。
+	 */
+	UFUNCTION()
+	void OnRegistryMultiSelectionChanged();
 };
