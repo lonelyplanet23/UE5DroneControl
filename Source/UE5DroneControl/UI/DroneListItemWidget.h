@@ -7,6 +7,7 @@
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
+#include "Components/VerticalBox.h"
 #include "DroneListItemWidget.generated.h"
 
 /**
@@ -105,6 +106,10 @@ public:
      */
     void SetDroneId(int32 InDroneId);
 
+    int32 GetDroneId() const { return DroneId; }
+    bool IsCollapsed() const { return bIsCollapsed; }
+    void SetCollapsed(bool bCollapsed) { bIsCollapsed = bCollapsed; ApplyCollapseState(); }
+
 protected:
     virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override;
@@ -113,6 +118,7 @@ protected:
 private:
     int32 DroneId = 0;
     EDroneCommandMode CurrentMode = EDroneCommandMode::Move;
+    bool bIsCollapsed = false;
 
     /** 选中/取消选中按钮（运行时由 BuildRuntimeCard 创建） */
     UPROPERTY(meta = (BindWidgetOptional))
@@ -121,6 +127,18 @@ private:
     /** 选中按钮上的文字 */
     UPROPERTY(meta = (BindWidgetOptional))
     class UTextBlock* SelectButtonText = nullptr;
+
+    /** 折叠/展开按钮（Header 行右侧） */
+    UPROPERTY(meta = (BindWidgetOptional))
+    class UButton* CollapseButton = nullptr;
+
+    /** 折叠按钮上的箭头文字（▼ / ▶） */
+    UPROPERTY(meta = (BindWidgetOptional))
+    class UTextBlock* CollapseButtonText = nullptr;
+
+    /** 可折叠区域容器（模式行 → TargetIndexText，不含选中按钮） */
+    UPROPERTY(meta = (BindWidgetOptional))
+    UVerticalBox* CollapsibleContent = nullptr;
 
     /** 根据注册表当前状态刷新 SelectButton 的文字和启用状态（须为 UFUNCTION 以绑定 Dynamic 委托） */
     UFUNCTION()
@@ -132,7 +150,11 @@ private:
     UFUNCTION()
     void OnModeButtonClicked();
 
+    UFUNCTION()
+    void OnCollapseButtonClicked();
+
     void UpdateModeText();
+    void ApplyCollapseState();
 
     /**
      * 当蓝图未绑定新增控件时，在代码里创建并挂载。

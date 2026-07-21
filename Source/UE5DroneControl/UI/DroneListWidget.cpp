@@ -148,6 +148,18 @@ void UDroneListWidget::RefreshFromRegistry()
         return;
     }
 
+    // 销毁前保存每个条目的折叠状态，刷新后按 DroneId 还原
+    if (DroneScrollBox)
+    {
+        for (UWidget* Child : DroneScrollBox->GetAllChildren())
+        {
+            if (UDroneListItemWidget* Item = Cast<UDroneListItemWidget>(Child))
+            {
+                CollapseStates.Add(Item->GetDroneId(), Item->IsCollapsed());
+            }
+        }
+    }
+
     ClearList();
 
     TArray<FDroneRegistrationViewData> ViewData;
@@ -190,6 +202,11 @@ void UDroneListWidget::RefreshFromRegistry()
 				Item->SetCommandMode(Desc.DroneId, Snap.TaskMode);
                 // 绑定 DroneId 并订阅多选变更委托，使选中按钮生效
                 Item->SetDroneId(Desc.DroneId);
+                // 还原折叠状态（跨刷新持久化）
+                if (const bool* bSaved = CollapseStates.Find(Desc.DroneId))
+                {
+                    Item->SetCollapsed(*bSaved);
+                }
                 DroneScrollBox->AddChild(Item);
             }
         }
