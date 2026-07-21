@@ -1251,6 +1251,111 @@ FGeographicDispatchResult ADroneOpsPlayerController::ExecuteWorldDispatchPlan(
 	return Result;
 }
 
+bool ADroneOpsPlayerController::TryBuildGeographicBackendTarget(
+	int32 DroneId,
+	const FGeographicCoordinate3D& TargetCoordinate,
+	const FVector& AdditionalLocalUeOffset,
+	const UDroneNetworkManager* NetworkManager,
+	FVector& OutBackendRelativeTarget,
+	FString& OutError) const
+{
+	OutBackendRelativeTarget = FVector::ZeroVector;
+	if (!DroneRegistry || !NetworkManager)
+	{
+		OutError = TEXT("后端连接未就绪");
+		return false;
+	}
+
+	const ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(
+		DroneRegistry->GetReceiverActor(DroneId));
+	if (!Receiver || !Receiver->bHasGpsAnchor)
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 尚未获得GPS锚点，请等待上电信息"), DroneId);
+		return false;
+	}
+
+	double AnchorLatitude = 0.0;
+	double AnchorLongitude = 0.0;
+	double AnchorAltitudeMslMeters = 0.0;
+	if (!NetworkManager->GetCachedGpsAnchor(
+		DroneId, AnchorLatitude, AnchorLongitude, AnchorAltitudeMslMeters)
+		|| !FMath::IsFinite(AnchorLatitude)
+		|| AnchorLatitude < -90.0 || AnchorLatitude > 90.0
+		|| !FMath::IsFinite(AnchorLongitude)
+		|| AnchorLongitude < -180.0 || AnchorLongitude > 180.0
+		|| !FMath::IsFinite(AnchorAltitudeMslMeters))
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 的GPS锚点无效"), DroneId);
+		return false;
+	}
+
+	FDroneTelemetrySnapshot Telemetry;
+	if (!DroneRegistry->GetTelemetry(DroneId, Telemetry)
+		|| Telemetry.Availability != EDroneAvailability::Online)
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 尚无可用遥测"), DroneId);
+		return false;
+	}
+	if (!Telemetry.bLocalPositionValid)
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 本地NED位置尚未就绪"), DroneId);
+		return false;
+	}
+	if (!Telemetry.bGpsFix
+		|| !FMath::IsFinite(Telemetry.GpsLatitude)
+		|| Telemetry.GpsLatitude < -90.0 || Telemetry.GpsLatitude > 90.0
+		|| !FMath::IsFinite(Telemetry.GpsLongitude)
+		|| Telemetry.GpsLongitude < -180.0 || Telemetry.GpsLongitude > 180.0
+		|| !FMath::IsFinite(Telemetry.GpsAltitude))
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 当前GPS数据无效"), DroneId);
+		return false;
+	}
+
+	constexpr double MaxTelemetryAgeSeconds = 3.0;
+	const double TelemetryAgeSeconds = FPlatformTime::Seconds() - Telemetry.LastUpdateTime;
+	if (Telemetry.LastUpdateTime <= 0.0
+		|| !FMath::IsFinite(TelemetryAgeSeconds)
+		|| TelemetryAgeSeconds < 0.0
+		|| TelemetryAgeSeconds > MaxTelemetryAgeSeconds)
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 遥测已过期，请等待数据恢复"), DroneId);
+		return false;
+	}
+
+	FGeographicCoordinate3D CurrentCoordinate;
+	CurrentCoordinate.Longitude = Telemetry.GpsLongitude;
+	CurrentCoordinate.Latitude = Telemetry.GpsLatitude;
+	CurrentCoordinate.AltitudeMslMeters = Telemetry.GpsAltitude;
+	const FVector CurrentLocalUeOffset(
+		Telemetry.NedLocation.X * 100.0,
+		Telemetry.NedLocation.Y * 100.0,
+		-Telemetry.NedLocation.Z * 100.0);
+	if (!FGeographicDispatchOffsetCalculator::CalculateBackendRelativeOffset(
+		TargetCoordinate,
+		CurrentCoordinate,
+		CurrentLocalUeOffset,
+		AdditionalLocalUeOffset,
+		OutBackendRelativeTarget))
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 的目标偏移计算失败"), DroneId);
+		return false;
+	}
+
+	// Match Jetson's existing default absolute local-NED guard. Reject here so
+	// the UI cannot report success for a command the flight endpoint will drop.
+	constexpr double MaxAbsoluteLocalTargetCm = 5000.0 * 100.0;
+	if (FMath::Abs(OutBackendRelativeTarget.X) > MaxAbsoluteLocalTargetCm
+		|| FMath::Abs(OutBackendRelativeTarget.Y) > MaxAbsoluteLocalTargetCm
+		|| FMath::Abs(OutBackendRelativeTarget.Z) > MaxAbsoluteLocalTargetCm)
+	{
+		OutBackendRelativeTarget = FVector::ZeroVector;
+		OutError = FString::Printf(TEXT("无人机 %d 的目标超出本地NED范围（5000 m）"), DroneId);
+		return false;
+	}
+	return true;
+}
+
 bool ADroneOpsPlayerController::TryConvertGeographicToWorld(
 	EGeographicCoordinateSystem CoordinateSystem,
 	double Longitude,
@@ -1457,13 +1562,18 @@ FGeographicDispatchResult ADroneOpsPlayerController::BuildGeographicDispatchPlan
 		Result.Message = TEXT("坐标转换失败");
 		return Result;
 	}
+	FGeographicCoordinate3D GeographicTarget;
+	GeographicTarget.Longitude = Longitude;
+	GeographicTarget.Latitude = Latitude;
+	GeographicTarget.AltitudeMslMeters = AltitudeMslMeters;
 
 	// Dispatch is atomic from the UI's perspective: validate every selected drone before sending
 	// the first command. Never silently skip a locked or unanchored secondary drone because doing so
 	// would change the stable DroneId-to-spiral-slot mapping.
 	if (bForDispatch)
 	{
-		if (!NetworkManager || !NetworkManager->GetWebSocketClient()
+		if (!NetworkManager || !NetworkManager->CanSendToBackend()
+			|| !NetworkManager->GetWebSocketClient()
 			|| !NetworkManager->GetWebSocketClient()->IsConnected())
 		{
 			Result.Message = TEXT("后端连接未就绪");
@@ -1494,10 +1604,26 @@ FGeographicDispatchResult ADroneOpsPlayerController::BuildGeographicDispatchPlan
 	for (int32 i = 0; i < OrderedIds.Num(); ++i)
 	{
 		const int32 Id = OrderedIds[i];
+		const FVector FormationOffset = ComputeMultiDispatchOffset(SlotIndex, SpacingCm);
 		FGeographicDispatchSlot Slot;
 		Slot.DroneId = Id;
 		Slot.bIsPrimary = (i == 0);
-		Slot.WorldTarget = BaseTarget + ComputeMultiDispatchOffset(SlotIndex, SpacingCm);
+		Slot.WorldTarget = BaseTarget + FormationOffset;
+		if (bForDispatch)
+		{
+			if (!TryBuildGeographicBackendTarget(
+				Id,
+				GeographicTarget,
+				FormationOffset,
+				NetworkManager,
+				Slot.BackendRelativeTarget,
+				Result.Message))
+			{
+				OutSlots.Reset();
+				return Result;
+			}
+			Slot.bHasBackendRelativeTarget = true;
+		}
 		OutSlots.Add(Slot);
 		++SlotIndex;
 	}
@@ -1551,9 +1677,8 @@ FGeographicDispatchResult ADroneOpsPlayerController::DispatchGeographicTarget(
 	// command per drone; the backend heartbeat owns reliable resend and queue consumption.
 	for (const FGeographicDispatchSlot& Slot : Slots)
 	{
-		const ARealTimeDroneReceiver* Receiver = CastChecked<ARealTimeDroneReceiver>(
-			DroneRegistry->GetReceiverActor(Slot.DroneId));
-		const FVector SendLocation = Slot.WorldTarget - Receiver->AnchorWorldLocation;
+		check(Slot.bHasBackendRelativeTarget);
+		const FVector SendLocation = Slot.BackendRelativeTarget;
 		const EDroneCommandMode CommandMode = DroneRegistry->GetDroneCommandMode(Slot.DroneId);
 		NetworkManager->SendMoveCommand(Slot.DroneId, SendLocation, CommandMode);
 
@@ -3860,6 +3985,18 @@ FGeographicDispatchResult ADroneOpsPlayerController::BuildPerDroneGeographicDisp
 		return Result;
 	}
 
+	UDroneNetworkManager* NetworkManager = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UDroneNetworkManager>()
+		: nullptr;
+	if (bForDispatch
+		&& (!NetworkManager || !NetworkManager->CanSendToBackend()
+			|| !NetworkManager->GetWebSocketClient()
+			|| !NetworkManager->GetWebSocketClient()->IsConnected()))
+	{
+		Result.Message = TEXT("后端连接未就绪");
+		return Result;
+	}
+
 	const TArray<int32> SelectedIds = GetSelectedDroneIdsForDispatch();
 	if (SelectedIds.IsEmpty())
 	{
@@ -3931,6 +4068,21 @@ FGeographicDispatchResult ADroneOpsPlayerController::BuildPerDroneGeographicDisp
 		Slot.DroneId = DroneId;
 		Slot.WorldTarget = WorldTarget;
 		Slot.bIsPrimary = DroneId == PrimaryId;
+		if (bForDispatch)
+		{
+			if (!TryBuildGeographicBackendTarget(
+				DroneId,
+				*Coordinate,
+				FVector::ZeroVector,
+				NetworkManager,
+				Slot.BackendRelativeTarget,
+				Result.Message))
+			{
+				OutSlots.Reset();
+				return Result;
+			}
+			Slot.bHasBackendRelativeTarget = true;
+		}
 		OutSlots.Add(Slot);
 	}
 
@@ -3969,10 +4121,23 @@ FGeographicDispatchResult ADroneOpsPlayerController::DispatchPerDroneGeographicT
 		return Result;
 	}
 
-	Result = ExecuteWorldDispatchPlan(Slots);
-	if (Result.bSuccess)
+	UDroneNetworkManager* NetworkManager = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UDroneNetworkManager>()
+		: nullptr;
+	ActiveGeographicPreviewSlots.Reset();
+	for (const FGeographicDispatchSlot& Slot : Slots)
 	{
-		UE_LOG(LogTemp, Log, TEXT("DispatchPerDroneGeographicTargets: dispatched %d exact targets"), Slots.Num());
+		check(Slot.bHasBackendRelativeTarget);
+		NetworkManager->SendMoveCommand(
+			Slot.DroneId,
+			Slot.BackendRelativeTarget,
+			DroneRegistry->GetDroneCommandMode(Slot.DroneId));
+		if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ResolveDroneActorById(Slot.DroneId)))
+		{
+			Shadow->MoveToTarget3D(Slot.WorldTarget);
+		}
 	}
+	Result.Message = FString::Printf(TEXT("已派发 %d 个逐机目标"), Slots.Num());
+	UE_LOG(LogTemp, Log, TEXT("DispatchPerDroneGeographicTargets: dispatched %d exact targets"), Slots.Num());
 	return Result;
 }

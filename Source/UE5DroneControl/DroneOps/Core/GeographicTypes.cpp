@@ -34,6 +34,57 @@ void NormalizeCoordinateSeparators(FString& Text)
 	Text.ReplaceInline(TEXT(";"), TEXT(","));
 }
 
+bool ParseFiniteDoubleStrict(const FString& Text, double& OutValue)
+{
+	int32 Cursor = 0;
+	if (Cursor < Text.Len() && (Text[Cursor] == TEXT('+') || Text[Cursor] == TEXT('-')))
+	{
+		++Cursor;
+	}
+
+	bool bHasMantissaDigit = false;
+	while (Cursor < Text.Len() && FChar::IsDigit(Text[Cursor]))
+	{
+		bHasMantissaDigit = true;
+		++Cursor;
+	}
+	if (Cursor < Text.Len() && Text[Cursor] == TEXT('.'))
+	{
+		++Cursor;
+		while (Cursor < Text.Len() && FChar::IsDigit(Text[Cursor]))
+		{
+			bHasMantissaDigit = true;
+			++Cursor;
+		}
+	}
+	if (!bHasMantissaDigit)
+	{
+		return false;
+	}
+
+	if (Cursor < Text.Len() && (Text[Cursor] == TEXT('e') || Text[Cursor] == TEXT('E')))
+	{
+		++Cursor;
+		if (Cursor < Text.Len() && (Text[Cursor] == TEXT('+') || Text[Cursor] == TEXT('-')))
+		{
+			++Cursor;
+		}
+		const int32 ExponentStart = Cursor;
+		while (Cursor < Text.Len() && FChar::IsDigit(Text[Cursor]))
+		{
+			++Cursor;
+		}
+		if (Cursor == ExponentStart)
+		{
+			return false;
+		}
+	}
+
+	return Cursor == Text.Len()
+		&& FDefaultValueHelper::ParseDouble(Text, OutValue)
+		&& FMath::IsFinite(OutValue);
+}
+
 bool ParseCoordinateComponents(
 	const FString& CoordinateText,
 	FGeographicCoordinate3D& OutCoordinate,
@@ -75,7 +126,7 @@ bool ParseCoordinateComponents(
 			OutError = FString::Printf(TEXT("%s为空"), CoordinateFieldName(Index));
 			return false;
 		}
-		if (!FDefaultValueHelper::ParseDouble(Parts[Index], Values[Index]) || !FMath::IsFinite(Values[Index]))
+		if (!ParseFiniteDoubleStrict(Parts[Index], Values[Index]))
 		{
 			OutError = FString::Printf(TEXT("%s不是有效数字"), CoordinateFieldName(Index));
 			return false;
@@ -229,4 +280,73 @@ FString FGeographicCoordinateTextParser::Format(const FGeographicCoordinate3D& C
 		Coordinate.Longitude,
 		Coordinate.Latitude,
 		Coordinate.AltitudeMslMeters);
+}
+
+bool FGeographicDispatchOffsetCalculator::CalculateBackendRelativeOffset(
+	const FGeographicCoordinate3D& TargetCoordinate,
+	const FGeographicCoordinate3D& CurrentCoordinate,
+	const FVector& CurrentLocalUeOffset,
+	const FVector& AdditionalLocalUeOffset,
+	FVector& OutRelativeOffset)
+{
+	OutRelativeOffset = FVector::ZeroVector;
+	const auto IsValidCoordinate = [](const FGeographicCoordinate3D& Coordinate)
+	{
+		return FMath::IsFinite(Coordinate.Longitude)
+			&& Coordinate.Longitude >= -180.0 && Coordinate.Longitude <= 180.0
+			&& FMath::IsFinite(Coordinate.Latitude)
+			&& Coordinate.Latitude >= -90.0 && Coordinate.Latitude <= 90.0
+			&& FMath::IsFinite(Coordinate.AltitudeMslMeters);
+	};
+	const auto IsFiniteVector = [](const FVector& Value)
+	{
+		return FMath::IsFinite(Value.X)
+			&& FMath::IsFinite(Value.Y)
+			&& FMath::IsFinite(Value.Z);
+	};
+	if (!IsValidCoordinate(TargetCoordinate)
+		|| !IsValidCoordinate(CurrentCoordinate)
+		|| !IsFiniteVector(CurrentLocalUeOffset)
+		|| !IsFiniteVector(AdditionalLocalUeOffset))
+	{
+		return false;
+	}
+
+	// WGS84 local radii of curvature. Geographic drone targets are local
+	// movements, so the tangent-plane delta is both stable and sufficiently
+	// precise while avoiding any Cesium-world/PX4-axis coupling.
+	constexpr double SemiMajorMeters = 6378137.0;
+	constexpr double Flattening = 1.0 / 298.257223563;
+	constexpr double EccentricitySquared = Flattening * (2.0 - Flattening);
+	const double CurrentLatitude = FMath::DegreesToRadians(CurrentCoordinate.Latitude);
+	const double TargetLatitude = FMath::DegreesToRadians(TargetCoordinate.Latitude);
+	const double MeanLatitude = 0.5 * (CurrentLatitude + TargetLatitude);
+	const double SinMeanLatitude = FMath::Sin(MeanLatitude);
+	const double CurvatureTerm = 1.0
+		- EccentricitySquared * SinMeanLatitude * SinMeanLatitude;
+	if (CurvatureTerm <= 0.0 || !FMath::IsFinite(CurvatureTerm))
+	{
+		return false;
+	}
+	const double PrimeVerticalRadius = SemiMajorMeters / FMath::Sqrt(CurvatureTerm);
+	const double MeridionalRadius = SemiMajorMeters * (1.0 - EccentricitySquared)
+		/ FMath::Pow(CurvatureTerm, 1.5);
+	const double RawLongitudeDelta = FMath::DegreesToRadians(
+		TargetCoordinate.Longitude - CurrentCoordinate.Longitude);
+	const double ShortLongitudeDelta = FMath::Atan2(
+		FMath::Sin(RawLongitudeDelta), FMath::Cos(RawLongitudeDelta));
+	const double NorthMeters = (TargetLatitude - CurrentLatitude) * MeridionalRadius;
+	const double EastMeters = ShortLongitudeDelta * PrimeVerticalRadius * FMath::Cos(MeanLatitude);
+
+	OutRelativeOffset.X = CurrentLocalUeOffset.X + NorthMeters * 100.0 + AdditionalLocalUeOffset.X;
+	OutRelativeOffset.Y = CurrentLocalUeOffset.Y + EastMeters * 100.0 + AdditionalLocalUeOffset.Y;
+	OutRelativeOffset.Z = CurrentLocalUeOffset.Z
+		+ (TargetCoordinate.AltitudeMslMeters - CurrentCoordinate.AltitudeMslMeters) * 100.0
+		+ AdditionalLocalUeOffset.Z;
+	if (!IsFiniteVector(OutRelativeOffset))
+	{
+		OutRelativeOffset = FVector::ZeroVector;
+		return false;
+	}
+	return true;
 }

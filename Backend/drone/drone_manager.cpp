@@ -4,6 +4,7 @@
 #include "conversion/quaternion_utils.h"
 
 #include <chrono>
+#include <cmath>
 #include <spdlog/spdlog.h>
 
 namespace {
@@ -27,6 +28,30 @@ DroneControlPacket make_packet(int slot, double ned_n, double ned_e,
     cmd.mode = mode;
     cmd.slot = slot;
     return cmd;
+}
+
+bool is_valid_gps_anchor(const TelemetryData& data)
+{
+    return data.gps_fix
+        && std::isfinite(data.gps_lat)
+        && std::isfinite(data.gps_lon)
+        && std::isfinite(data.gps_alt)
+        && data.gps_lat >= -90.0 && data.gps_lat <= 90.0
+        && data.gps_lon >= -180.0 && data.gps_lon <= 180.0;
+}
+
+bool has_fresh_valid_local_position(const DroneContext& ctx)
+{
+    constexpr double kMaxSafeHoldTelemetryAgeSeconds = 3.0;
+    const double age_seconds = now_unix_seconds() - ctx.last_telemetry_unix;
+    return ctx.has_telemetry
+        && ctx.latest_telemetry.local_position_valid
+        && std::isfinite(ctx.latest_telemetry.position_ned[0])
+        && std::isfinite(ctx.latest_telemetry.position_ned[1])
+        && std::isfinite(ctx.latest_telemetry.position_ned[2])
+        && ctx.last_telemetry_unix > 0.0
+        && age_seconds >= 0.0
+        && age_seconds <= kMaxSafeHoldTelemetryAgeSeconds;
 }
 
 } // namespace
@@ -81,22 +106,28 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
 
             switch (event) {
                 case StateEvent::PowerOn:
-                case StateEvent::Reconnect:
+                case StateEvent::Reconnect: {
+                    // This transition is driven only by an estimator-valid
+                    // VehicleLocalPosition sample. Hold that measured NED point,
+                    // never the guessed PX4 local origin.
+                    const double hold_x = ctx->latest_telemetry.position_ned[0];
+                    const double hold_y = ctx->latest_telemetry.position_ned[1];
+                    const double hold_z = ctx->latest_telemetry.position_ned[2];
                     if (event == StateEvent::Reconnect) {
-                        // 重上电后 PX4 本地 NED 原点已改变，旧相对坐标绝不能重放。
+                        // Do not replay commands from the previous connection.
                         ctx->command_queue->Clear();
-                        ctx->last_ned_x = 0.0;
-                        ctx->last_ned_y = 0.0;
-                        ctx->last_ned_z = 0.0;
                         spdlog::warn(
-                            "Drone {} reconnected: cleared commands tied to old "
-                            "power-on NED origin",
+                            "Drone {} reconnected: cleared stale commands and holding current NED",
                             drone_id);
                     }
+                    ctx->last_ned_x = hold_x;
+                    ctx->last_ned_y = hold_y;
+                    ctx->last_ned_z = hold_z;
                     if (state_change_cb_) {
                         state_change_cb_(drone_id, event, anchor_manager_.GetAnchor(drone_id));
                     }
-                    hb_manager_.Start(drone_id, ctx->slot, ctx->jetson_ip, ctx->send_port,
+                    hb_manager_.Start(
+                        drone_id, ctx->slot, ctx->jetson_ip, ctx->send_port,
                         [command_queue](DroneControlPacket& cmd) -> bool {
                             // The queue owns its own mutex and remains alive until
                             // RemoveDrone stops and joins this heartbeat thread.
@@ -104,8 +135,10 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
                             // emitted while that mutex is held and synchronously
                             // stops the heartbeat, so reacquiring it would deadlock.
                             return command_queue && command_queue->Pop(cmd);
-                        });
+                        },
+                        hold_x, hold_y, hold_z);
                     break;
+                }
 
                 case StateEvent::LostConnection:
                     hb_manager_.Stop(drone_id);
@@ -113,6 +146,12 @@ bool DroneManager::AddDrone(int drone_id, int slot, const std::string& name,
                     ctx->last_ned_x = 0.0;
                     ctx->last_ned_y = 0.0;
                     ctx->last_ned_z = 0.0;
+                    // A reconnect is treated as a new power-on lifecycle: the
+                    // PX4 local origin and its GPS anchor must both be rebuilt.
+                    anchor_manager_.ClearAnchor(drone_id);
+                    ctx->latest_telemetry.local_position_valid = false;
+                    ctx->has_telemetry = false;
+                    ctx->last_telemetry_unix = 0.0;
                     if (state_change_cb_) {
                         state_change_cb_(drone_id, event, GpsAnchor{});
                     }
@@ -377,16 +416,22 @@ std::vector<int> DroneManager::RefreshDisconnectedConnections()
             continue;
         }
 
-        // 使用最后一份已知位置（首次连接则为 0,0,0）发送 mode=hold，
-        // 这里只做链路探测，不会下发 move/arm/offboard 指令。
-        const double hold_x = ctx->has_telemetry ? ctx->latest_telemetry.position_ned[0] : 0.0;
-        const double hold_y = ctx->has_telemetry ? ctx->latest_telemetry.position_ned[1] : 0.0;
-        const double hold_z = ctx->has_telemetry ? ctx->latest_telemetry.position_ned[2] : 0.0;
+        // Refresh must not start a heartbeat at a guessed local origin.
+        if (!has_fresh_valid_local_position(*ctx)) {
+            spdlog::warn(
+                "[ConnectionRefresh] drone {} has no fresh valid PX4 local position; skipped",
+                id);
+            continue;
+        }
+        const double hold_x = ctx->latest_telemetry.position_ned[0];
+        const double hold_y = ctx->latest_telemetry.position_ned[1];
+        const double hold_z = ctx->latest_telemetry.position_ned[2];
 
         hb_manager_.Start(id, ctx->slot, ctx->jetson_ip, ctx->send_port,
             [queue = ctx->command_queue.get()](DroneControlPacket& cmd) -> bool {
                 return queue && queue->Pop(cmd);
-            });
+            },
+            hold_x, hold_y, hold_z);
         hb_manager_.RequestHold(id, hold_x, hold_y, hold_z);
         refreshed_ids.push_back(id);
 
@@ -443,18 +488,37 @@ DroneContext* DroneManager::GetContextUnsafe(int drone_id) const
 void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
 {
     const int drone_id = ctx.drone_id;
+    const DroneConnectionState state_before = ctx.state_machine->GetState();
+    const bool had_anchor = anchor_manager_.HasAnchor(drone_id);
+    const bool local_position_valid = data.local_position_valid
+        && std::isfinite(data.position_ned[0])
+        && std::isfinite(data.position_ned[1])
+        && std::isfinite(data.position_ned[2]);
 
     ctx.latest_telemetry = data;
+    ctx.latest_telemetry.local_position_valid = local_position_valid;
     ctx.has_telemetry = true;
     ctx.last_telemetry_unix = now_unix_seconds();
 
-    if (data.gps_fix) {
+    bool created_anchor = false;
+    if (!had_anchor && is_valid_gps_anchor(data)) {
         anchor_manager_.SetAnchor(drone_id, data.gps_lat, data.gps_lon, data.gps_alt);
-        spdlog::debug("[DroneManager] Drone {} GPS fix: ({:.6f},{:.6f},{:.1f}m)",
+        created_anchor = true;
+        spdlog::debug("[DroneManager] Drone {} power-on GPS anchor: ({:.6f},{:.6f},{:.1f}m)",
                       drone_id, data.gps_lat, data.gps_lon, data.gps_alt);
     }
 
-    ctx.state_machine->OnTelemetryReceived();
+    // Starting the heartbeat from odometry in a different pose frame, or from
+    // an invalid local estimate, can command (0,0,0) while airborne.
+    if (local_position_valid) {
+        ctx.state_machine->OnTelemetryReceived();
+    }
+
+    // Local NED can become valid before GPS. Publish the frozen anchor once
+    // the first valid GPS tuple arrives so UE can enable geographic dispatch.
+    if (created_anchor && state_before == DroneConnectionState::Online && state_change_cb_) {
+        state_change_cb_(drone_id, StateEvent::PowerOn, anchor_manager_.GetAnchor(drone_id));
+    }
 
     // 遥测位置是“当前实际位置”，不能覆盖后端的“期望目标位置”。
     // 否则 move 只发一帧，下一帧 heartbeat 就会把目标改成当前点，导致飞机停住。
@@ -480,7 +544,7 @@ void DroneManager::HandleTelemetry(DroneContext& ctx, const TelemetryData& data)
     }
 
     if (telemetry_cb_) {
-        telemetry_cb_(drone_id, data);
+        telemetry_cb_(drone_id, ctx.latest_telemetry);
     }
 }
 

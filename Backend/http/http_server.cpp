@@ -115,6 +115,7 @@ HttpServer::HttpServer(const AppConfig& config,
         CoordinateConverter::NedToUeOffset(
             tel.position_ned[0], tel.position_ned[1], tel.position_ned[2],
             ux, uy, uz);
+        const GpsAnchor anchor = drone_mgr_.GetAnchor(drone_id);
 
         auto msg = boost::json::object{
             {"type",     "telemetry"},
@@ -134,6 +135,11 @@ HttpServer::HttpServer(const AppConfig& config,
             {"gps_lon",  tel.gps_lon},
             {"gps_alt",  tel.gps_alt},
             {"gps_fix",  tel.gps_fix},
+            {"local_position_valid", tel.local_position_valid},
+            {"anchor_valid", anchor.valid},
+            {"anchor_gps_lat", anchor.latitude},
+            {"anchor_gps_lon", anchor.longitude},
+            {"anchor_gps_alt", anchor.altitude},
         };
         double roll, pitch, yaw;
         QuaternionUtils::QuatToEuler(
@@ -893,6 +899,10 @@ boost::json::value HttpServer::DebugInjectTelemetry(const std::string& id, const
             tel.position_ned[0] = boost::json::value_to<double>(pos[0]);
             tel.position_ned[1] = boost::json::value_to<double>(pos[1]);
             tel.position_ned[2] = boost::json::value_to<double>(pos[2]);
+            tel.local_position[0] = tel.position_ned[0];
+            tel.local_position[1] = tel.position_ned[1];
+            tel.local_position[2] = tel.position_ned[2];
+            tel.local_position_valid = true;
         }
     }
     if (body.contains("q") && body.at("q").is_array()) {

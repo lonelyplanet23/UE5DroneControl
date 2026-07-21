@@ -191,6 +191,10 @@ inline void RunDebugCli(DroneManager&       drone_mgr,
                 tel.position_ned[0] = std::stod(tokens[2]);
                 tel.position_ned[1] = std::stod(tokens[3]);
                 tel.position_ned[2] = std::stod(tokens[4]);
+                tel.local_position[0] = tel.position_ned[0];
+                tel.local_position[1] = tel.position_ned[1];
+                tel.local_position[2] = tel.position_ned[2];
+                tel.local_position_valid = true;
                 tel.battery         = tokens.size() >= 6 ? std::stoi(tokens[5]) : -1;
                 tel.gps_lat         = tokens.size() >= 7 ? std::stod(tokens[6]) : 0.0;
                 tel.gps_lon         = tokens.size() >= 8 ? std::stod(tokens[7]) : 0.0;

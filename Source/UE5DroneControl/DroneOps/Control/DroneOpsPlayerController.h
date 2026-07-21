@@ -21,6 +21,7 @@ class ADroneWaypointActor;
 class AMultiDroneCharacter;
 class UUserWidget;
 class UDroneInfoPanelWidget;
+class UDroneNetworkManager;
 
 /**
  * Delegate for when drone info panel is requested by middle click.
@@ -48,9 +49,9 @@ public:
 	 *
 	 * The primary selected drone is placed exactly at the input lon/lat/alt point; any other
  * multi-selected drones are arranged around it on the existing 1 m square spiral, ordered
- * by ascending DroneId for a stable layout. Shadow drones always move locally; when the backend
- * is connected and a drone has a GPS anchor, one corresponding command is also sent. Altitude is
- * treated as height above mean sea level and converted to
+	 * by ascending DroneId for a stable layout. A real dispatch is atomic and requires every selected
+	 * drone to have a connected backend, a frozen GPS anchor, and fresh valid GPS/local-NED telemetry;
+	 * preview remains command-free. Altitude is treated as height above mean sea level and converted to
 	 * ellipsoid height via UDroneNetworkManager::GeoidSeparationMeters before the coordinate
 	 * transform.
 	 *
@@ -71,8 +72,8 @@ public:
 
 	/**
  * Validate the current selection and a geographic target without drawing or sending anything.
- * bForDispatch=true validates local dispatch prerequisites only; backend connection and GPS
- * anchors affect command delivery status but never block the local shadow-drone dispatch.
+ * bForDispatch=true validates all real-dispatch prerequisites, including backend connectivity,
+ * each drone's power-on GPS anchor, and fresh time-coherent GPS/local-NED telemetry.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	FGeographicDispatchResult ValidateGeographicTarget(
@@ -331,6 +332,9 @@ private:
 	{
 		int32 DroneId = 0;
 		FVector WorldTarget = FVector::ZeroVector;
+		/** Absolute PX4-local target encoded as X=North/Y=East/Z=Up centimetres. */
+		FVector BackendRelativeTarget = FVector::ZeroVector;
+		bool bHasBackendRelativeTarget = false;
 		bool bIsPrimary = false;
 	};
 
@@ -349,6 +353,14 @@ FGeographicDispatchResult BuildPerDroneGeographicDispatchPlan(
     TArray<FGeographicDispatchSlot>& OutSlots) const;
 
 bool ValidateDispatchDrone(int32 DroneId, FString& OutError) const;
+
+	bool TryBuildGeographicBackendTarget(
+		int32 DroneId,
+		const FGeographicCoordinate3D& TargetCoordinate,
+		const FVector& AdditionalLocalUeOffset,
+		const UDroneNetworkManager* NetworkManager,
+		FVector& OutBackendRelativeTarget,
+		FString& OutError) const;
 
 	/**
 	 * 把 WGS84 经纬高（海拔 MSL）转换为 UE 世界坐标（cm）。

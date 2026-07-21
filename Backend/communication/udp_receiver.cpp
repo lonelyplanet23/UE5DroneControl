@@ -1,7 +1,44 @@
 #include "udp_receiver.h"
 #include <yaml-cpp/yaml.h>
 #include <spdlog/spdlog.h>
+#include <cmath>
 #include <sstream>
+
+namespace {
+
+bool TryParseFiniteDouble(const YAML::Node& node, double& out_value)
+{
+    if (!node || !node.IsScalar()) {
+        return false;
+    }
+
+    try {
+        const double value = node.as<double>();
+        if (!std::isfinite(value)) {
+            return false;
+        }
+        out_value = value;
+        return true;
+    } catch (const YAML::Exception&) {
+        return false;
+    }
+}
+
+bool TryParseBool(const YAML::Node& node, bool& out_value)
+{
+    if (!node || !node.IsScalar()) {
+        return false;
+    }
+
+    try {
+        out_value = node.as<bool>();
+        return true;
+    } catch (const YAML::Exception&) {
+        return false;
+    }
+}
+
+}  // namespace
 
 UdpReceiver::UdpReceiver(boost::asio::io_context& io_context)
     : io_context_(io_context)
@@ -136,19 +173,58 @@ void UdpReceiver::HandleReceive(PortListener& listener,
                 tel.battery = bat.as<int>(-1);
             }
 
-            // GPS
-            if (auto gps_lat = root["gps_lat"]) tel.gps_lat = gps_lat.as<double>(0.0);
-            if (auto gps_lon = root["gps_lon"]) tel.gps_lon = gps_lon.as<double>(0.0);
-            if (auto gps_alt = root["gps_alt"]) tel.gps_alt = gps_alt.as<double>(0.0);
-            if (auto gps_fix = root["gps_fix"]) tel.gps_fix = gps_fix.as<bool>(false);
+            // WGS84 global position. Geographic dispatch requires a complete,
+            // finite latitude/longitude/AMSL tuple.
+            const auto gps_lat = root["gps_lat"];
+            const auto gps_lon = root["gps_lon"];
+            const auto gps_alt = root["gps_alt"];
+            const auto gps_fix = root["gps_fix"];
+            double parsed_gps_lat = 0.0;
+            double parsed_gps_lon = 0.0;
+            double parsed_gps_alt = 0.0;
+            bool parsed_gps_fix = false;
+            const bool has_complete_gps =
+                TryParseFiniteDouble(gps_lat, parsed_gps_lat)
+                && TryParseFiniteDouble(gps_lon, parsed_gps_lon)
+                && TryParseFiniteDouble(gps_alt, parsed_gps_alt);
+            const bool has_gps_fix_flag = TryParseBool(gps_fix, parsed_gps_fix);
+            if (has_complete_gps) {
+                tel.gps_lat = parsed_gps_lat;
+                tel.gps_lon = parsed_gps_lon;
+                tel.gps_alt = parsed_gps_alt;
+            }
+            tel.gps_fix = has_gps_fix_flag && parsed_gps_fix
+                && has_complete_gps
+                && tel.gps_lat >= -90.0 && tel.gps_lat <= 90.0
+                && tel.gps_lon >= -180.0 && tel.gps_lon <= 180.0;
 
-            // local_position [x, y, z]
+            // VehicleLocalPosition [N, E, D] is the coordinate frame consumed
+            // by PX4 TrajectorySetpoint. Do not substitute VehicleOdometry.
+            bool has_local_position = false;
             if (auto lp = root["local_position"]) {
                 if (lp.IsSequence() && lp.size() >= 3) {
-                    tel.local_position[0] = lp[0].as<double>(0.0);
-                    tel.local_position[1] = lp[1].as<double>(0.0);
-                    tel.local_position[2] = lp[2].as<double>(0.0);
+                    double parsed_local_position[3]{};
+                    has_local_position =
+                        TryParseFiniteDouble(lp[0], parsed_local_position[0])
+                        && TryParseFiniteDouble(lp[1], parsed_local_position[1])
+                        && TryParseFiniteDouble(lp[2], parsed_local_position[2]);
+                    if (has_local_position) {
+                        tel.local_position[0] = parsed_local_position[0];
+                        tel.local_position[1] = parsed_local_position[1];
+                        tel.local_position[2] = parsed_local_position[2];
+                    }
                 }
+            }
+            bool parsed_local_position_valid = false;
+            const bool has_local_position_valid_flag =
+                TryParseBool(root["local_position_valid"], parsed_local_position_valid);
+            tel.local_position_valid = has_local_position_valid_flag
+                && parsed_local_position_valid
+                && has_local_position;
+            if (tel.local_position_valid) {
+                tel.position_ned[0] = tel.local_position[0];
+                tel.position_ned[1] = tel.local_position[1];
+                tel.position_ned[2] = tel.local_position[2];
             }
 
             // arming_state / nav_state (vehicle_status_v1)

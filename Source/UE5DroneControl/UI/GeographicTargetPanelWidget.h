@@ -81,7 +81,7 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BatchAddButton;
 
-	/** Batch path card. The fallback UI only shows it while path edit mode is active. */
+	/** Batch path card. It stays visible so non-edit attempts can show the isolation message. */
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UWidget> BatchPathSection;
 

@@ -22,7 +22,9 @@ HeartbeatManager::~HeartbeatManager()
 // Start 对外接口：不需要锁 -> 内部 StopInternal 无锁
 // ========================================================
 void HeartbeatManager::Start(int drone_id, int slot, const std::string& jetson_ip,
-                              int send_port, CommandProvider cmd_provider)
+                             int send_port, CommandProvider cmd_provider,
+                             double initial_ned_x, double initial_ned_y,
+                             double initial_ned_z)
 {
     // 先停止已有的（在外面 stop，不持有锁，避免死锁）
     StopInternal(drone_id);
@@ -31,6 +33,11 @@ void HeartbeatManager::Start(int drone_id, int slot, const std::string& jetson_i
     state->running     = true;
     state->slot        = slot;
     state->get_command = std::move(cmd_provider);
+    // The worker may send immediately after it starts. Holding an airborne
+    // vehicle at a guessed (0,0,0) would command the PX4 local origin.
+    state->last_ned_x  = initial_ned_x;
+    state->last_ned_y  = initial_ned_y;
+    state->last_ned_z  = initial_ned_z;
 
     sender_.SetTarget(drone_id, jetson_ip, send_port);
 

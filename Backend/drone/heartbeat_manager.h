@@ -50,7 +50,10 @@ public:
     ~HeartbeatManager();
 
     void Start(int drone_id, int slot, const std::string& jetson_ip, int send_port,
-               CommandProvider cmd_provider = nullptr);
+               CommandProvider cmd_provider = nullptr,
+               double initial_ned_x = 0.0,
+               double initial_ned_y = 0.0,
+               double initial_ned_z = 0.0);
 
     void RequestHold(int drone_id, double x, double y, double z);
     void Stop(int drone_id);

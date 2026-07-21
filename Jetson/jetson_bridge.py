@@ -74,6 +74,12 @@ COMMAND_CONFIRM_WINDOW_SEC = float(
 )
 MAX_CONTROL_PACKET_BYTES = int(os.environ.get("MAX_CONTROL_PACKET_BYTES", "4096"))
 MAX_ABS_TARGET_M = float(os.environ.get("MAX_ABS_TARGET_M", "5000"))
+MAX_TELEMETRY_SAMPLE_AGE_SEC = float(
+    os.environ.get("MAX_TELEMETRY_SAMPLE_AGE_SEC", "1.0")
+)
+MAX_GEOGRAPHIC_SAMPLE_SKEW_SEC = float(
+    os.environ.get("MAX_GEOGRAPHIC_SAMPLE_SKEW_SEC", "0.25")
+)
 CONTROL_PROTOCOL = "ue5_drone_control"
 CONTROL_PROTOCOL_VERSION = 1
 
@@ -202,6 +208,42 @@ def parse_control_packet(data: bytes):
 # ============================================================
 # ROS2 桥接节点
 # ============================================================
+def valid_vehicle_local_ned(local_position):
+    """Return a finite PX4 VehicleLocalPosition NED tuple, or ``None``."""
+    if local_position is None:
+        return None
+
+    try:
+        local_ned = [
+            float(local_position.x),
+            float(local_position.y),
+            float(local_position.z),
+        ]
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+
+    if not bool(getattr(local_position, "xy_valid", False)):
+        return None
+    if not bool(getattr(local_position, "z_valid", False)):
+        return None
+    if not all(math.isfinite(value) for value in local_ned):
+        return None
+    return local_ned
+
+
+def ros_sample_is_fresh(last_sample_times, name, now_monotonic, max_age_sec):
+    """Whether a named ROS sample is recent enough to drive control telemetry."""
+    if not math.isfinite(now_monotonic) or not math.isfinite(max_age_sec):
+        return False
+    if max_age_sec <= 0.0:
+        return False
+    last_sample = last_sample_times.get(name)
+    if last_sample is None or not math.isfinite(last_sample):
+        return False
+    age = now_monotonic - last_sample
+    return 0.0 <= age <= max_age_sec
+
+
 class JetsonBridge(Node):
     def __init__(self, slot: int = 1):
         if slot < 1 or slot > 6:
@@ -210,6 +252,10 @@ class JetsonBridge(Node):
             raise ValueError("COMMAND_CONFIRM_COUNT must be >= 1")
         if COMMAND_CONFIRM_WINDOW_SEC <= 0:
             raise ValueError("COMMAND_CONFIRM_WINDOW_SEC must be > 0")
+        if not math.isfinite(MAX_TELEMETRY_SAMPLE_AGE_SEC) or MAX_TELEMETRY_SAMPLE_AGE_SEC <= 0:
+            raise ValueError("MAX_TELEMETRY_SAMPLE_AGE_SEC must be finite and > 0")
+        if not math.isfinite(MAX_GEOGRAPHIC_SAMPLE_SKEW_SEC) or MAX_GEOGRAPHIC_SAMPLE_SKEW_SEC <= 0:
+            raise ValueError("MAX_GEOGRAPHIC_SAMPLE_SKEW_SEC must be finite and > 0")
 
         self.slot = slot
         self._topic_prefix = ROS_TOPIC_PREFIX
@@ -357,11 +403,8 @@ class JetsonBridge(Node):
         self._last_applied_command = None
 
         # -------- 最新 setpoint 缓存 --------
-        # 初始值：悬停在原点（NED，位置控制）
-        self._last_setpoint = {
-            "x": 0.0, "y": 0.0, "z": 0.0,
-            "mode": "hold", "sequence": 0,
-        }
+        # 在 PX4 给出首个有效 VehicleLocalPosition 前不得猜测本地原点。
+        self._last_setpoint = None
         self._setpoint_lock = threading.Lock()
 
         # 预热计数 + 手动触发标志
@@ -474,6 +517,43 @@ class JetsonBridge(Node):
     def _on_local_pos(self, msg: VehicleLocalPosition):
         self._mark_ros_rx("local_position")
         self._local_pos = msg
+        if valid_vehicle_local_ned(msg) is None:
+            with self._setpoint_lock:
+                cleared_stale_setpoint = self._last_setpoint is not None
+                self._last_setpoint = None
+            self._warmup_count = 0
+            if cleared_stale_setpoint:
+                self.get_logger().warning(
+                    "[SAFE-HOLD] PX4 local position became invalid; "
+                    "cleared the old-frame setpoint"
+                )
+            return
+        self._ensure_safe_hold_initialized(msg)
+
+    def _ensure_safe_hold_initialized(self, local_position) -> bool:
+        """Initialize the first setpoint from a valid PX4 local NED sample."""
+        local_ned = valid_vehicle_local_ned(local_position)
+        if local_ned is None:
+            return False
+
+        initialized_now = False
+        with self._setpoint_lock:
+            if self._last_setpoint is None:
+                self._last_setpoint = {
+                    "x": local_ned[0],
+                    "y": local_ned[1],
+                    "z": local_ned[2],
+                    "mode": "hold",
+                    "sequence": 0,
+                }
+                initialized_now = True
+
+        if initialized_now:
+            self.get_logger().info(
+                f"[SAFE-HOLD] initialized from first valid VehicleLocalPosition: "
+                f"NED=({local_ned[0]:.3f},{local_ned[1]:.3f},{local_ned[2]:.3f})"
+            )
+        return True
 
     def _on_global_pos(self, msg: VehicleGlobalPosition):
         self._mark_ros_rx("global_position")
@@ -524,6 +604,13 @@ class JetsonBridge(Node):
     def _offboard_loop(self):
         now_us = int(self.get_clock().now().nanoseconds / 1000)
 
+        # Never publish a guessed origin setpoint or advance toward
+        # ARM/OFFBOARD before the PX4 local estimator is valid.
+        with self._setpoint_lock:
+            sp = dict(self._last_setpoint) if self._last_setpoint is not None else None
+        if sp is None:
+            return
+
         # 1. 持续发布 OffboardControlMode（位置控制）
         ocm = OffboardControlMode()
         ocm.timestamp = now_us
@@ -537,9 +624,6 @@ class JetsonBridge(Node):
         self._offboard_pub.publish(ocm)
 
         # 2. 持续发布 TrajectorySetpoint（最新缓存值）
-        with self._setpoint_lock:
-            sp = dict(self._last_setpoint)
-
         tsp = TrajectorySetpoint()
         tsp.timestamp = now_us
         tsp.position = [sp["x"], sp["y"], sp["z"]]
@@ -594,6 +678,7 @@ class JetsonBridge(Node):
     def _send_telemetry(self):
         data = {}
         data["timestamp"] = self.get_clock().now().nanoseconds // 1000  # μs
+        now_monotonic = time.monotonic()
 
         if self._odometry:
             o = self._odometry
@@ -606,18 +691,55 @@ class JetsonBridge(Node):
             data["arming_state"] = int(self._status.arming_state)
             data["nav_state"] = int(self._status.nav_state)
 
-        if self._local_pos:
+        local_position_fresh = ros_sample_is_fresh(
+            self._ros_last_monotonic,
+            "local_position",
+            now_monotonic,
+            MAX_TELEMETRY_SAMPLE_AGE_SEC,
+        )
+        if self._local_pos and local_position_fresh:
             lp = self._local_pos
             data["local_position"] = [float(lp.x), float(lp.y), float(lp.z)]
             data["local_velocity"] = [float(lp.vx), float(lp.vy), float(lp.vz)]
+            # Use the exact frame consumed by TrajectorySetpoint. VehicleOdometry
+            # may advertise a different pose frame (for example FRD).
+            local_ned = valid_vehicle_local_ned(lp)
+            data["local_position_valid"] = local_ned is not None
+            if local_ned is not None:
+                data["position"] = local_ned
+        else:
+            data["local_position_valid"] = False
 
-        if self._global_pos:
+        global_position_fresh = ros_sample_is_fresh(
+            self._ros_last_monotonic,
+            "global_position",
+            now_monotonic,
+            MAX_TELEMETRY_SAMPLE_AGE_SEC,
+        )
+        if self._global_pos and global_position_fresh:
             gp = self._global_pos
             # PX4 v1.17: lat / lon / alt / lat_lon_valid
-            data["gps_lat"] = float(gp.lat)
-            data["gps_lon"] = float(gp.lon)
-            data["gps_alt"] = float(gp.alt)
-            data["gps_fix"] = bool(gp.lat_lon_valid)
+            gps_lat = float(gp.lat)
+            gps_lon = float(gp.lon)
+            gps_alt = float(gp.alt)
+            data["gps_lat"] = gps_lat
+            data["gps_lon"] = gps_lon
+            data["gps_alt"] = gps_alt
+            geographic_sample_skew = abs(
+                self._ros_last_monotonic.get("global_position", float("-inf"))
+                - self._ros_last_monotonic.get("local_position", float("inf"))
+            )
+            data["gps_fix"] = (
+                bool(gp.lat_lon_valid)
+                and bool(getattr(gp, "alt_valid", True))
+                and local_position_fresh
+                and geographic_sample_skew <= MAX_GEOGRAPHIC_SAMPLE_SKEW_SEC
+                and all(math.isfinite(value) for value in (gps_lat, gps_lon, gps_alt))
+                and -90.0 <= gps_lat <= 90.0
+                and -180.0 <= gps_lon <= 180.0
+            )
+        else:
+            data["gps_fix"] = False
 
         if self._battery:
             data["battery"] = (
@@ -876,6 +998,13 @@ class JetsonBridge(Node):
         # JSON 中已经是 PX4 所需的 NED 米坐标，原点为本次上电位置。
         # Jetson 只透传到 TrajectorySetpoint，不做 UE/NED 二次转换。
         with self._setpoint_lock:
+            if self._last_setpoint is None:
+                self.get_logger().warning(
+                    f"[COMMAND-SAFETY] deferred id={parsed['command_id']} "
+                    f"sequence={sequence}: waiting for first valid "
+                    f"VehicleLocalPosition"
+                )
+                return False
             self._last_setpoint = {
                 "x": parsed["x"],
                 "y": parsed["y"],
@@ -907,6 +1036,7 @@ class JetsonBridge(Node):
             f"confirmed={confirmed_packets} NED(m, power_on_origin)="
             f"({parsed['x']:.3f},{parsed['y']:.3f},{parsed['z']:.3f})"
         )
+        return True
 
     def _prune_applied_commands(self, now_monotonic: float):
         for command_id, applied_at in list(self._applied_command_ids.items()):
@@ -988,7 +1118,17 @@ class JetsonBridge(Node):
             if self._last_ctrl_sender else "none"
         )
         with self._setpoint_lock:
-            sp = dict(self._last_setpoint)
+            sp = (
+                dict(self._last_setpoint)
+                if self._last_setpoint is not None
+                else None
+            )
+        sp_text = (
+            f"({sp['x']:.2f},{sp['y']:.2f},{sp['z']:.2f},"
+            f"{sp['mode']},seq={sp['sequence']})"
+            if sp is not None
+            else "waiting_for_valid_local_position"
+        )
 
         status_text = "none"
         if self._status is not None:
@@ -1014,8 +1154,7 @@ class JetsonBridge(Node):
             f"last_age={ctrl_age} sender={sender} | "
             f"confirmed applied/pending={self._commands_applied}/"
             f"{len(self._pending_commands)} highest_seq={self._highest_applied_sequence} | "
-            f"setpoint=({sp['x']:.2f},{sp['y']:.2f},{sp['z']:.2f},"
-            f"{sp['mode']},seq={sp['sequence']}) | "
+            f"setpoint={sp_text} | "
             f"ROS pub_subscribers ocm/traj/cmd={pub_links[0]}/{pub_links[1]}/{pub_links[2]} "
             f"published={self._offboard_publish_count} PX4={status_text} "
             f"ACK={self._command_ack_count} ROS_RX={seen_topics} | "

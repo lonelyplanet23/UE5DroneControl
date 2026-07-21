@@ -238,6 +238,10 @@ struct FDroneTelemetrySnapshot
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
 	bool bGpsFix = false;
 
+	/** True only for PX4 VehicleLocalPosition in the TrajectorySetpoint NED frame. */
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
+	bool bLocalPositionValid = false;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry")
 	double LastUpdateTime = 0.0;
 

@@ -748,10 +748,7 @@ void UGeographicTargetPanelWidget::RefreshAvailability()
 	}
 	if (BatchPathSection)
 	{
-		BatchPathSection->SetVisibility(
-			bShowingBatchPathTools
-				? ESlateVisibility::Visible
-				: ESlateVisibility::Collapsed);
+		BatchPathSection->SetVisibility(ESlateVisibility::Visible);
 	}
 	if (BatchAddButton)
 	{
@@ -794,7 +791,13 @@ void UGeographicTargetPanelWidget::RefreshAvailability()
 			}
 			else
 			{
-				bCanDispatch = true;
+				const FGeographicDispatchResult DispatchReadiness = Controller->ValidatePerDroneGeographicTargets(
+					GetSelectedCoordinateSystem(), Targets, true);
+				bCanDispatch = DispatchReadiness.bSuccess;
+				if (!bCanDispatch)
+				{
+					BlockingMessage = DispatchReadiness.Message;
+				}
 			}
 		}
 	}
@@ -819,9 +822,21 @@ void UGeographicTargetPanelWidget::RefreshAvailability()
 			}
 			else
 			{
-				// A local shadow-drone dispatch is always meaningful. Backend connection and GPS anchors
-				// only decide whether the same target can also be sent right now, not whether the button works.
-				bCanDispatch = true;
+				if (Controller->IsPathEditMode())
+				{
+					// In edit mode this button only appends a local waypoint.
+					bCanDispatch = true;
+				}
+				else
+				{
+					const FGeographicDispatchResult DispatchReadiness = Controller->ValidateGeographicTarget(
+						CoordinateSystem, Longitude, Latitude, AltitudeMsl, true);
+					bCanDispatch = DispatchReadiness.bSuccess;
+					if (!bCanDispatch)
+					{
+						BlockingMessage = DispatchReadiness.Message;
+					}
+				}
 			}
 		}
 	}

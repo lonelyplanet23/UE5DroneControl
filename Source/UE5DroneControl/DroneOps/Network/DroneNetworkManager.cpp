@@ -532,10 +532,14 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		Snap.DroneId = DroneId;
 
 		double X = 0, Y = 0, Z = 0;
-		Root->TryGetNumberField(TEXT("x"), X);
-		Root->TryGetNumberField(TEXT("y"), Y);
-		Root->TryGetNumberField(TEXT("z"), Z);
+		const bool bHasX = Root->TryGetNumberField(TEXT("x"), X);
+		const bool bHasY = Root->TryGetNumberField(TEXT("y"), Y);
+		const bool bHasZ = Root->TryGetNumberField(TEXT("z"), Z);
+		const bool bHasFiniteLocalPosition = bHasX && bHasY && bHasZ
+			&& FMath::IsFinite(X) && FMath::IsFinite(Y) && FMath::IsFinite(Z);
 		Snap.WorldLocation = FVector(X, Y, Z);
+		// Backend x/y/z use the existing UE-offset wire convention in centimetres.
+		Snap.NedLocation = FVector(X * 0.01, Y * 0.01, -Z * 0.01);
 
 		double Pitch = 0, Yaw = 0, Roll = 0;
 		Root->TryGetNumberField(TEXT("pitch"), Pitch);
@@ -547,28 +551,29 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		Root->TryGetNumberField(TEXT("speed"), Speed);
 		Snap.Velocity = FVector(Speed, 0, 0); // scalar speed stored in X component
 		
-		// ===== 解析 GPS 和电量 =====
-		// 使用新增的独立字段，不再借用 GeographicLocation.Z
-    	double GpsLat = 0, GpsLon = 0, GpsAlt = 0;
-    	Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
-    	Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
-    	Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
-    	int32 Battery = -1;
-    	Root->TryGetNumberField(TEXT("battery"), Battery);
-    
-    	// 如果 telemetry 未携带 GPS/电量，保留缓存中的旧值
-    	FDroneTelemetrySnapshot ExistingSnap;
-    	if (Registry->GetTelemetry(DroneId, ExistingSnap))
-    	{
-        	if (GpsLat == 0 && GpsLon == 0 && GpsAlt == 0) {
-            	GpsLat = ExistingSnap.GpsLatitude;
-            	GpsLon = ExistingSnap.GpsLongitude;
-            	GpsAlt = ExistingSnap.GpsAltitude;
-        	}
-        	if (Battery < 0) {
-                Battery = ExistingSnap.BatteryPercent;
-            }
-    	}
+		// GPS must be a complete tuple for synchronized geographic dispatch.
+		double GpsLat = 0, GpsLon = 0, GpsAlt = 0;
+		const bool bHasGpsLat = Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
+		const bool bHasGpsLon = Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
+		const bool bHasGpsAlt = Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+		const bool bHasCompleteGpsTuple = bHasGpsLat && bHasGpsLon && bHasGpsAlt;
+		int32 Battery = -1;
+		Root->TryGetNumberField(TEXT("battery"), Battery);
+
+		FDroneTelemetrySnapshot ExistingSnap;
+		if (Registry->GetTelemetry(DroneId, ExistingSnap))
+		{
+			if (!bHasCompleteGpsTuple)
+			{
+				GpsLat = ExistingSnap.GpsLatitude;
+				GpsLon = ExistingSnap.GpsLongitude;
+				GpsAlt = ExistingSnap.GpsAltitude;
+			}
+			if (Battery < 0)
+			{
+				Battery = ExistingSnap.BatteryPercent;
+			}
+		}
     
     	Snap.GpsLatitude = GpsLat;
     	Snap.GpsLongitude = GpsLon;
@@ -579,7 +584,19 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 
 		Root->TryGetBoolField(TEXT("armed"), Snap.bArmed);
 		Root->TryGetBoolField(TEXT("offboard"), Snap.bOffboard);
-		Root->TryGetBoolField(TEXT("gps_fix"), Snap.bGpsFix);
+		bool bIncomingLocalPositionValid = false;
+		const bool bHasLocalPositionValid = Root->TryGetBoolField(
+			TEXT("local_position_valid"), bIncomingLocalPositionValid);
+		Snap.bLocalPositionValid = bHasLocalPositionValid
+			&& bIncomingLocalPositionValid
+			&& bHasFiniteLocalPosition;
+		bool bIncomingGpsFix = false;
+		const bool bHasGpsFix = Root->TryGetBoolField(TEXT("gps_fix"), bIncomingGpsFix);
+		const bool bValidGpsTuple = bHasCompleteGpsTuple
+			&& FMath::IsFinite(GpsLat) && GpsLat >= -90.0 && GpsLat <= 90.0
+			&& FMath::IsFinite(GpsLon) && GpsLon >= -180.0 && GpsLon <= 180.0
+			&& FMath::IsFinite(GpsAlt);
+		Snap.bGpsFix = bHasGpsFix && bIncomingGpsFix && bValidGpsTuple;
 		Snap.GeographicLocation = FVector(GpsLat, GpsLon, GpsAlt);
 		Snap.Altitude = static_cast<float>(GpsAlt);
 
@@ -587,6 +604,26 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		Snap.Availability = EDroneAvailability::Online;
 
 		Registry->UpdateTelemetry(DroneId, Snap);
+
+		// power_on may predate this UE connection. Reuse the backend's frozen
+		// anchor instead of substituting the current GPS position.
+		bool bAnchorValid = false;
+		double AnchorLat = 0.0, AnchorLon = 0.0, AnchorAlt = 0.0;
+		const bool bHasAnchorTuple = Root->TryGetBoolField(TEXT("anchor_valid"), bAnchorValid)
+			&& Root->TryGetNumberField(TEXT("anchor_gps_lat"), AnchorLat)
+			&& Root->TryGetNumberField(TEXT("anchor_gps_lon"), AnchorLon)
+			&& Root->TryGetNumberField(TEXT("anchor_gps_alt"), AnchorAlt);
+		if (bAnchorValid && bHasAnchorTuple && !CachedGpsAnchors.Contains(DroneId)
+			&& FMath::IsFinite(AnchorLat) && AnchorLat >= -90.0 && AnchorLat <= 90.0
+			&& FMath::IsFinite(AnchorLon) && AnchorLon >= -180.0 && AnchorLon <= 180.0
+			&& FMath::IsFinite(AnchorAlt))
+		{
+			FGpsAnchorCache& Cache = CachedGpsAnchors.Add(DroneId);
+			Cache.Lat = AnchorLat;
+			Cache.Lon = AnchorLon;
+			Cache.Alt = AnchorAlt;
+			OnDroneWsEvent.Broadcast(DroneId, TEXT("power_on"), AnchorLat, AnchorLon, AnchorAlt);
+		}
 		return;
 	}
 
@@ -600,15 +637,27 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 		Root->TryGetStringField(TEXT("event"), Event);
 
 		double GpsLat = 0, GpsLon = 0, GpsAlt = 0;
-		Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
-		Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
-		Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+		const bool bHasGpsLat = Root->TryGetNumberField(TEXT("gps_lat"), GpsLat);
+		const bool bHasGpsLon = Root->TryGetNumberField(TEXT("gps_lon"), GpsLon);
+		const bool bHasGpsAlt = Root->TryGetNumberField(TEXT("gps_alt"), GpsAlt);
+		const bool bIsAnchorEvent = Event == TEXT("power_on") || Event == TEXT("reconnect");
+		const bool bValidAnchor = bHasGpsLat && bHasGpsLon && bHasGpsAlt
+			&& FMath::IsFinite(GpsLat) && GpsLat >= -90.0 && GpsLat <= 90.0
+			&& FMath::IsFinite(GpsLon) && GpsLon >= -180.0 && GpsLon <= 180.0
+			&& FMath::IsFinite(GpsAlt);
+		if (bIsAnchorEvent && !bValidAnchor)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("[DroneNetworkManager] Ignoring anchor event without a valid GPS tuple for drone %d"),
+				DroneId);
+			return;
+		}
 
 		UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] Event drone=%d type=%s lat=%.6f lon=%.6f alt=%.1f"),
 			DroneId, *Event, GpsLat, GpsLon, GpsAlt);
 
 		// Cache the GPS anchor so late-spawning actors can catch up.
-		if (Event == TEXT("power_on") || Event == TEXT("reconnect"))
+		if (bIsAnchorEvent)
 		{
 			FGpsAnchorCache& Cache = CachedGpsAnchors.FindOrAdd(DroneId);
 			Cache.Lat = GpsLat;
@@ -620,9 +669,9 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
 
 		// ===== 将 GPS 写入 Registry 快照 =====
     	// 确保 UI 列表能通过 GetTelemetry 读到 GPS 数据
-    	if (Event == TEXT("power_on") || Event == TEXT("reconnect"))
-    	{
-        	UDroneRegistrySubsystem* Registry = GetGameInstance()
+		if (bIsAnchorEvent)
+		{
+			UDroneRegistrySubsystem* Registry = GetGameInstance()
             	? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
             	: nullptr;
         	if (Registry)
@@ -630,13 +679,36 @@ void UDroneNetworkManager::OnWsMessage(const FString& Message)
             	FDroneTelemetrySnapshot Snap;
             	Registry->GetTelemetry(DroneId, Snap);
             	Snap.DroneId = DroneId;
-            	Snap.GpsLatitude = GpsLat;
-            	Snap.GpsLongitude = GpsLon;
-            	Snap.GpsAltitude = GpsAlt;
-            	Snap.LastUpdateTime = FPlatformTime::Seconds();
-            	Registry->UpdateTelemetry(DroneId, Snap);
-        	}
-    	}
+				Snap.GpsLatitude = GpsLat;
+				Snap.GpsLongitude = GpsLon;
+				Snap.GpsAltitude = GpsAlt;
+				// An anchor event is not a synchronized GPS/local-NED telemetry sample.
+				Snap.bGpsFix = false;
+				Snap.bLocalPositionValid = false;
+				Snap.LastUpdateTime = 0.0;
+				Registry->UpdateTelemetry(DroneId, Snap);
+			}
+		}
+		else if (Event == TEXT("lost_connection"))
+		{
+			// The next reconnect belongs to a new PX4 local-origin lifecycle.
+			// Removing the old cache also lets telemetry catch-up install the new
+			// anchor if UE misses the reconnect event itself.
+			CachedGpsAnchors.Remove(DroneId);
+			if (UDroneRegistrySubsystem* Registry = GetGameInstance()
+				? GetGameInstance()->GetSubsystem<UDroneRegistrySubsystem>()
+				: nullptr)
+			{
+				FDroneTelemetrySnapshot Snap;
+				Registry->GetTelemetry(DroneId, Snap);
+				Snap.DroneId = DroneId;
+				Snap.Availability = EDroneAvailability::Lost;
+				Snap.bGpsFix = false;
+				Snap.bLocalPositionValid = false;
+				Snap.LastUpdateTime = 0.0;
+				Registry->UpdateTelemetry(DroneId, Snap);
+			}
+		}
 		return;
 	}
 

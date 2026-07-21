@@ -68,6 +68,22 @@ public:
 };
 
 /**
+ * Builds an absolute PX4-local target using one fresh, time-coherent GPS/local-NED
+ * sample. Vectors use the existing wire convention: X=North cm, Y=East cm,
+ * Z=Up cm.
+ */
+class UE5DRONECONTROL_API FGeographicDispatchOffsetCalculator
+{
+public:
+	static bool CalculateBackendRelativeOffset(
+		const FGeographicCoordinate3D& TargetCoordinate,
+		const FGeographicCoordinate3D& CurrentCoordinate,
+		const FVector& CurrentLocalUeOffset,
+		const FVector& AdditionalLocalUeOffset,
+		FVector& OutRelativeOffset);
+};
+
+/**
  * Result of a geographic target dispatch (or preview) request.
  */
 USTRUCT(BlueprintType)

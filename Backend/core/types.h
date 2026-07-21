@@ -60,6 +60,9 @@ struct TelemetryData {
     bool gps_fix = false;
 
     double local_position[3] = {0.0, 0.0, 0.0};
+    // True only when local_position came from an estimator-valid PX4
+    // VehicleLocalPosition sample (the TrajectorySetpoint frame).
+    bool local_position_valid = false;
 
     uint8_t arming_state = 0; // 1=DISARMED, 2=ARMED
     uint8_t nav_state = 0;    // 14=OFFBOARD
