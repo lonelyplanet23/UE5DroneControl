@@ -20,12 +20,14 @@ ffmpeg -stream_loop -1 -re -i .\demo.mp4 -an -c:v libx264 -pix_fmt yuv420p -pres
 
 ## 当前局域网实机地址
 
-当前约定：Jetson 为 `192.168.10.1`，MediaMTX、后端和 UE 所在 Windows 电脑为 `192.168.10.30`。
+当前测试约定：Jetson 为 `192.168.10.1`，MediaMTX、后端和 UE 暂时都使用 `192.168.10.30`。它们以后可以拆到不同电脑；Jetson 的 MediaMTX 地址和后端地址是两个独立参数。
 
 - Jetson 发布：`rtsp://192.168.10.30:8554/drone-1`
 - UE/浏览器播放页：`http://192.168.10.30:8889/drone-1`
 - 后端保存的 `video_url`：`http://192.168.10.30:8889/drone-1`
 
 Windows 防火墙需要允许 MediaMTX 的 TCP `8554`、TCP `8889` 和 WebRTC ICE 使用的 UDP `8189`。配置文件已将 `192.168.10.30` 放入 `webrtcAdditionalHosts`，并使用 MediaMTX 的兜底路径名 `all_others`。
+
+MediaMTX 已配置为在其所在电脑自动录制，默认目录为 `D:\DroneData\recordings`，格式为 fMP4，每 10 分钟一个视频段。Jetson 脚本默认不再保存本地 MKV。逐帧 GPS/位姿元数据通过后端的独立 HTTP 接口保存到后端电脑，不经过 UE 和遥测 WebSocket。
 
 Jetson 实机推流及逐帧 GPS/SfM 数据采集请看 [Jetson 视频流与 SfM 同步采集说明](../../Jetson/视频流与SfM同步采集说明.md)。

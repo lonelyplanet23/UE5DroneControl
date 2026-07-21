@@ -28,6 +28,13 @@ class TopicAndArgumentsTest(unittest.TestCase):
         )
         self.assertEqual(args.rtsp_url, "rtsp://192.168.10.30:8554/drone-1")
         self.assertEqual(args.video_url, "http://192.168.10.30:8889/drone-1")
+        self.assertEqual(
+            args.metadata_endpoint,
+            "http://192.168.10.30:8080/api/video-metadata/batch",
+        )
+        self.assertFalse(args.record_local)
+        self.assertFalse(args.local_metadata)
+        self.assertTrue(args.upload_metadata)
         self.assertEqual(args.image_topic, "/image_raw")
         self.assertEqual(
             args.gps_topic, "/px4_1/fmu/out/vehicle_global_position"
@@ -154,6 +161,58 @@ class PipelineDescriptionTest(unittest.TestCase):
         )
         packet = MODULE.FramePacket(tracking, b"abXXcdYY")
         self.assertEqual(MODULE.GstStreamPipeline._tight_frame_data(packet), b"abcd")
+
+
+class MetadataBatchUploaderTest(unittest.TestCase):
+    def test_payload_contains_frame_timing_camera_and_server_stream_identity(self):
+        uploader = MODULE.MetadataBatchUploader(
+            endpoint="http://192.168.10.30:8080/api/video-metadata/batch",
+            mission_id="mission_test_drone_1",
+            drone_id="1",
+            session_info={
+                "stream_path": "drone-1",
+                "rtsp_url": "rtsp://192.168.10.30:8554/drone-1",
+                "video_url": "http://192.168.10.30:8889/drone-1",
+            },
+            batch_size=90,
+            queue_size=100,
+            flush_seconds=1.0,
+            retry_seconds=2.0,
+            request_timeout_seconds=3.0,
+        )
+        uploader.set_camera_info({"width": 1920, "height": 1080})
+        payload = uploader._build_payload(
+            [
+                {
+                    "frame_index": 1,
+                    "stream_generation": 1,
+                    "stream_pts_ns": 0,
+                    "latitude": 30.0,
+                }
+            ],
+            final=False,
+        )
+        self.assertEqual(payload["mission_id"], "mission_test_drone_1")
+        self.assertEqual(payload["drone_id"], "1")
+        self.assertEqual(payload["stream_path"], "drone-1")
+        self.assertEqual(payload["camera_info"]["width"], 1920)
+        self.assertEqual(payload["frames"][0]["stream_generation"], 1)
+
+    def test_metadata_retry_queue_is_bounded(self):
+        uploader = MODULE.MetadataBatchUploader(
+            endpoint="http://localhost/unused",
+            mission_id="mission_test",
+            drone_id="1",
+            session_info={},
+            batch_size=1,
+            queue_size=1,
+            flush_seconds=1.0,
+            retry_seconds=1.0,
+            request_timeout_seconds=1.0,
+        )
+        self.assertTrue(uploader.enqueue({"frame_index": 1}))
+        self.assertFalse(uploader.enqueue({"frame_index": 2}))
+        self.assertEqual(uploader.snapshot()["dropped_frames"], 1)
 
 
 if __name__ == "__main__":

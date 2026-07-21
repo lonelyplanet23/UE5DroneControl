@@ -7,13 +7,20 @@ rtspAddress: :8554
 
 webrtc: true
 webrtcAddress: :8889
-# MediaMTX runs on the UE/Windows host in the current LAN.
-# This address is advertised to the Jetson/UE WebRTC clients.
+# Current MediaMTX host. If MediaMTX is moved away from the UE/backend,
+# replace this with the MediaMTX machine's client-reachable LAN address.
 webrtcAdditionalHosts: [192.168.10.30]
 webrtcAllowOrigins: ['*']
 
 pathDefaults:
   source: publisher
+  # Video is recorded by the MediaMTX host, not by the Jetson or UE process.
+  record: true
+  recordPath: D:/DroneData/recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 10m
+  recordDeleteAfter: 0s
 
 paths:
   all_others: {}

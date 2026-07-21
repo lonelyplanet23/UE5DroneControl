@@ -52,6 +52,10 @@ jetson:
 
 storage:
   path: "./data/drones.json"
+  # Jetson 逐帧 GPS/位姿元数据在后端所在电脑上的保存位置。
+  video_metadata_path: "D:/DroneData/metadata"
+  # 单次 HTTP 批量上传允许的最大帧数。
+  video_metadata_max_batch: 300
 
 log:
   level: "debug"             # debug / info / warn / error

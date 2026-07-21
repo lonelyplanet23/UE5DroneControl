@@ -37,6 +37,7 @@ set(SOURCES
     execution/assembly_planner.cpp
     execution/execution_engine.cpp
     http/http_server.cpp
+    storage/video_metadata_store.cpp
 )
 
 set(HEADERS
@@ -58,6 +59,7 @@ set(HEADERS
     execution/assembly_planner.h
     execution/execution_engine.h
     http/http_server.h
+    storage/video_metadata_store.h
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
@@ -88,11 +90,15 @@ set(TEST_SOURCES
     tests/test_command_queue.cpp
     tests/test_state_machine.cpp
     tests/test_assembly_planner.cpp
+    tests/test_video_metadata_store.cpp
     conversion/coordinate_converter.cpp
     conversion/quaternion_utils.cpp
     conversion/gps_anchor_manager.cpp
+    conversion/assignment_solver.cpp
     drone/command_queue.cpp
     drone/state_machine.cpp
+    execution/assembly_planner.cpp
+    storage/video_metadata_store.cpp
 )
 
 add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES} ${HEADERS})
@@ -103,6 +109,7 @@ target_link_libraries(${PROJECT_NAME}_tests PRIVATE
     yaml-cpp
     nlohmann_json::nlohmann_json
     spdlog::spdlog
+    Boost::json
     GTest::gtest_main
     GTest::gmock
 )

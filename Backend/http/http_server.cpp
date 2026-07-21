@@ -107,6 +107,8 @@ HttpServer::HttpServer(const AppConfig& config,
     , assembly_ctrl_(assembly_ctrl)
     , exec_engine_(exec_engine)
     , ws_manager_(ws_manager)
+    , video_metadata_store_(config.video_metadata_path,
+                            static_cast<std::size_t>(config.video_metadata_max_batch))
 {
     // 注册 DroneManager 回调 -> WS 推送
     drone_mgr_.SetTelemetryCallback([this](int drone_id, const TelemetryData& tel) {
@@ -396,6 +398,9 @@ http::response<http::string_body> HttpServer::HandleHttp(
             return MakeResponse(req, 200, json_stringify(ApiGetAnchor(id)));
         if (method == "POST" && path == "/api/drones/refresh")
             return MakeResponse(req, 200, json_stringify(ApiRefreshDrones()));
+        if (method == "POST" && path == "/api/video-metadata/batch")
+            return MakeResponse(req, 200, json_stringify(
+                ApiStoreVideoMetadataBatch(require_object(body, "body"))));
         if (method == "POST" && path == "/api/arrays")
             return MakeResponse(req, 201, json_stringify(ApiCreateArray(require_object(body, "body"))));
         if (method == "POST" && PathMatch(path, "/api/arrays/", "/stop", id))
@@ -525,6 +530,30 @@ boost::json::value HttpServer::ApiRefreshDrones()
         {"message", "safe hold probes sent; a drone becomes online only after telemetry is received"},
         {"refreshed_drone_ids", std::move(ids)},
     };
+}
+
+boost::json::value HttpServer::ApiStoreVideoMetadataBatch(
+    const boost::json::object& body)
+{
+    try {
+        const auto result = video_metadata_store_.AppendBatch(body);
+        spdlog::debug(
+            "[VideoMetadata] drone={} mission={} batch={} frames={} duplicate={} final={}",
+            result.drone_id, result.mission_id, result.batch_sequence,
+            result.accepted_frames, result.duplicate, result.completed);
+        return boost::json::object{
+            {"ok", true},
+            {"mission_id", result.mission_id},
+            {"drone_id", result.drone_id},
+            {"batch_sequence", result.batch_sequence},
+            {"accepted_frames", result.accepted_frames},
+            {"duplicate", result.duplicate},
+            {"completed", result.completed},
+            {"relative_batch_path", result.relative_batch_path},
+        };
+    } catch (const std::invalid_argument& e) {
+        throw ApiError(400, e.what());
+    }
 }
 
 boost::json::value HttpServer::ApiRegisterDrone(const boost::json::object& body) {

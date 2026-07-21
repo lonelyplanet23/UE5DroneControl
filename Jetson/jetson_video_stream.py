@@ -10,15 +10,20 @@ This process is intentionally independent from jetson_bridge.py:
 
 Default LAN topology:
   Jetson:   192.168.10.1
-  MediaMTX: 192.168.10.30 (the UE/Windows computer)
+  MediaMTX: 192.168.10.30
+  Backend:  http://192.168.10.30:8080
   RTSP:     rtsp://192.168.10.30:8554/drone-1
   UE page:  http://192.168.10.30:8889/drone-1
 
-The program records every ROS image callback in frames.csv. GPS fields remain
-empty when PX4 has no valid global fix. When bracketing GPS samples are
-available, latitude/longitude/altitude are linearly interpolated on a unified
-ROS clock for the image frame. Original PX4 timestamps are retained in the
-CSV. Local pose is matched from the nearest VehicleOdometry sample.
+MediaMTX, the backend and UE can later run on separate computers. Their
+addresses are configured independently.
+
+Every ROS image callback produces a metadata row that is batch-uploaded to the
+Windows backend. MediaMTX records the H.264 stream on the Windows disk, so the
+Jetson does not retain video or metadata by default. Optional local fallback
+flags can still create MKV and frames.csv files. GPS fields remain empty when
+PX4 has no valid global fix. Original PX4 timestamps are retained alongside a
+unified ROS matching clock.
 """
 
 from __future__ import annotations
@@ -704,6 +709,8 @@ class MetadataWriter:
         sync_wait_ms: float,
         max_gps_age_ms: float,
         max_odom_age_ms: float,
+        row_sink: Optional[Callable[[dict[str, object]], bool]] = None,
+        write_local: bool = True,
     ):
         self.mission_dir = mission_dir
         self.gps_cache = gps_cache
@@ -711,15 +718,20 @@ class MetadataWriter:
         self.sync_wait_seconds = max(0.0, sync_wait_ms / 1000.0)
         self.max_gps_age_us = int(max_gps_age_ms * 1000.0)
         self.max_odom_age_us = int(max_odom_age_ms * 1000.0)
+        self.row_sink = row_sink
+        self.write_local = write_local
         self.tasks: queue.Queue[Optional[FrameTracking]] = queue.Queue()
         self.thread = threading.Thread(
             target=self._run, name="sfm-metadata", daemon=True
         )
-        self.file = (mission_dir / "frames.csv").open(
-            "w", encoding="utf-8", newline="", buffering=1
-        )
-        self.writer = csv.DictWriter(self.file, fieldnames=CSV_FIELDS)
-        self.writer.writeheader()
+        self.file = None
+        self.writer = None
+        if self.write_local:
+            self.file = (mission_dir / "frames.csv").open(
+                "w", encoding="utf-8", newline="", buffering=1
+            )
+            self.writer = csv.DictWriter(self.file, fieldnames=CSV_FIELDS)
+            self.writer.writeheader()
         self.rows_written = 0
 
     def start(self) -> None:
@@ -832,7 +844,11 @@ class MetadataWriter:
             if remaining > 0:
                 time.sleep(remaining)
             tracking.stream_done.wait(timeout=0.5)
-            self.writer.writerow(self._build_row(tracking))
+            row = self._build_row(tracking)
+            if self.writer is not None:
+                self.writer.writerow(row)
+            if self.row_sink is not None:
+                self.row_sink(row)
             self.rows_written += 1
 
     def close(self) -> None:
@@ -840,8 +856,9 @@ class MetadataWriter:
         # Every received image must have one CSV row, so drain the pending
         # metadata queue before closing the file.
         self.thread.join()
-        self.file.flush()
-        self.file.close()
+        if self.file is not None:
+            self.file.flush()
+            self.file.close()
 
 
 def update_backend_video_url(
@@ -867,12 +884,202 @@ def update_backend_video_url(
         return json.loads(body) if body else {}
 
 
+def post_json(
+    endpoint: str,
+    payload: dict,
+    timeout_seconds: float = 3.0,
+) -> dict:
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        ),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        body = response.read().decode("utf-8")
+        return json.loads(body) if body else {}
+
+
 def write_json_atomic(path: pathlib.Path, payload: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     temporary.replace(path)
+
+
+class MetadataBatchUploader:
+    """Uploads frame metadata without using the telemetry WebSocket.
+
+    Retries retain the same batch_sequence so the backend can deduplicate a
+    batch after an HTTP response is lost. The queue is deliberately bounded:
+    it protects Jetson memory during a long backend outage and reports drops
+    instead of consuming the onboard disk.
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        mission_id: str,
+        drone_id: str,
+        session_info: dict,
+        batch_size: int,
+        queue_size: int,
+        flush_seconds: float,
+        retry_seconds: float,
+        request_timeout_seconds: float,
+    ):
+        self.endpoint = endpoint
+        self.mission_id = mission_id
+        self.drone_id = str(drone_id)
+        self.session_info = dict(session_info)
+        self.batch_size = batch_size
+        self.flush_seconds = flush_seconds
+        self.retry_seconds = retry_seconds
+        self.request_timeout_seconds = request_timeout_seconds
+        self.frames: queue.Queue[dict[str, object]] = queue.Queue(
+            maxsize=queue_size
+        )
+        self.stop_requested = threading.Event()
+        self.thread = threading.Thread(
+            target=self._run, name="metadata-upload", daemon=True
+        )
+        self.state_lock = threading.Lock()
+        self.camera_info: Optional[dict] = None
+        self.final_summary: dict = {}
+        self.batch_sequence = 0
+        self.uploaded_frames = 0
+        self.dropped_frames = 0
+        self.final_uploaded = False
+        self.last_error = ""
+        self.shutdown_deadline = math.inf
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def enqueue(self, row: dict[str, object]) -> bool:
+        try:
+            self.frames.put_nowait(dict(row))
+            return True
+        except queue.Full:
+            with self.state_lock:
+                self.dropped_frames += 1
+                self.last_error = "metadata_upload_queue_full"
+            return False
+
+    def set_camera_info(self, payload: dict) -> None:
+        with self.state_lock:
+            self.camera_info = dict(payload)
+
+    def snapshot(self) -> dict[str, object]:
+        with self.state_lock:
+            return {
+                "queued_frames": self.frames.qsize(),
+                "uploaded_frames": self.uploaded_frames,
+                "dropped_frames": self.dropped_frames,
+                "batch_sequence": self.batch_sequence,
+                "final_uploaded": self.final_uploaded,
+                "last_error": self.last_error,
+            }
+
+    def _build_payload(
+        self, batch: Sequence[dict[str, object]], final: bool
+    ) -> dict:
+        with self.state_lock:
+            camera_info = dict(self.camera_info) if self.camera_info else None
+            summary = dict(self.final_summary)
+            sequence = self.batch_sequence
+        payload = {
+            "schema_version": 1,
+            "mission_id": self.mission_id,
+            "drone_id": self.drone_id,
+            "batch_sequence": sequence,
+            "final": final,
+            "frames": list(batch),
+            "sent_at_unix_ns": time.time_ns(),
+            **self.session_info,
+        }
+        if camera_info is not None:
+            payload["camera_info"] = camera_info
+        if summary:
+            payload["summary"] = summary
+        return payload
+
+    def _send_with_retry(
+        self, batch: Sequence[dict[str, object]], final: bool
+    ) -> bool:
+        while True:
+            try:
+                response = post_json(
+                    self.endpoint,
+                    self._build_payload(batch, final),
+                    timeout_seconds=self.request_timeout_seconds,
+                )
+                if not response.get("ok", False):
+                    raise ValueError(f"backend rejected metadata: {response}")
+                with self.state_lock:
+                    self.uploaded_frames += len(batch)
+                    self.batch_sequence += 1
+                    self.final_uploaded = final
+                    self.last_error = ""
+                return True
+            except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                with self.state_lock:
+                    self.last_error = str(exc)
+                LOGGER.warning("Metadata upload failed: %s", exc)
+                if (
+                    self.stop_requested.is_set()
+                    and time.monotonic() >= self.shutdown_deadline
+                ):
+                    return False
+                time.sleep(self.retry_seconds)
+
+    def _mark_unsent_dropped(self, current_batch_size: int) -> None:
+        with self.state_lock:
+            self.dropped_frames += current_batch_size + self.frames.qsize()
+            self.last_error = "metadata_shutdown_deadline_exceeded"
+
+    def _run(self) -> None:
+        batch: list[dict[str, object]] = []
+        last_flush = time.monotonic()
+        while True:
+            remaining = max(
+                0.05, self.flush_seconds - (time.monotonic() - last_flush)
+            )
+            try:
+                batch.append(self.frames.get(timeout=remaining))
+            except queue.Empty:
+                pass
+
+            closing = self.stop_requested.is_set()
+            flush_due = time.monotonic() - last_flush >= self.flush_seconds
+            if batch and (
+                len(batch) >= self.batch_size or flush_due or closing
+            ):
+                if not self._send_with_retry(batch, final=False):
+                    self._mark_unsent_dropped(len(batch))
+                    return
+                batch.clear()
+                last_flush = time.monotonic()
+
+            if closing and self.frames.empty() and not batch:
+                if not self._send_with_retry([], final=True):
+                    self._mark_unsent_dropped(0)
+                return
+
+    def close(self, final_summary: dict, timeout_seconds: float) -> None:
+        with self.state_lock:
+            self.final_summary = dict(final_summary)
+            self.shutdown_deadline = time.monotonic() + timeout_seconds
+        self.stop_requested.set()
+        self.thread.join(
+            timeout=timeout_seconds + self.request_timeout_seconds + 2.0
+        )
+        if self.thread.is_alive():
+            with self.state_lock:
+                self.last_error = "metadata_upload_thread_shutdown_timeout"
 
 
 class JetsonVideoStreamNode(Node):  # type: ignore[misc]
@@ -884,12 +1091,8 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
         self.frame_queue: queue.Queue[Optional[FramePacket]] = queue.Queue(
             maxsize=args.frame_queue_size
         )
-        self.gps_cache = TimedSampleCache[GpsSample](
-            _sync_timestamp_us
-        )
-        self.odom_cache = TimedSampleCache[OdomSample](
-            _sync_timestamp_us
-        )
+        self.gps_cache = TimedSampleCache[GpsSample](_sync_timestamp_us)
+        self.odom_cache = TimedSampleCache[OdomSample](_sync_timestamp_us)
         self.frame_index = 0
         self.last_image_timestamp_ns = 0
         self.stream_queue_drops = 0
@@ -899,8 +1102,11 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
             f"mission_{datetime.now().strftime('%Y%m%d_%H%M%S')}_"
             f"drone_{args.drone_id}"
         )
+        self.mission_id = mission_name
+        self.local_capture_enabled = args.record_local or args.local_metadata
         self.mission_dir = pathlib.Path(args.record_dir).expanduser() / mission_name
-        self.mission_dir.mkdir(parents=True, exist_ok=False)
+        if self.local_capture_enabled:
+            self.mission_dir.mkdir(parents=True, exist_ok=False)
 
         stream_config = StreamConfig(
             rtsp_url=args.rtsp_url,
@@ -913,6 +1119,33 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
             segment_minutes=args.segment_minutes,
         )
         self.stream_pipeline = GstStreamPipeline(stream_config)
+
+        self.metadata_uploader: Optional[MetadataBatchUploader] = None
+        if args.upload_metadata:
+            self.metadata_uploader = MetadataBatchUploader(
+                endpoint=args.metadata_endpoint,
+                mission_id=self.mission_id,
+                drone_id=str(args.drone_id),
+                session_info={
+                    "jetson_ip": args.jetson_ip,
+                    "stream_path": args.stream_path,
+                    "rtsp_url": args.rtsp_url,
+                    "video_url": args.video_url,
+                    "image_topic": args.image_topic,
+                    "camera_info_topic": args.camera_info_topic,
+                    "gps_topic": args.gps_topic,
+                    "odometry_topic": args.odometry_topic,
+                    "fps": args.fps,
+                    "bitrate": args.bitrate,
+                },
+                batch_size=args.metadata_batch_size,
+                queue_size=args.metadata_queue_size,
+                flush_seconds=args.metadata_flush_seconds,
+                retry_seconds=args.metadata_retry_seconds,
+                request_timeout_seconds=args.metadata_request_timeout,
+            )
+            self.metadata_uploader.start()
+
         self.metadata_writer = MetadataWriter(
             mission_dir=self.mission_dir,
             gps_cache=self.gps_cache,
@@ -920,6 +1153,12 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
             sync_wait_ms=args.sync_wait_ms,
             max_gps_age_ms=args.max_gps_age_ms,
             max_odom_age_ms=args.max_odom_age_ms,
+            row_sink=(
+                self.metadata_uploader.enqueue
+                if self.metadata_uploader is not None
+                else None
+            ),
+            write_local=args.local_metadata,
         )
         self.metadata_writer.start()
         self.stream_thread = threading.Thread(
@@ -967,33 +1206,54 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
         self.get_logger().info(
             f"RTSP target: {args.rtsp_url}; UE page: {args.video_url}"
         )
-        self.get_logger().info(f"Mission directory: {self.mission_dir}")
+        if self.local_capture_enabled:
+            self.get_logger().info(f"Local fallback directory: {self.mission_dir}")
+        else:
+            self.get_logger().info(
+                f"Windows metadata endpoint: {args.metadata_endpoint}; "
+                "Jetson local recording is disabled"
+            )
+        if not args.upload_metadata and not args.local_metadata:
+            self.get_logger().warning(
+                "No metadata sink is enabled; frame GPS/pose rows will be discarded"
+            )
         self.get_logger().info(
             "Read-only ROS subscriptions started; jetson_bridge.py can run concurrently"
         )
 
+    def _build_mission_summary(self, completed: bool) -> dict:
+        uploader_state = (
+            self.metadata_uploader.snapshot()
+            if self.metadata_uploader is not None
+            else {}
+        )
+        return {
+            "drone_id": str(self.args.drone_id),
+            "jetson_ip": self.args.jetson_ip,
+            "mediamtx_host": self.args.mediamtx_host,
+            "rtsp_url": self.args.rtsp_url,
+            "video_url": self.args.video_url,
+            "image_topic": self.args.image_topic,
+            "camera_info_topic": self.args.camera_info_topic,
+            "gps_topic": self.args.gps_topic,
+            "odometry_topic": self.args.odometry_topic,
+            "fps": self.args.fps,
+            "bitrate": self.args.bitrate,
+            "record_local": self.args.record_local,
+            "completed": completed,
+            "frames_received": self.frame_index,
+            "metadata_rows": self.metadata_writer.rows_written,
+            "stream_queue_drops": self.stream_queue_drops,
+            "estimated_source_drops": self.source_drop_estimate,
+            "metadata_upload": uploader_state,
+        }
+
     def _write_mission_summary(self, completed: bool) -> None:
+        if not self.local_capture_enabled:
+            return
         write_json_atomic(
             self.mission_dir / "mission.json",
-            {
-                "drone_id": str(self.args.drone_id),
-                "jetson_ip": self.args.jetson_ip,
-                "mediamtx_host": self.args.mediamtx_host,
-                "rtsp_url": self.args.rtsp_url,
-                "video_url": self.args.video_url,
-                "image_topic": self.args.image_topic,
-                "camera_info_topic": self.args.camera_info_topic,
-                "gps_topic": self.args.gps_topic,
-                "odometry_topic": self.args.odometry_topic,
-                "fps": self.args.fps,
-                "bitrate": self.args.bitrate,
-                "record_local": self.args.record_local,
-                "completed": completed,
-                "frames_received": self.frame_index,
-                "metadata_rows": self.metadata_writer.rows_written,
-                "stream_queue_drops": self.stream_queue_drops,
-                "estimated_source_drops": self.source_drop_estimate,
-            },
+            self._build_mission_summary(completed),
         )
 
     def _on_gps(self, message) -> None:
@@ -1054,7 +1314,10 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
         )
         if signature != self._camera_info_signature:
             self._camera_info_signature = signature
-            write_json_atomic(self.mission_dir / "camera_info.json", payload)
+            if self.local_capture_enabled:
+                write_json_atomic(self.mission_dir / "camera_info.json", payload)
+            if self.metadata_uploader is not None:
+                self.metadata_uploader.set_camera_info(payload)
             if not payload["k"] or payload["k"][0] == 0.0:
                 self.get_logger().warning(
                     "CameraInfo reports an uncalibrated camera (K[0] == 0)"
@@ -1154,6 +1417,11 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
             self.stop_event.wait(self.args.backend_retry_seconds)
 
     def _log_status(self) -> None:
+        uploader_state = (
+            self.metadata_uploader.snapshot()
+            if self.metadata_uploader is not None
+            else {}
+        )
         self.get_logger().info(
             f"video frames={self.frame_index} "
             f"queue_drops={self.stream_queue_drops} "
@@ -1161,7 +1429,10 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
             f"stream={self.stream_pipeline.state} "
             f"generation={self.stream_pipeline.generation} "
             f"gps_samples={len(self.gps_cache.snapshot())} "
-            f"odom_samples={len(self.odom_cache.snapshot())}"
+            f"odom_samples={len(self.odom_cache.snapshot())} "
+            f"metadata_queued={uploader_state.get('queued_frames', 0)} "
+            f"metadata_uploaded={uploader_state.get('uploaded_frames', 0)} "
+            f"metadata_dropped={uploader_state.get('dropped_frames', 0)}"
         )
 
     def shutdown(self) -> None:
@@ -1186,10 +1457,17 @@ class JetsonVideoStreamNode(Node):  # type: ignore[misc]
             self.stream_pipeline.stop()
             self.stream_thread.join(timeout=2.0)
         self.metadata_writer.close()
+        if self.metadata_uploader is not None:
+            self.metadata_uploader.close(
+                self._build_mission_summary(completed=True),
+                timeout_seconds=self.args.metadata_shutdown_timeout,
+            )
         if self._backend_thread is not None:
             self._backend_thread.join(timeout=1.0)
         self._write_mission_summary(completed=True)
-        self.get_logger().info("Video pipeline, recorder and metadata writer stopped")
+        self.get_logger().info(
+            "Video pipeline and metadata processing stopped; final upload was attempted"
+        )
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -1225,7 +1503,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--record-local",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
+        help="optional Jetson-side MKV fallback; Windows MediaMTX records by default",
+    )
+    parser.add_argument(
+        "--local-metadata",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="also retain frames.csv and mission files on the Jetson",
     )
     parser.add_argument("--segment-minutes", type=float, default=10.0)
     parser.add_argument("--sync-wait-ms", type=float, default=200.0)
@@ -1234,6 +1519,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backend-base-url", default="http://192.168.10.30:8080"
     )
+    parser.add_argument("--metadata-endpoint", default=None)
+    parser.add_argument(
+        "--upload-metadata",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--metadata-batch-size", type=int, default=90)
+    parser.add_argument("--metadata-queue-size", type=int, default=3600)
+    parser.add_argument("--metadata-flush-seconds", type=float, default=1.0)
+    parser.add_argument("--metadata-retry-seconds", type=float, default=2.0)
+    parser.add_argument("--metadata-request-timeout", type=float, default=3.0)
+    parser.add_argument("--metadata-shutdown-timeout", type=float, default=10.0)
     parser.add_argument(
         "--update-backend",
         action=argparse.BooleanOptionalAction,
@@ -1255,6 +1552,18 @@ def finalize_arguments(args: argparse.Namespace) -> argparse.Namespace:
         raise ValueError("keyframe interval must be positive")
     if args.frame_queue_size <= 0:
         raise ValueError("frame queue size must be positive")
+    if args.metadata_batch_size <= 0 or args.metadata_batch_size > 300:
+        raise ValueError("metadata batch size must be 1~300")
+    if args.metadata_queue_size < args.metadata_batch_size:
+        raise ValueError("metadata queue size must be >= metadata batch size")
+    if args.metadata_flush_seconds <= 0:
+        raise ValueError("metadata flush seconds must be positive")
+    if args.metadata_retry_seconds <= 0:
+        raise ValueError("metadata retry seconds must be positive")
+    if args.metadata_request_timeout <= 0:
+        raise ValueError("metadata request timeout must be positive")
+    if args.metadata_shutdown_timeout < 0:
+        raise ValueError("metadata shutdown timeout must not be negative")
     stream_path = args.stream_path or f"drone-{args.drone_id}"
     args.stream_path = sanitize_stream_path(stream_path)
     args.backend_drone_id = args.backend_drone_id or args.drone_id
@@ -1267,6 +1576,9 @@ def finalize_arguments(args: argparse.Namespace) -> argparse.Namespace:
     )
     args.video_url = (
         f"http://{args.mediamtx_host}:{args.webrtc_port}/{args.stream_path}"
+    )
+    args.metadata_endpoint = args.metadata_endpoint or (
+        args.backend_base_url.rstrip("/") + "/api/video-metadata/batch"
     )
     return args
 

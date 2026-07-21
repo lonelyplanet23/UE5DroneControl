@@ -1,37 +1,52 @@
 # Jetson 视频流与 SfM 同步采集说明
 
-## 1. 程序作用
+## 1. 当前保存方案
 
-`jetson_video_stream.py` 是一个独立 ROS2 节点，可以和现有的 `jetson_bridge.py` 同时运行。
+`jetson_video_stream.py` 可以和现有 `jetson_bridge.py` 同时运行。默认情况下，Jetson 不长期保存视频或逐帧元数据：
 
-它只订阅以下话题，不发送飞控命令，也不会打开 PX4 串口、UDP 端口或摄像头设备：
+```text
+Jetson
+├─ /image_raw -> H.264/RTSP -> MediaMTX 电脑 -> D:\DroneData\recordings
+└─ GPS/位姿逐帧匹配 -> HTTP 批量上传 -> 后端电脑 -> D:\DroneData\metadata
+
+UE -> 后端 GET /api/drones -> 取得 video_url -> MediaMTX WebRTC 页面
+```
+
+视频数据不会进入遥测 WebSocket。UE 只播放和展示，不负责录像。
+
+当前测试环境中，MediaMTX、后端和 UE 都可以运行在 `192.168.10.30`。程序也支持以后分开部署：
+
+| 角色 | 当前地址 | 将来能否独立电脑 |
+|---|---|---|
+| Jetson Orin NX | `192.168.10.1` | 一架无人机一台 Jetson |
+| MediaMTX | `192.168.10.30` | 可以，视频保存在该电脑本地磁盘 |
+| C++ 后端 | `192.168.10.30:8080` | 可以，元数据保存在该电脑本地磁盘 |
+| UE | `192.168.10.30` | 可以，只需能访问后端和 MediaMTX |
+
+以后如果三者地址不同，只需分别填写 `--mediamtx-host` 和 `--backend-base-url`，不需要改代码。
+
+## 2. 数据内容
+
+脚本只订阅：
 
 - `/image_raw`
 - `/camera_info`
 - `/fmu/out/vehicle_global_position`
 - `/fmu/out/vehicle_odometry`
 
-程序同时完成两件事：
+它不发送飞控命令，不打开 PX4 串口或控制 UDP 端口，也不会再次打开 `/dev/video0`。
 
-1. 将 `/image_raw` 编码为无音频 H.264，通过 RTSP 推送到 Windows 电脑上的 MediaMTX。
-2. 在 Jetson 本地保存分段 MKV 视频、相机标定和 `frames.csv`，为每一个收到的图像帧记录对应 GPS 与局部位姿。
+每个收到的图像帧都会生成一条元数据，包括：
 
-当前网络地址：
+- 图像时间、接收序号和估算丢帧数。
+- 视频重连代次 `stream_generation` 和编码时间 `stream_pts_ns`。
+- GPS 经纬度、海拔、精度和有效状态。
+- NED 局部位置、速度和四元数。
+- GPS/里程计匹配偏差。
 
-| 设备 | 地址 | 用途 |
-|---|---|---|
-| Jetson Orin NX | `192.168.10.1` | 订阅摄像头和 PX4 话题、编码与推流 |
-| UE/Windows | `192.168.10.30` | 运行 MediaMTX、后端和 UE |
+GPS 通常只有几 Hz，脚本会在相邻有效样本之间按时间插值。逐帧对应不代表 GPS 传感器本身变成 30 Hz。
 
-```text
-摄像头驱动 -> /image_raw -> jetson_video_stream.py -> H.264/RTSP -> MediaMTX
-                                               |                    |
-PX4 -> global_position / odometry -------------+                    +-> WebRTC 页面 -> UE
-                                               |
-                                               +-> 本地 MKV + frames.csv
-```
-
-## 2. Jetson 安装依赖
+## 3. Jetson 安装依赖
 
 ```bash
 sudo apt update
@@ -42,7 +57,7 @@ sudo apt install -y \
   gstreamer1.0-plugins-bad
 ```
 
-检查关键插件：
+检查插件：
 
 ```bash
 gst-inspect-1.0 rtspclientsink
@@ -51,52 +66,92 @@ gst-inspect-1.0 splitmuxsink
 gst-inspect-1.0 matroskamux
 ```
 
-四条命令都应显示插件信息。`nvv4l2h264enc` 来自 Jetson 的 NVIDIA 多媒体组件；如果找不到，应先检查 JetPack/GStreamer NVIDIA 插件是否完整安装。
+默认方案只需要前两个关键插件。后两个用于启用 Jetson 本地 MKV 备用录制。
 
-FFmpeg 不是实时推流必需项，仅用于检查录制文件时可选安装：
+FFmpeg 不是实时推流必需项，只在检查文件时可选安装：
 
 ```bash
 sudo apt install -y ffmpeg
 ```
 
-## 3. Windows 启动 MediaMTX
+## 4. MediaMTX 电脑配置
 
-将 [`Docs/MediaMTX/mediamtx.yml`](../Docs/MediaMTX/mediamtx.yml) 放到 MediaMTX 可执行文件旁，然后启动 MediaMTX。
+将 [`Docs/MediaMTX/mediamtx.yml`](../Docs/MediaMTX/mediamtx.yml) 放到 MediaMTX 可执行文件旁并启动。
 
-Windows 防火墙需要允许：
+配置默认将视频保存到 MediaMTX 所在 Windows 电脑：
+
+```text
+D:\DroneData\recordings\drone-1\
+```
+
+录制格式为 fMP4，每 10 分钟一个视频段，不自动删除。MediaMTX 会自动创建子目录。
+
+MediaMTX 电脑防火墙需要允许：
 
 - TCP `8554`：Jetson 发布 RTSP。
-- TCP `8889`：UE WebBrowser 打开 MediaMTX WebRTC 页面。
+- TCP `8889`：UE 打开 WebRTC 播放页。
 - UDP `8189`：WebRTC 媒体传输。
 
-当前配置已经写入 `webrtcAdditionalHosts: [192.168.10.30]`。
+如果 MediaMTX 以后换到另一台电脑：
 
-## 4. 将脚本复制到 Jetson
+1. 将配置中的 `webrtcAdditionalHosts` 改成那台电脑可被 UE 访问的局域网 IP。
+2. Jetson 启动参数中的 `--mediamtx-host` 改成同一个 IP。
+3. 后端保存的 `video_url` 会由 Jetson 脚本自动更新。
 
-在 Windows 项目根目录执行，用户名按 Jetson 实际用户名修改：
+## 5. 后端电脑配置
+
+后端新增接口：
+
+```text
+POST /api/video-metadata/batch
+```
+
+该接口不经过 WebSocket。默认保存目录在 [`Backend/config.yaml`](../Backend/config.yaml) 中：
+
+```yaml
+storage:
+  path: "./data/drones.json"
+  video_metadata_path: "D:/DroneData/metadata"
+  video_metadata_max_batch: 300
+```
+
+后端会保存为：
+
+```text
+D:\DroneData\metadata\drone-1\mission_...\
+├── session.json
+├── completed.json
+└── batches\
+    ├── 000000000000.jsonl
+    ├── 000000000001.jsonl
+    └── ...
+```
+
+每批文件是不可变 JSONL。Jetson 在 HTTP 响应丢失后会用同一批次编号重试，后端发现文件已存在就返回成功，不会重复写入帧。
+
+如果后端换到另一台电脑：
+
+- 在那台电脑的 `config.yaml` 中设置它自己的保存磁盘。
+- 允许 Jetson 访问 TCP `8080`。
+- Jetson 使用 `--backend-base-url http://后端IP:8080`。
+- UE 也将后端基础地址改成该电脑；MediaMTX 地址不必相同。
+
+## 6. 复制和启动脚本
+
+从 Windows 项目根目录复制：
 
 ```powershell
 scp .\Jetson\jetson_video_stream.py jetson1@192.168.10.1:/home/jetson1/
 ```
 
-也可以用 U 盘复制。Jetson 上只需要这一个 Python 文件。
-
-## 5. 启动顺序
-
-### 5.1 保持已有程序运行
-
-保持原来的摄像头 ROS2 节点、Micro XRCE Agent 和 `jetson_bridge.py` 正常运行。不要再启动第二个直接读取 `/dev/video0` 的程序；视频脚本直接订阅已经存在的 `/image_raw`。
-
-### 5.2 加载 ROS2 环境
-
-打开另一个 Jetson 终端：
+Jetson 新终端加载 ROS2：
 
 ```bash
 source /opt/ros/humble/setup.bash
 source /home/jetson1/swarm_ws/install/setup.bash
 ```
 
-先确认话题仍在发布：
+确认话题：
 
 ```bash
 ros2 topic hz /image_raw
@@ -104,30 +159,31 @@ ros2 topic hz /fmu/out/vehicle_global_position
 ros2 topic hz /fmu/out/vehicle_odometry
 ```
 
-### 5.3 启动推流和 SfM 采集
-
-当前摄像头先使用默认 8 Mbps：
+当前同机部署的启动命令：
 
 ```bash
 python3 /home/jetson1/jetson_video_stream.py \
   --drone-id 1 \
   --jetson-ip 192.168.10.1 \
   --mediamtx-host 192.168.10.30 \
-  --record-dir /home/jetson1/sfm_captures \
+  --backend-base-url http://192.168.10.30:8080 \
   --bitrate 8000000
 ```
 
-未来换成 1080p 摄像头做 SfM 时，脚本会自动读取 `/image_raw` 的实际宽高。建议先把码率提高到 16 Mbps：
+未来 MediaMTX 和后端分开时，例如：
 
 ```bash
 python3 /home/jetson1/jetson_video_stream.py \
   --drone-id 1 \
-  --jetson-ip 192.168.10.1 \
-  --mediamtx-host 192.168.10.30 \
-  --record-dir /home/jetson1/sfm_captures \
+  --mediamtx-host 192.168.10.40 \
+  --backend-base-url http://192.168.10.50:8080 \
   --bitrate 16000000 \
   --fps 30
 ```
+
+这里视频保存在 `192.168.10.40`，元数据保存在 `192.168.10.50`，UE 可以运行在第三台电脑。
+
+未来 1080p/30fps 做 SfM 时建议从 16 Mbps 开始实测。脚本会读取 `/image_raw` 的实际宽高，不会强行把低分辨率图像放大成 1080p。
 
 如果 PX4 话题带命名空间，例如 `/px4_1/fmu/out/...`，增加：
 
@@ -135,114 +191,72 @@ python3 /home/jetson1/jetson_video_stream.py \
 --topic-prefix /px4_1
 ```
 
-这个参数只会作用于 PX4 的 GPS 和里程计话题，不会改变 `/image_raw` 和 `/camera_info`。
+这个参数只改变 PX4 话题，不改变 `/image_raw` 和 `/camera_info`。
 
-## 6. 自动生成的地址
+## 7. Jetson 空间和断网行为
 
-Drone 1 默认使用：
-
-- Jetson 推流地址：`rtsp://192.168.10.30:8554/drone-1`
-- UE 播放页面：`http://192.168.10.30:8889/drone-1`
-- 后端接口：`PUT http://192.168.10.30:8080/api/drones/1`
-
-脚本会自动向现有后端写入：
-
-```json
-{
-  "video_url": "http://192.168.10.30:8889/drone-1"
-}
-```
-
-如果后端暂时没启动，脚本会继续推流和采集，并每 5 秒重试。若只想测试视频、不更新后端，增加 `--no-update-backend`。如果后端中的无人机 ID 不同，可用 `--backend-drone-id` 单独指定。
-
-## 7. SfM 文件说明
-
-每次启动都会创建一个新目录，例如：
+默认参数为：
 
 ```text
-/home/jetson1/sfm_captures/mission_20260721_153000_drone_1/
-├── mission.json
-├── camera_info.json
-├── frames.csv
-├── video_g001_00000.mkv
-├── video_g001_00001.mkv
-└── ...
+--no-record-local
+--no-local-metadata
+--upload-metadata
+--metadata-batch-size 90
+--metadata-queue-size 3600
 ```
 
-- `mission.json`：本次任务、地址、帧数和丢帧统计。
-- `camera_info.json`：相机内参和畸变参数。正式 SfM 前必须完成相机标定；若 `K[0] == 0`，程序会提示未标定。
-- `video_gNNN_XXXXX.mkv`：无音频 H.264 视频，默认每 10 分钟分段。网络断开并重连后 `gNNN` 会递增。
-- `frames.csv`：每个收到的 `/image_raw` 回调对应一行。
+因此正常运行时不会在 Jetson 创建任务目录，也不会长期写入 MKV 或 CSV。
 
-关键 CSV 字段：
+元数据上传使用有上限的内存队列。30fps、3600 帧约等于 2 分钟缓存：
 
-- `frame_index`：ROS 图像接收序号。
-- `image_timestamp_ns`：原始图像 Header 时间；Header 无效时使用 ROS 接收时间。
-- `sync_timestamp_us` / `sync_basis`：实际用于匹配 GPS/里程计的统一 ROS 时钟及其来源。
-- `stream_accepted`、`stream_generation`、`stream_pts_ns`：该帧是否交给编码器、属于哪个视频代次、在该视频代次中的时间位置。
-- `latitude`、`longitude`、`altitude_amsl_m`：与该帧匹配或插值后的全球位置。
-- `gps_px4_timestamp_sample_us`：匹配位置对应的原始 PX4 时间，不能直接当作 Unix 时间。
-- `local_north_m`、`local_east_m`、`local_down_m` 和四元数：最近的本地里程计位姿。
-- `estimated_source_drops`、`stream_error`：排查源丢帧或推流失败。
+- 后端短暂中断：保留批次并自动重试。
+- 后端长时间中断且队列装满：新元数据会被丢弃，并增加 `metadata_dropped`。
+- 不会因为后端离线无限占满 Jetson 内存或硬盘。
+- 视频 RTSP 推流与元数据 HTTP 上传互相独立。
 
-PX4 时间通常是飞控启动后的微秒，而摄像头 Header 常是 ROS/系统时间。脚本不会直接比较这两种时间；它使用同一个 ROS 时钟记录消息到达时间并匹配，同时把 PX4 原始时间保留在 CSV 中。
-
-室内没有 GPS 定位时：
-
-- 面板和视频仍可正常工作。
-- `frames.csv` 仍然每帧写一行。
-- `lat_lon_valid` 为 `False`，经纬度字段为空，不会伪造 `0,0` 坐标。
-- 局部位姿仍可由 `/fmu/out/vehicle_odometry` 填写。
-
-## 8. 验证方法
-
-1. 在 UE/Windows 浏览器打开 `http://192.168.10.30:8889/drone-1`，确认画面出现。
-2. 调用后端 `GET /api/drones`，确认 Drone 1 的 `video_url` 是上述页面地址。
-3. 在 UE 中中键点击 Drone 1，确认信息面板播放同一画面。
-4. 在 Jetson 上查看输出目录，确认 MKV 文件大小持续增长且 `frames.csv` 持续增加行。
-5. 如果安装了 FFmpeg，可检查录制参数：
+如果现场确实需要 Jetson 备用副本，可显式增加：
 
 ```bash
-ffprobe /home/jetson1/sfm_captures/mission_*/video_g001_00000.mkv
+--record-local --local-metadata --record-dir /mnt/ssd/sfm_captures
 ```
 
-6. 按 `Ctrl+C` 停止。日志应出现 `Video pipeline, recorder and metadata writer stopped`，MKV 文件完成封装，`mission.json` 中 `completed` 变为 `true`。
+只有使用这些参数时，Jetson 才会创建 `mission_...` 目录并保存 MKV、CSV、相机参数和任务信息。
 
-## 9. 常见问题
+## 8. 室内 GPS 行为
 
-### 浏览器打不开播放页
+室内没有定位时：
 
-先从 Jetson 检查 Windows 端口：
+- 视频、服务端录像和 UE 播放仍正常。
+- 后端仍为每个收到的图像帧保存一条元数据。
+- `lat_lon_valid` 为 `false`，经纬度为空，不写入伪造的 `0,0`。
+- `/fmu/out/vehicle_odometry` 有效时，局部位置和姿态仍会保存。
 
-```bash
-nc -vz 192.168.10.30 8554
-nc -vz 192.168.10.30 8889
+PX4 时间一般是飞控启动后的微秒，摄像头 Header 常是 ROS/系统时间。脚本使用统一 ROS 时钟完成匹配，同时保留 PX4 原始时间。正式高精度 SfM 仍建议以后增加硬件触发、PPS/PTP 或相机精确时间戳。
+
+## 9. 验证步骤
+
+1. 启动后端和 MediaMTX。
+2. 启动 Jetson 脚本，日志应显示 RTSP、WebRTC 和 metadata endpoint 三个地址。
+3. 浏览器打开 `http://192.168.10.30:8889/drone-1`。
+4. UE 中键打开 Drone 1 面板。
+5. 检查 MediaMTX 电脑：
+
+```text
+D:\DroneData\recordings\drone-1
 ```
 
-再检查 MediaMTX 是否运行、Windows 防火墙是否放行、`webrtcAdditionalHosts` 是否是 `192.168.10.30`。
+6. 检查后端电脑：
 
-### 提示找不到 `rtspclientsink`
-
-安装 `gstreamer1.0-rtsp`，然后重新执行 `gst-inspect-1.0 rtspclientsink`。
-
-### 提示找不到 `nvv4l2h264enc`
-
-这是 Jetson 硬件编码插件缺失，不要临时改成 CPU 编码长期运行。检查 JetPack、`nvidia-l4t-gstreamer` 和 NVIDIA 多媒体组件。
-
-### 有 GPS 话题但 CSV 没有经纬度
-
-```bash
-ros2 topic echo /fmu/out/vehicle_global_position --once
+```text
+D:\DroneData\metadata\drone-1
 ```
 
-重点看 `lat_lon_valid`、`alt_valid`、`eph` 和 `epv`。室内持续发布消息但没有有效定位属于正常情况。
+7. 断开后端网络几秒再恢复，确认 `metadata_queued` 先增加、随后下降，批次文件继续生成。
+8. 按 `Ctrl+C`，脚本会尝试上传最后一批和完成标记；后端任务目录应出现 `completed.json`。
 
-### `stream_queue_drops` 持续增加
+## 10. 重要限制
 
-说明原始图像到达速度超过编码或网络处理速度。先确认硬件编码插件被使用，再检查局域网稳定性、磁盘写入速度和实际帧率；不建议简单增大队列，因为会明显增加延迟。
-
-## 10. 当前精度边界
-
-这版保证“每个收到的图像帧都有一行元数据”，但 GPS 通常只有几 Hz，无法产生真正每帧独立测量的 GPS。脚本会在相邻有效 GPS 样本之间按时间插值；CSV 是逐帧对应，不代表 GPS 传感器本身变成 30 Hz。
-
-用于正式高精度 SfM 前，还需要实测确认摄像头标定、曝光/快门、ROS 时间同步、GPS 精度、视频丢帧率和磁盘吞吐。若以后能使用硬件触发、PPS/PTP 或相机自带精确时间戳，应优先替换现在基于 ROS 到达时间的同步方式。
+- MediaMTX 保存的是 fMP4，不再是上一版 Jetson 本地生成的 MKV。
+- 视频文件与元数据位于不同目录，后续 SfM 整理程序应使用 `mission_id`、`stream_generation`、`stream_pts_ns` 和图像时间进行关联。
+- 默认缓存只覆盖短暂断网，不承诺后端长时间离线时零丢失。若需要断网数小时仍零丢失，应增加 Jetson 小容量磁盘 spool 或任务结束后的补传机制。
+- 录像磁盘容量仍需在 MediaMTX 电脑上管理。1080p、16 Mbps 约为每架无人机每小时 7.2 GB。

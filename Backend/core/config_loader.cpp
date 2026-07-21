@@ -52,6 +52,10 @@ AppConfig LoadConfig(const std::string& path)
         // --- storage ---
         if (auto st = root["storage"]) {
             cfg.storage_path = st["path"].as<std::string>(cfg.storage_path);
+            cfg.video_metadata_path = st["video_metadata_path"].as<std::string>(
+                cfg.video_metadata_path);
+            cfg.video_metadata_max_batch = st["video_metadata_max_batch"].as<int>(
+                cfg.video_metadata_max_batch);
         }
 
         // --- log ---
@@ -92,6 +96,14 @@ void ValidateConfig(const AppConfig& cfg)
     if (cfg.max_count < 1 || cfg.max_count > 6) {
         throw std::invalid_argument(
             "max_count must be 1~6");
+    }
+    if (cfg.video_metadata_path.empty()) {
+        throw std::invalid_argument("video_metadata_path must not be empty");
+    }
+    if (cfg.video_metadata_max_batch < 1 ||
+        cfg.video_metadata_max_batch > 1000) {
+        throw std::invalid_argument(
+            "video_metadata_max_batch must be 1~1000");
     }
 
     // 端口唯一性检查

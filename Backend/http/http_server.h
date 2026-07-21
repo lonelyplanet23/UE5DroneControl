@@ -8,6 +8,7 @@
 #include "execution/assembly_controller.h"
 #include "execution/execution_engine.h"
 #include "communication/ws_manager.h"
+#include "storage/video_metadata_store.h"
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>
@@ -106,6 +107,8 @@ private:
     boost::json::value ApiDeleteDrone(const std::string& id);
     boost::json::value ApiGetAnchor(const std::string& id);
     boost::json::value ApiRefreshDrones();
+    boost::json::value ApiStoreVideoMetadataBatch(
+        const boost::json::object& body);
     boost::json::value ApiCreateArray(const boost::json::object& body);
     boost::json::value ApiPreviewArray(const boost::json::object& body);
     boost::json::value ApiStopArray(const std::string& id);
@@ -155,6 +158,7 @@ private:
     AssemblyController&   assembly_ctrl_;
     ExecutionEngine&      exec_engine_;
     WsManager&            ws_manager_;
+    VideoMetadataStore    video_metadata_store_;
 
     std::atomic<bool>     running_{false};
     std::thread           http_thread_;

@@ -32,6 +32,8 @@ struct AppConfig {
 
     // Storage
     std::string storage_path = "./data/drones.json";
+    std::string video_metadata_path = "D:/DroneData/metadata";
+    int video_metadata_max_batch = 300;
 
     // Log
     std::string log_level = "info";
