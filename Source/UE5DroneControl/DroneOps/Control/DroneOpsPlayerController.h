@@ -82,9 +82,30 @@ public:
 		double AltitudeMslMeters,
 		bool bForDispatch) const;
 
+/**
+ * Dispatches one exact geographic target per selected drone. Unlike the shared-target API,
+ * this path never adds formation offsets: every DroneId goes to its own supplied coordinate.
+ */
+UFUNCTION(BlueprintCallable, Category = "DroneOps")
+FGeographicDispatchResult DispatchPerDroneGeographicTargets(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FDroneGeographicTarget>& Targets,
+    bool bPreviewOnly);
+
+/** Validates an exact per-drone target set without drawing markers or sending commands. */
+UFUNCTION(BlueprintCallable, Category = "DroneOps")
+FGeographicDispatchResult ValidatePerDroneGeographicTargets(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FDroneGeographicTarget>& Targets,
+    bool bForDispatch) const;
+
 	/** Number of drones currently selected for dispatch (multi-selection, or 0). */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps")
 	int32 GetSelectedDroneCountForDispatch() const;
+
+/** Unique selected DroneIds in ascending order, used by deterministic per-drone UI rows. */
+UFUNCTION(BlueprintCallable, Category = "DroneOps")
+TArray<int32> GetSelectedDroneIdsForDispatch() const;
 
 	// ---- 预演关卡路径编辑模式（供 SequenceDispatchPanelWidget 调用）----
 
@@ -112,6 +133,15 @@ public:
 		double Longitude,
 		double Latitude,
 		double AltitudeMslMeters);
+
+/**
+ * Atomically appends an ordered geographic waypoint batch to every active editing path.
+ * All coordinates are converted before any path is mutated. This method never sends backend commands.
+ */
+UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
+FGeographicDispatchResult AddGeographicWaypointsInEditMode(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FGeographicCoordinate3D>& Coordinates);
 
 	/** 销毁全部临时路径 Actor（含航点句柄）并清空编辑状态。 */
 	UFUNCTION(BlueprintCallable, Category = "DroneOps|PathEdit")
@@ -311,6 +341,14 @@ private:
 		double AltitudeMslMeters,
 		bool bForDispatch,
 		TArray<FGeographicDispatchSlot>& OutSlots) const;
+
+FGeographicDispatchResult BuildPerDroneGeographicDispatchPlan(
+    EGeographicCoordinateSystem CoordinateSystem,
+    const TArray<FDroneGeographicTarget>& Targets,
+    bool bForDispatch,
+    TArray<FGeographicDispatchSlot>& OutSlots) const;
+
+bool ValidateDispatchDrone(int32 DroneId, FString& OutError) const;
 
 	/**
 	 * 把 WGS84 经纬高（海拔 MSL）转换为 UE 世界坐标（cm）。

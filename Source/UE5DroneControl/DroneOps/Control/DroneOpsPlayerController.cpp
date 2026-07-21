@@ -1117,26 +1117,7 @@ void ADroneOpsPlayerController::HandleMapClick(const FVector& WorldLocation)
 
 int32 ADroneOpsPlayerController::GetSelectedDroneCountForDispatch() const
 {
-	if (!DroneRegistry)
-	{
-		return 0;
-	}
-
-	TSet<int32> UniqueSelectedIds;
-	for (const int32 DroneId : DroneRegistry->GetMultiSelectedDrones())
-	{
-		if (DroneId > 0)
-		{
-			UniqueSelectedIds.Add(DroneId);
-		}
-	}
-
-	if (!UniqueSelectedIds.IsEmpty())
-	{
-		return UniqueSelectedIds.Num();
-	}
-
-	return DroneRegistry->GetPrimarySelectedDrone() > 0 ? 1 : 0;
+	return GetSelectedDroneIdsForDispatch().Num();
 }
 
 FGeographicDispatchResult ADroneOpsPlayerController::BuildWorldDispatchPlan(
@@ -1152,23 +1133,9 @@ FGeographicDispatchResult ADroneOpsPlayerController::BuildWorldDispatchPlan(
 		return Result;
 	}
 
-	TArray<int32> SelectedIds = DroneRegistry->GetMultiSelectedDrones();
-	TSet<int32> SeenIds;
-	SelectedIds.RemoveAll([&SeenIds](const int32 DroneId)
-	{
-		if (DroneId <= 0 || SeenIds.Contains(DroneId))
-		{
-			return true;
-		}
-		SeenIds.Add(DroneId);
-		return false;
-	});
+	TArray<int32> SelectedIds = GetSelectedDroneIdsForDispatch();
 
 	int32 PrimaryId = DroneRegistry->GetPrimarySelectedDrone();
-	if (SelectedIds.IsEmpty() && PrimaryId > 0)
-	{
-		SelectedIds.Add(PrimaryId);
-	}
 	if (SelectedIds.IsEmpty())
 	{
 		Result.Message = TEXT("请先选择无人机");
@@ -1191,15 +1158,8 @@ FGeographicDispatchResult ADroneOpsPlayerController::BuildWorldDispatchPlan(
 	for (int32 Index = 0; Index < OrderedIds.Num(); ++Index)
 	{
 		const int32 DroneId = OrderedIds[Index];
-		EDroneControlLockReason LockReason = EDroneControlLockReason::None;
-		if (DroneRegistry->IsControlLocked(DroneId, LockReason))
+		if (!ValidateDispatchDrone(DroneId, Result.Message))
 		{
-			Result.Message = FString::Printf(TEXT("无人机 %d 当前不可控，无法派发"), DroneId);
-			return Result;
-		}
-		if (!IsValid(ResolveDroneActorById(DroneId)))
-		{
-			Result.Message = FString::Printf(TEXT("无人机 %d 的影子机不可用"), DroneId);
 			return Result;
 		}
 
@@ -1402,21 +1362,146 @@ FGeographicDispatchResult ADroneOpsPlayerController::BuildGeographicDispatchPlan
 		return Result;
 	}
 
-	FVector BaseTarget = FVector::ZeroVector;
-	FString ConvertError;
-	if (!TryConvertGeographicToWorld(CoordinateSystem, Longitude, Latitude, AltitudeMslMeters, BaseTarget, ConvertError))
+	if (CoordinateSystem != EGeographicCoordinateSystem::WGS84)
 	{
-		Result.Message = ConvertError;
+		Result.Message = TEXT("当前仅支持 WGS84 坐标系");
 		return Result;
 	}
 
-	Result = BuildWorldDispatchPlan(BaseTarget, OutSlots);
-	if (Result.bSuccess)
+	if (!FMath::IsFinite(Longitude) || !FMath::IsFinite(Latitude) || !FMath::IsFinite(AltitudeMslMeters))
 	{
-		// Backend availability is intentionally not a validation prerequisite. Both input paths
-		// always create local 3D targets; sending the corresponding backend command is best-effort.
-		Result.Message = bForDispatch ? TEXT("可以在UE内派发") : TEXT("可以预览");
+		Result.Message = TEXT("请输入有效的经度、纬度和海拔");
+		return Result;
 	}
+
+	if (Longitude < -180.0 || Longitude > 180.0 || Latitude < -90.0 || Latitude > 90.0)
+	{
+		Result.Message = TEXT("经纬度超出合法范围");
+		return Result;
+	}
+
+	// Build a unique ordered selection: primary first, all remaining drones by ascending DroneId.
+	TArray<int32> SelectedIds = DroneRegistry->GetMultiSelectedDrones();
+	TSet<int32> SeenIds;
+	SelectedIds.RemoveAll([&SeenIds](const int32 DroneId)
+	{
+		if (DroneId <= 0 || SeenIds.Contains(DroneId))
+		{
+			return true;
+		}
+		SeenIds.Add(DroneId);
+		return false;
+	});
+
+	int32 PrimaryId = DroneRegistry->GetPrimarySelectedDrone();
+	if (SelectedIds.IsEmpty())
+	{
+		if (PrimaryId > 0)
+		{
+			SelectedIds.Add(PrimaryId);
+		}
+	}
+
+	if (SelectedIds.IsEmpty())
+	{
+		Result.Message = TEXT("请先选择无人机");
+		return Result;
+	}
+
+	if (!SelectedIds.Contains(PrimaryId))
+	{
+		// Registry selection should always contain its primary. Keep a deterministic fallback for
+		// direct Blueprint manipulation or a transient selection update in the same frame.
+		SelectedIds.Sort();
+		PrimaryId = SelectedIds[0];
+	}
+
+	TArray<int32> OrderedIds;
+	OrderedIds.Add(PrimaryId);
+	{
+		TArray<int32> Others = SelectedIds;
+		Others.Remove(PrimaryId);
+		Others.Sort(); // ascending DroneId → stable spiral layout
+		OrderedIds.Append(Others);
+	}
+
+	// Coordinate service must be ready and support geographic conversion.
+	TScriptInterface<ICoordinateService> CoordService = DroneRegistry->GetCoordinateService();
+	UObject* CoordObject = CoordService.GetObject();
+	if (!CoordObject
+		|| !ICoordinateService::Execute_IsCoordinateSystemReady(CoordObject)
+		|| !ICoordinateService::Execute_IsGeographicSupported(CoordObject))
+	{
+		Result.Message = TEXT("坐标服务未就绪");
+		return Result;
+	}
+
+	// Cesium consumes WGS84 ellipsoid height while the UI and PX4 anchor altitude are AMSL.
+	// Use the same configured geoid separation for both target and power-on anchor conversion.
+	UDroneNetworkManager* NetworkManager = nullptr;
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		NetworkManager = GI->GetSubsystem<UDroneNetworkManager>();
+	}
+	const double EllipsoidAltMeters = NetworkManager
+		? NetworkManager->ConvertMslToWgs84EllipsoidHeight(AltitudeMslMeters)
+		: AltitudeMslMeters;
+
+	const FVector BaseTarget = ICoordinateService::Execute_GeographicToWorld(
+		CoordObject, Latitude, Longitude, EllipsoidAltMeters);
+	if (!FMath::IsFinite(BaseTarget.X) || !FMath::IsFinite(BaseTarget.Y) || !FMath::IsFinite(BaseTarget.Z))
+	{
+		Result.Message = TEXT("坐标转换失败");
+		return Result;
+	}
+
+	// Dispatch is atomic from the UI's perspective: validate every selected drone before sending
+	// the first command. Never silently skip a locked or unanchored secondary drone because doing so
+	// would change the stable DroneId-to-spiral-slot mapping.
+	if (bForDispatch)
+	{
+		if (!NetworkManager || !NetworkManager->GetWebSocketClient()
+			|| !NetworkManager->GetWebSocketClient()->IsConnected())
+		{
+			Result.Message = TEXT("后端连接未就绪");
+			return Result;
+		}
+
+		for (const int32 DroneId : OrderedIds)
+		{
+			EDroneControlLockReason LockReason = EDroneControlLockReason::None;
+			if (DroneRegistry->IsControlLocked(DroneId, LockReason))
+			{
+				Result.Message = FString::Printf(TEXT("无人机 %d 当前不可控，无法派发"), DroneId);
+				return Result;
+			}
+
+			const ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(
+				DroneRegistry->GetReceiverActor(DroneId));
+			if (!Receiver || !Receiver->bHasGpsAnchor)
+			{
+				Result.Message = FString::Printf(TEXT("无人机 %d 尚未获得GPS锚点，请等待上电信息"), DroneId);
+				return Result;
+			}
+		}
+	}
+
+	constexpr float SpacingCm = 100.0f; // 1 m square spiral
+	int32 SlotIndex = 0;
+	for (int32 i = 0; i < OrderedIds.Num(); ++i)
+	{
+		const int32 Id = OrderedIds[i];
+		FGeographicDispatchSlot Slot;
+		Slot.DroneId = Id;
+		Slot.bIsPrimary = (i == 0);
+		Slot.WorldTarget = BaseTarget + ComputeMultiDispatchOffset(SlotIndex, SpacingCm);
+		OutSlots.Add(Slot);
+		++SlotIndex;
+	}
+
+	Result.bSuccess = true;
+	Result.DispatchedCount = OutSlots.Num();
+	Result.Message = bForDispatch ? TEXT("可以派发") : TEXT("可以预览");
 	return Result;
 }
 
@@ -1455,15 +1540,30 @@ FGeographicDispatchResult ADroneOpsPlayerController::DispatchGeographicTarget(
 		return Result;
 	}
 
-	Result = ExecuteWorldDispatchPlan(Slots);
-	if (!Result.bSuccess)
-	{
-		return Result;
-	}
-
 	UDroneNetworkManager* NetworkManager = GetGameInstance()
 		? GetGameInstance()->GetSubsystem<UDroneNetworkManager>()
 		: nullptr;
+
+	// All prerequisites were checked for the complete selection above. Send exactly one frontend
+	// command per drone; the backend heartbeat owns reliable resend and queue consumption.
+	for (const FGeographicDispatchSlot& Slot : Slots)
+	{
+		const ARealTimeDroneReceiver* Receiver = CastChecked<ARealTimeDroneReceiver>(
+			DroneRegistry->GetReceiverActor(Slot.DroneId));
+		const FVector SendLocation = Slot.WorldTarget - Receiver->AnchorWorldLocation;
+		const EDroneCommandMode CommandMode = DroneRegistry->GetDroneCommandMode(Slot.DroneId);
+		NetworkManager->SendMoveCommand(Slot.DroneId, SendLocation, CommandMode);
+
+		// Local visual: move the shadow drone toward the full 3D world target (honouring Z).
+		if (AActor* DroneActor = ResolveDroneActorById(Slot.DroneId))
+		{
+			if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(DroneActor))
+			{
+				Shadow->MoveToTarget3D(Slot.WorldTarget);
+			}
+		}
+	}
+
 	const double GeoidSeparationMeters = NetworkManager ? NetworkManager->GeoidSeparationMeters : 0.0;
 	const FVector BaseTarget = Slots[0].WorldTarget;
 	UE_LOG(LogTemp, Log,
@@ -1471,6 +1571,7 @@ FGeographicDispatchResult ADroneOpsPlayerController::DispatchGeographicTarget(
 		Longitude, Latitude, AltitudeMslMeters, GeoidSeparationMeters,
 		BaseTarget.X, BaseTarget.Y, BaseTarget.Z, Slots.Num());
 
+	Result.Message = FString::Printf(TEXT("已派发 %d 架无人机"), Slots.Num());
 	return Result;
 }
 
@@ -3557,4 +3658,306 @@ void ADroneOpsPlayerController::NotifyBoxSelectHide()
 	if (!BoxSelectWidgetInstance) return;
 	UFunction* Func = BoxSelectWidgetInstance->FindFunction(FName("HideSelectionRect"));
 	if (Func) BoxSelectWidgetInstance->ProcessEvent(Func, nullptr);
+}
+
+TArray<int32> ADroneOpsPlayerController::GetSelectedDroneIdsForDispatch() const
+{
+	TArray<int32> SelectedIds;
+	if (!DroneRegistry)
+	{
+		return SelectedIds;
+	}
+
+	TSet<int32> SeenIds;
+	for (const int32 DroneId : DroneRegistry->GetMultiSelectedDrones())
+	{
+		if (DroneId > 0 && !SeenIds.Contains(DroneId))
+		{
+			SeenIds.Add(DroneId);
+			SelectedIds.Add(DroneId);
+		}
+	}
+
+	const int32 PrimaryId = DroneRegistry->GetPrimarySelectedDrone();
+	if (SelectedIds.IsEmpty() && PrimaryId > 0)
+	{
+		SelectedIds.Add(PrimaryId);
+	}
+
+	SelectedIds.Sort();
+	return SelectedIds;
+}
+
+bool ADroneOpsPlayerController::ValidateDispatchDrone(int32 DroneId, FString& OutError) const
+{
+	if (!DroneRegistry)
+	{
+		OutError = TEXT("无人机注册表不可用");
+		return false;
+	}
+
+	EDroneControlLockReason LockReason = EDroneControlLockReason::None;
+	if (DroneRegistry->IsControlLocked(DroneId, LockReason))
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 当前不可控，无法派发"), DroneId);
+		return false;
+	}
+	if (!IsValid(ResolveDroneActorById(DroneId)))
+	{
+		OutError = FString::Printf(TEXT("无人机 %d 的影子机不可用"), DroneId);
+		return false;
+	}
+
+	return true;
+}
+
+FGeographicDispatchResult ADroneOpsPlayerController::AddGeographicWaypointsInEditMode(
+	EGeographicCoordinateSystem CoordinateSystem,
+	const TArray<FGeographicCoordinate3D>& Coordinates)
+{
+	FGeographicDispatchResult Result;
+	if (!bPathEditMode)
+	{
+		Result.Message = TEXT("批量坐标仅用于路径编辑");
+		return Result;
+	}
+	if (Coordinates.IsEmpty())
+	{
+		Result.Message = TEXT("请输入至少一组批量坐标");
+		return Result;
+	}
+
+	// Transaction phase 1: convert every tuple before touching any path.
+	TArray<FVector> ConvertedTargets;
+	ConvertedTargets.Reserve(Coordinates.Num());
+	for (int32 CoordinateIndex = 0; CoordinateIndex < Coordinates.Num(); ++CoordinateIndex)
+	{
+		const FGeographicCoordinate3D& Coordinate = Coordinates[CoordinateIndex];
+		FVector WorldTarget = FVector::ZeroVector;
+		FString ConvertError;
+		if (!TryConvertGeographicToWorld(
+			CoordinateSystem,
+			Coordinate.Longitude,
+			Coordinate.Latitude,
+			Coordinate.AltitudeMslMeters,
+			WorldTarget,
+			ConvertError))
+		{
+			Result.Message = FString::Printf(
+				TEXT("第 %d 个坐标转换失败：%s"), CoordinateIndex + 1, *ConvertError);
+			return Result;
+		}
+		ConvertedTargets.Add(WorldTarget);
+	}
+
+	struct FPathWaypointWritePlan
+	{
+		ADronePathActor* PathActor = nullptr;
+		int32 InitialWaypointCount = 0;
+		TArray<FVector> WorldLocations;
+	};
+
+	// Transaction phase 2: validate every active destination and build all relative-formation writes.
+	TArray<FPathWaypointWritePlan> WritePlans;
+	for (int32 PathIndex = 0; PathIndex < EditingPaths.Num(); ++PathIndex)
+	{
+		if (!EditingPathActive.IsValidIndex(PathIndex) || !EditingPathActive[PathIndex])
+		{
+			continue;
+		}
+		if (!EditingPathOrigins.IsValidIndex(PathIndex) || !IsValid(EditingPaths[PathIndex]))
+		{
+			Result.Message = FString::Printf(TEXT("第 %d 条编辑路径不可用，未添加任何航点"), PathIndex + 1);
+			return Result;
+		}
+
+		FPathWaypointWritePlan& Plan = WritePlans.AddDefaulted_GetRef();
+		Plan.PathActor = EditingPaths[PathIndex];
+		Plan.InitialWaypointCount = Plan.PathActor->GetWaypointCount();
+		Plan.WorldLocations.Reserve(ConvertedTargets.Num());
+		for (const FVector& WorldTarget : ConvertedTargets)
+		{
+			// Exactly the same formation rule as AddWaypointToAllEditingPaths:
+			// each path origin receives the target offset from the shared edit reference origin.
+			const FVector Offset = WorldTarget - EditFormationRefOrigin;
+			Plan.WorldLocations.Add(EditingPathOrigins[PathIndex] + Offset);
+		}
+	}
+
+	if (WritePlans.IsEmpty())
+	{
+		Result.Message = TEXT("当前没有可添加航点的编辑路径");
+		return Result;
+	}
+
+	// Transaction phase 3: append in tuple order. Roll back every path on an unexpected write failure.
+	bool bWriteSucceeded = true;
+	for (FPathWaypointWritePlan& Plan : WritePlans)
+	{
+		for (const FVector& WorldLocation : Plan.WorldLocations)
+		{
+			if (Plan.PathActor->AddWaypoint(WorldLocation, EditDefaultSegmentSpeed) == INDEX_NONE)
+			{
+				bWriteSucceeded = false;
+				break;
+			}
+		}
+		if (!bWriteSucceeded)
+		{
+			break;
+		}
+	}
+
+	if (!bWriteSucceeded)
+	{
+		for (FPathWaypointWritePlan& Plan : WritePlans)
+		{
+			while (IsValid(Plan.PathActor) && Plan.PathActor->GetWaypointCount() > Plan.InitialWaypointCount)
+			{
+				Plan.PathActor->RemoveWaypoint(Plan.PathActor->GetWaypointCount() - 1);
+			}
+		}
+		Result.Message = TEXT("批量航点写入失败，已回滚全部路径");
+		return Result;
+	}
+
+	Result.bSuccess = true;
+	Result.DispatchedCount = WritePlans.Num() * ConvertedTargets.Num();
+	Result.Message = FString::Printf(
+		TEXT("已为 %d 条路径各添加 %d 个航点"), WritePlans.Num(), ConvertedTargets.Num());
+	UE_LOG(LogTemp, Log, TEXT("[PathEdit] Batch added %d geographic waypoint(s) to %d active path(s)"),
+		ConvertedTargets.Num(), WritePlans.Num());
+	return Result;
+}
+
+FGeographicDispatchResult ADroneOpsPlayerController::BuildPerDroneGeographicDispatchPlan(
+	EGeographicCoordinateSystem CoordinateSystem,
+	const TArray<FDroneGeographicTarget>& Targets,
+	bool bForDispatch,
+	TArray<FGeographicDispatchSlot>& OutSlots) const
+{
+	FGeographicDispatchResult Result;
+	OutSlots.Reset();
+
+	if (!DroneRegistry)
+	{
+		Result.Message = TEXT("无人机注册表不可用");
+		return Result;
+	}
+
+	const TArray<int32> SelectedIds = GetSelectedDroneIdsForDispatch();
+	if (SelectedIds.IsEmpty())
+	{
+		Result.Message = TEXT("请先选择无人机");
+		return Result;
+	}
+
+	TMap<int32, FGeographicCoordinate3D> TargetByDroneId;
+	for (const FDroneGeographicTarget& Target : Targets)
+	{
+		if (!SelectedIds.Contains(Target.DroneId))
+		{
+			Result.Message = FString::Printf(TEXT("无人机 %d 未被选中，不能加入本次逐机派发"), Target.DroneId);
+			return Result;
+		}
+		if (TargetByDroneId.Contains(Target.DroneId))
+		{
+			Result.Message = FString::Printf(TEXT("无人机 %d 存在重复目标"), Target.DroneId);
+			return Result;
+		}
+		TargetByDroneId.Add(Target.DroneId, Target.Coordinate);
+	}
+
+	for (const int32 DroneId : SelectedIds)
+	{
+		if (!TargetByDroneId.Contains(DroneId))
+		{
+			Result.Message = FString::Printf(TEXT("请填写无人机 %d 的目标坐标"), DroneId);
+			return Result;
+		}
+	}
+	if (TargetByDroneId.Num() != SelectedIds.Num())
+	{
+		Result.Message = TEXT("逐机目标必须与当前选中的无人机一一对应");
+		return Result;
+	}
+
+	int32 PrimaryId = DroneRegistry->GetPrimarySelectedDrone();
+	if (!SelectedIds.Contains(PrimaryId))
+	{
+		PrimaryId = SelectedIds[0];
+	}
+
+	for (const int32 DroneId : SelectedIds)
+	{
+		if (!ValidateDispatchDrone(DroneId, Result.Message))
+		{
+			return Result;
+		}
+
+		const FGeographicCoordinate3D* Coordinate = TargetByDroneId.Find(DroneId);
+		check(Coordinate);
+
+		FVector WorldTarget = FVector::ZeroVector;
+		FString ConvertError;
+		if (!TryConvertGeographicToWorld(
+			CoordinateSystem,
+			Coordinate->Longitude,
+			Coordinate->Latitude,
+			Coordinate->AltitudeMslMeters,
+			WorldTarget,
+			ConvertError))
+		{
+			Result.Message = FString::Printf(TEXT("无人机 %d：%s"), DroneId, *ConvertError);
+			return Result;
+		}
+
+		FGeographicDispatchSlot Slot;
+		Slot.DroneId = DroneId;
+		Slot.WorldTarget = WorldTarget;
+		Slot.bIsPrimary = DroneId == PrimaryId;
+		OutSlots.Add(Slot);
+	}
+
+	Result.bSuccess = true;
+	Result.DispatchedCount = OutSlots.Num();
+	Result.Message = bForDispatch ? TEXT("可以在UE内逐机派发") : TEXT("可以预览逐机目标");
+	return Result;
+}
+
+FGeographicDispatchResult ADroneOpsPlayerController::ValidatePerDroneGeographicTargets(
+	EGeographicCoordinateSystem CoordinateSystem,
+	const TArray<FDroneGeographicTarget>& Targets,
+	bool bForDispatch) const
+{
+	TArray<FGeographicDispatchSlot> Slots;
+	return BuildPerDroneGeographicDispatchPlan(CoordinateSystem, Targets, bForDispatch, Slots);
+}
+
+FGeographicDispatchResult ADroneOpsPlayerController::DispatchPerDroneGeographicTargets(
+	EGeographicCoordinateSystem CoordinateSystem,
+	const TArray<FDroneGeographicTarget>& Targets,
+	bool bPreviewOnly)
+{
+	TArray<FGeographicDispatchSlot> Slots;
+	FGeographicDispatchResult Result = BuildPerDroneGeographicDispatchPlan(
+		CoordinateSystem, Targets, !bPreviewOnly, Slots);
+	if (!Result.bSuccess)
+	{
+		return Result;
+	}
+
+	if (bPreviewOnly)
+	{
+		ActiveGeographicPreviewSlots = Slots;
+		Result.Message = FString::Printf(TEXT("已预览 %d 个逐机目标点"), Slots.Num());
+		return Result;
+	}
+
+	Result = ExecuteWorldDispatchPlan(Slots);
+	if (Result.bSuccess)
+	{
+		UE_LOG(LogTemp, Log, TEXT("DispatchPerDroneGeographicTargets: dispatched %d exact targets"), Slots.Num());
+	}
+	return Result;
 }
