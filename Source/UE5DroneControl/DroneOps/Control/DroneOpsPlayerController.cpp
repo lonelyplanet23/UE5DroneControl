@@ -25,6 +25,8 @@
 #include "Engine/OverlapResult.h"
 #include "UI/UIManagerBlueprintLibrary.h"
 #include "UI/DroneInfoPanelWidget.h"
+#include "UI/DroneVideoWindowManager.h"
+#include "UI/DroneVideoWindowWidget.h"
 #include "UI/GeographicTargetPanelWidget.h"
 #include "UI/LocalPreviewIsolationToggleWidget.h"
 #include "UI/SequenceDispatchPanelWidget.h"
@@ -189,6 +191,13 @@ ADroneOpsPlayerController::ADroneOpsPlayerController()
 	{
 		DroneInfoPanelWidgetClass = DroneInfoPanelClass.Class;
 	}
+
+	static ConstructorHelpers::FClassFinder<UDroneVideoWindowWidget> DroneVideoWindowClass(
+		TEXT("/Game/DroneOps/UI/WBP_DroneVideoWindow"));
+	if (DroneVideoWindowClass.Succeeded())
+	{
+		DroneVideoWindowWidgetClass = DroneVideoWindowClass.Class;
+	}
 }
 
 void ADroneOpsPlayerController::BeginPlay()
@@ -230,7 +239,8 @@ void ADroneOpsPlayerController::BeginPlay()
 		UUserWidget* HUDWidget = CreateWidget(this, DroneOpsHUDWidgetClass);
 		if (HUDWidget)
 		{
-			HUDWidget->AddToViewport();
+			// HUD 放在框选层(ZOrder=10)等临时覆盖层之上，否则那些全屏覆盖层会挡住 HUD 上按钮的点击。
+			HUDWidget->AddToViewport(50);
 			UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: HUD widget created and added to viewport"));
 		}
 		else
@@ -294,6 +304,7 @@ void ADroneOpsPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason
 {
 	StopSelectedDroneVerticalControl(false);
 	CloseCurrentDroneInfoPanel();
+	CloseAllDroneVideoWindows();
 	EndFormationRotatePreview();
 	Super::EndPlay(EndPlayReason);
 }
@@ -315,6 +326,10 @@ void ADroneOpsPlayerController::SetupInputComponent()
 		FInputChord UndoChord(EKeys::Z);
 		UndoChord.bCtrl = true;
 		InputComponent->BindKey(UndoChord, IE_Pressed, this, &ADroneOpsPlayerController::HandleUndoWaypointKey);
+		// Ctrl+A：编辑模式下全选所有可编辑航点
+		FInputChord SelectAllChord(EKeys::A);
+		SelectAllChord.bCtrl = true;
+		InputComponent->BindKey(SelectAllChord, IE_Pressed, this, &ADroneOpsPlayerController::HandleSelectAllWaypointsKey);
 		InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ADroneOpsPlayerController::OnFreeCamToggle);
 		InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ADroneOpsPlayerController::OnPauseToggle);
 		InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &ADroneOpsPlayerController::OnSwitchToTopDown);
@@ -349,10 +364,8 @@ void ADroneOpsPlayerController::Tick(float DeltaTime)
 	// 路径编辑模式下：驱动自由相机 + gizmo 拖拽，跳过常规相机/悬停逻辑
 	if (bPathEditMode)
 	{
-		if (EditSelectedWaypoint != nullptr && !IsValid(EditSelectedWaypoint))
-		{
-			SetEditSelectedWaypoint(nullptr);
-		}
+		// 剔除已失效的选中航点（可能被删除/路径重建），并同步主选中。
+		PruneInvalidSelection();
 
 		if (bEditDraggingWaypoint)
 		{
@@ -974,6 +987,79 @@ void ADroneOpsPlayerController::OnDroneInfoPanelClosed()
 	GetWorldTimerManager().ClearTimer(DroneInfoRefreshTimerHandle);
 	CurrentDroneInfoPanel = nullptr;
 	CurrentDroneInfoDroneId = 0;
+}
+
+UDroneVideoWindowManager* ADroneOpsPlayerController::EnsureVideoWindowManager()
+{
+	if (!VideoWindowManager)
+	{
+		VideoWindowManager = NewObject<UDroneVideoWindowManager>(this);
+		VideoWindowManager->SetWindowContentClass(DroneVideoWindowWidgetClass);
+		// Any close path funnels through the manager's CloseVideoWindow; forward that out to
+		// Blueprint so the video-stream row can reset its checkbox.
+		VideoWindowManager->OnWindowClosed.AddUObject(this, &ADroneOpsPlayerController::HandleVideoWindowClosed);
+	}
+	return VideoWindowManager;
+}
+
+void ADroneOpsPlayerController::HandleVideoWindowClosed(int32 DroneId)
+{
+	OnDroneVideoWindowClosed.Broadcast(DroneId);
+}
+
+bool ADroneOpsPlayerController::OpenDroneVideoWindow(int32 DroneId)
+{
+	if (DroneId <= 0)
+	{
+		return false;
+	}
+	if (!DroneVideoWindowWidgetClass)
+	{
+		UUIManagerBlueprintLibrary::ShowToast(this, TEXT("视频窗口控件未配置"), 3.0f);
+		return false;
+	}
+
+	// 严格本地预演：只读缓存注册表，不触碰 DroneBackend。
+	FString DroneName = FString::Printf(TEXT("Drone-%d"), DroneId);
+	FString VideoUrl;
+	if (DroneRegistry)
+	{
+		FDroneDescriptor Descriptor;
+		if (DroneRegistry->GetDroneDescriptor(DroneId, Descriptor))
+		{
+			if (!Descriptor.Name.IsEmpty()) DroneName = Descriptor.Name;
+			VideoUrl = Descriptor.VideoUrl;
+		}
+	}
+
+	FString Error;
+	const bool bOpen = EnsureVideoWindowManager()->OpenVideoWindow(DroneId, DroneName, VideoUrl, Error);
+	if (!bOpen && !Error.IsEmpty())
+	{
+		UUIManagerBlueprintLibrary::ShowToast(this, Error, 3.0f);
+	}
+	return bOpen;
+}
+
+void ADroneOpsPlayerController::CloseDroneVideoWindow(int32 DroneId)
+{
+	if (VideoWindowManager)
+	{
+		VideoWindowManager->CloseVideoWindow(DroneId);
+	}
+}
+
+void ADroneOpsPlayerController::CloseAllDroneVideoWindows()
+{
+	if (VideoWindowManager)
+	{
+		VideoWindowManager->CloseAllVideoWindows();
+	}
+}
+
+bool ADroneOpsPlayerController::HasDroneVideoWindow(int32 DroneId) const
+{
+	return VideoWindowManager && VideoWindowManager->HasWindow(DroneId);
 }
 
 void ADroneOpsPlayerController::OnFreeCamToggle()
@@ -2722,6 +2808,7 @@ bool ADroneOpsPlayerController::BeginPathEditMode(const TArray<int32>& DroneIds)
 	SetEditSelectedWaypoint(nullptr);
 	EditActiveAxis = EGizmoAxis::None;
 	bEditDraggingWaypoint = false;
+	ClearEditUndoHistory(); // 每次进入编辑为全新的撤销会话
 
 	// 切换到自由相机，让用户能环视/靠近所编辑的路径
 	EnterEditCamera();
@@ -2802,6 +2889,7 @@ void ADroneOpsPlayerController::ClearEditingPaths()
 	EditingPathOrigins.Reset();
 	EditingPathActive.Reset();
 	bPathEditMode = false;
+	ClearEditUndoHistory(); // 路径已销毁，撤销记录随之失效
 
 	// 防御性恢复相机（弹窗取消等路径可能不经过 EndPathEditMode）
 	ExitEditCamera();
@@ -2825,7 +2913,29 @@ void ADroneOpsPlayerController::HandleEditModePressed()
 	ADroneWaypointActor* HitWaypoint = Cast<ADroneWaypointActor>(HitResult.GetActor());
 	if (CanInteractWithEditWaypoint(HitWaypoint))
 	{
-		SetEditSelectedWaypoint(HitWaypoint);
+		const bool bAdditiveModifier =
+			IsInputKeyDown(EKeys::LeftControl) || IsInputKeyDown(EKeys::RightControl) ||
+			IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
+
+		// Shift/Ctrl+点击：切换该航点在多选集合中的存在，不进入拖拽。
+		if (bAdditiveModifier)
+		{
+			ToggleEditWaypointSelection(HitWaypoint);
+			return;
+		}
+
+		// 普通点击：若命中航点已在多选集合内则保留整个集合（可整体拖拽），
+		// 否则收敛为仅选中该航点（标准编辑器手感：点未选中项＝单选它）。
+		if (IsEditWaypointSelected(HitWaypoint))
+		{
+			// 命中已选航点：把它切为主操作航点，Gizmo 只显示在它上面（其余选中仅保留高亮）。
+			EditSelectedWaypoint = HitWaypoint;
+			RefreshSelectionGizmoVisual();
+		}
+		else
+		{
+			SetEditSelectedWaypoint(HitWaypoint);
+		}
 
 		const EGizmoAxis HitAxis = HitWaypoint->GetGizmoAxisFromComponent(HitResult.GetComponent());
 		SetEditActiveAxis(HitAxis);
@@ -2839,7 +2949,10 @@ void ADroneOpsPlayerController::HandleEditModePressed()
 		bEditDraggingWaypoint = true;
 		SetIgnoreLookInput(true);
 		SetIgnoreMoveInput(true);
-		HitWaypoint->BeginDeferredPathUpdate();
+		// 记录拖拽前各选中航点的旧位置（用于 Ctrl+Z 撤销移动），再进入延迟提交。
+		CaptureMoveUndoStart();
+		// 整个多选集合一起进入延迟提交，拖拽结束时统一刷新路径。
+		BeginDeferredUpdateForSelection();
 
 		double MouseX = 0.0;
 		double MouseY = 0.0;
@@ -2847,6 +2960,15 @@ void ADroneOpsPlayerController::HandleEditModePressed()
 		{
 			EditLastMouseScreenPos = FVector2D(MouseX, MouseY);
 		}
+		return;
+	}
+
+	// 命中的是在编路径上的航点（此处即被锁定的起点：CanInteract 已拒绝）——
+	// 起点固定不可选，视为"点空白处"：清选中并结束，不落到下面的无人机增删/加点分支，
+	// 避免点起点标记误触发冻结无人机或追加航点。
+	if (IsValid(HitWaypoint) && IsValid(HitWaypoint->PathActor) && EditingPaths.Contains(HitWaypoint->PathActor))
+	{
+		SetEditSelectedWaypoint(nullptr);
 		return;
 	}
 
@@ -2869,18 +2991,26 @@ void ADroneOpsPlayerController::HandleEditModePressed()
 
 void ADroneOpsPlayerController::HandleEditModeReleased()
 {
+	const bool bWasDragging = bEditDraggingWaypoint;
 	if (bEditDraggingWaypoint)
 	{
-		if (IsValid(EditSelectedWaypoint))
-		{
-			EditSelectedWaypoint->EndDeferredPathUpdate(true);
-		}
+		EndDeferredUpdateForSelection(true);
 	}
 
 	bEditDraggingWaypoint = false;
 	SetIgnoreLookInput(false);
 	SetIgnoreMoveInput(false);
 	SetEditActiveAxis(EGizmoAxis::None);
+
+	// 拖拽结束：若确有位移，压入一条整体移动的撤销记录。
+	if (bWasDragging)
+	{
+		CommitMoveUndoIfMoved();
+	}
+	else
+	{
+		PendingMoveUndoItems.Reset();
+	}
 }
 
 void ADroneOpsPlayerController::UpdateDraggedEditWaypoint()
@@ -2904,7 +3034,8 @@ void ADroneOpsPlayerController::UpdateDraggedEditWaypoint()
 		return;
 	}
 
-	EditSelectedWaypoint->MoveAlongGizmoAxis(EditActiveAxis, DragDelta * EditGizmoDragSensitivity);
+	// 主选中确定拖拽轴/位移量，整个多选集合按相同世界轴位移同步移动。
+	MoveSelectionAlongAxis(EditActiveAxis, DragDelta * EditGizmoDragSensitivity);
 }
 
 float ADroneOpsPlayerController::ResolveEditAxisDragDelta()
@@ -2963,24 +3094,188 @@ float ADroneOpsPlayerController::ResolveEditAxisDragDelta()
 
 void ADroneOpsPlayerController::SetEditSelectedWaypoint(ADroneWaypointActor* NewWaypoint)
 {
-	if (EditSelectedWaypoint == NewWaypoint)
+	// 单选语义：清空整个多选集合，只保留 NewWaypoint（可为空＝全清）。
+	// 既有调用点（点空白、删除后、退出编辑等）无需改动即获得"清空所有选中"的正确行为。
+	const bool bAlreadySingle = (EditSelectedWaypoints.Num() <= 1) && (EditSelectedWaypoint == NewWaypoint);
+	if (bAlreadySingle)
 	{
 		return;
 	}
 
-	if (IsValid(EditSelectedWaypoint))
-	{
-		EditSelectedWaypoint->SetSelected(false);
-		EditSelectedWaypoint->SetActiveGizmoAxis(EGizmoAxis::None);
-	}
+	ClearEditWaypointSelection();
 
 	EditSelectedWaypoint = NewWaypoint;
 	EditActiveAxis = EGizmoAxis::None;
 
 	if (IsValid(EditSelectedWaypoint))
 	{
+		EditSelectedWaypoints.Add(EditSelectedWaypoint);
 		EditSelectedWaypoint->SetSelected(true);
 		EditSelectedWaypoint->SetActiveGizmoAxis(EGizmoAxis::None);
+	}
+
+	RefreshSelectionGizmoVisual();
+}
+
+bool ADroneOpsPlayerController::IsEditWaypointSelected(const ADroneWaypointActor* WaypointActor) const
+{
+	return WaypointActor != nullptr && EditSelectedWaypoints.Contains(WaypointActor);
+}
+
+void ADroneOpsPlayerController::ClearEditWaypointSelection()
+{
+	for (ADroneWaypointActor* Waypoint : EditSelectedWaypoints)
+	{
+		if (IsValid(Waypoint))
+		{
+			Waypoint->SetSelected(false);
+			Waypoint->SetActiveGizmoAxis(EGizmoAxis::None);
+		}
+	}
+	EditSelectedWaypoints.Reset();
+	EditSelectedWaypoint = nullptr;
+	EditActiveAxis = EGizmoAxis::None;
+}
+
+void ADroneOpsPlayerController::ToggleEditWaypointSelection(ADroneWaypointActor* WaypointActor)
+{
+	if (!CanInteractWithEditWaypoint(WaypointActor))
+	{
+		return;
+	}
+
+	EditActiveAxis = EGizmoAxis::None;
+
+	if (EditSelectedWaypoints.Contains(WaypointActor))
+	{
+		WaypointActor->SetSelected(false);
+		WaypointActor->SetActiveGizmoAxis(EGizmoAxis::None);
+		EditSelectedWaypoints.Remove(WaypointActor);
+		// 主选中被移除时，回退到集合末项（若空则置空）。
+		if (EditSelectedWaypoint == WaypointActor)
+		{
+			EditSelectedWaypoint = EditSelectedWaypoints.Num() > 0 ? EditSelectedWaypoints.Last().Get() : nullptr;
+		}
+	}
+	else
+	{
+		WaypointActor->SetSelected(true);
+		EditSelectedWaypoints.Add(WaypointActor);
+		EditSelectedWaypoint = WaypointActor; // 新加入的成为主选中
+	}
+
+	RefreshSelectionGizmoVisual();
+}
+
+void ADroneOpsPlayerController::SelectAllEditWaypoints()
+{
+	ClearEditWaypointSelection();
+
+	for (ADronePathActor* PathActor : EditingPaths)
+	{
+		if (!IsValid(PathActor))
+		{
+			continue;
+		}
+
+		for (const TObjectPtr<ADroneWaypointActor>& Waypoint : PathActor->GetWaypointHandleActors())
+		{
+			ADroneWaypointActor* WaypointActor = Waypoint.Get();
+			// 只纳入可交互航点（在编路径、非运动中）。首航点可随编队整体拖拽，
+			// 但删除时由 RemoveSelectedEditWaypoint 单独保护，口径一致。
+			if (!CanInteractWithEditWaypoint(WaypointActor) || EditSelectedWaypoints.Contains(WaypointActor))
+			{
+				continue;
+			}
+			WaypointActor->SetSelected(true);
+			EditSelectedWaypoints.Add(WaypointActor);
+			EditSelectedWaypoint = WaypointActor;
+		}
+	}
+
+	EditActiveAxis = EGizmoAxis::None;
+	RefreshSelectionGizmoVisual();
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
+			FString::Printf(TEXT("已全选 %d 个航点"), EditSelectedWaypoints.Num()));
+	}
+}
+
+void ADroneOpsPlayerController::HandleSelectAllWaypointsKey()
+{
+	if (bPathEditMode)
+	{
+		SelectAllEditWaypoints();
+	}
+}
+
+void ADroneOpsPlayerController::BeginDeferredUpdateForSelection()
+{
+	for (ADroneWaypointActor* Waypoint : EditSelectedWaypoints)
+	{
+		if (IsValid(Waypoint))
+		{
+			Waypoint->BeginDeferredPathUpdate();
+		}
+	}
+}
+
+void ADroneOpsPlayerController::EndDeferredUpdateForSelection(bool bCommit)
+{
+	for (ADroneWaypointActor* Waypoint : EditSelectedWaypoints)
+	{
+		if (IsValid(Waypoint))
+		{
+			Waypoint->EndDeferredPathUpdate(bCommit);
+		}
+	}
+}
+
+void ADroneOpsPlayerController::MoveSelectionAlongAxis(EGizmoAxis Axis, float DeltaDistance)
+{
+	// MoveAlongGizmoAxis 按世界 X/Y/Z 平移，集合内每个航点位移一致＝整体平移。
+	for (ADroneWaypointActor* Waypoint : EditSelectedWaypoints)
+	{
+		if (CanInteractWithEditWaypoint(Waypoint))
+		{
+			Waypoint->MoveAlongGizmoAxis(Axis, DeltaDistance);
+		}
+	}
+}
+
+void ADroneOpsPlayerController::PruneInvalidSelection()
+{
+	EditSelectedWaypoints.RemoveAll([](const TObjectPtr<ADroneWaypointActor>& Waypoint)
+	{
+		return !IsValid(Waypoint.Get());
+	});
+
+	if (EditSelectedWaypoint != nullptr && !IsValid(EditSelectedWaypoint))
+	{
+		// 主操作航点失效（被删除/路径重建）：换成集合末项作为新主，并把 Gizmo 迁移过去。
+		EditSelectedWaypoint = EditSelectedWaypoints.Num() > 0 ? EditSelectedWaypoints.Last().Get() : nullptr;
+		RefreshSelectionGizmoVisual();
+	}
+}
+
+void ADroneOpsPlayerController::RefreshSelectionGizmoVisual()
+{
+	// 仅主操作航点显示可交互 Gizmo 轴，其余选中航点只保留选中高亮，避免多组 Gizmo 重叠误操作。
+	for (ADroneWaypointActor* Waypoint : EditSelectedWaypoints)
+	{
+		if (!IsValid(Waypoint))
+		{
+			continue;
+		}
+
+		const bool bIsPrimary = (Waypoint == EditSelectedWaypoint);
+		Waypoint->SetGizmoInteractable(bIsPrimary);
+		if (!bIsPrimary)
+		{
+			Waypoint->SetActiveGizmoAxis(EGizmoAxis::None);
+		}
 	}
 }
 
@@ -3001,11 +3296,26 @@ bool ADroneOpsPlayerController::CanInteractWithEditWaypoint(const ADroneWaypoint
 	}
 
 	// 只允许操作本次编辑创建的路径上的航点
-	if (!EditingPaths.Contains(WaypointActor->PathActor))
+	const int32 PathIndex = EditingPaths.IndexOfByKey(WaypointActor->PathActor);
+	if (PathIndex == INDEX_NONE)
 	{
 		return false;
 	}
 
+	// 冻结路径（已取消选中的无人机）的航点：保留可见但不可选中/拖拽，不加入可拖动集合。
+	if (EditingPathActive.IsValidIndex(PathIndex) && !EditingPathActive[PathIndex])
+	{
+		return false;
+	}
+
+	// 起点（每条路径首航点＝影子机当前位置/编队锚点）固定，不可选中/拖拽/删除。
+	// 从统一的交互口径拦截，保证点选、Ctrl+点击、Ctrl+A、拖拽、删除行为一致。
+	if (WaypointActor->WaypointIndex == 0)
+	{
+		return false;
+	}
+
+	// 播放中路径的航点不可拖动。
 	return !WaypointActor->PathActor->IsMovementActive();
 }
 
@@ -3013,6 +3323,7 @@ void ADroneOpsPlayerController::AddWaypointToAllEditingPaths(const FVector& Worl
 {
 	const FVector Offset = WorldLocation - EditFormationRefOrigin;
 
+	TArray<ADronePathActor*> AffectedPaths;
 	for (int32 i = 0; i < EditingPaths.Num(); ++i)
 	{
 		ADronePathActor* PathActor = EditingPaths[i];
@@ -3030,7 +3341,11 @@ void ADroneOpsPlayerController::AddWaypointToAllEditingPaths(const FVector& Worl
 		// 编队平移：每条路径以自身首航点为基准，叠加相同偏移
 		const FVector NewWaypointLocation = EditingPathOrigins[i] + Offset;
 		PathActor->AddWaypoint(NewWaypointLocation, EditDefaultSegmentSpeed);
+		AffectedPaths.Add(PathActor);
 	}
+
+	// 一次地图点击加点作为一步操作记录，供 Ctrl+Z 撤销。
+	PushAddWaypointsUndo(AffectedPaths);
 }
 
 void ADroneOpsPlayerController::RecomputeEditFormationRefOrigin()
@@ -3167,14 +3482,40 @@ void ADroneOpsPlayerController::FreezeDroneInEditMode(int32 DroneId)
 		EditingPathActive[Index] = false;
 	}
 
-	// 若正拖拽/选中的航点属于被冻结的路径，结束交互，避免继续拖拽已冻结路径。
+	// 被冻结路径上的航点必须移出多选集合：结束相关拖拽、清除其高亮/Gizmo，
+	// 保证"冻结路径航点不在可拖动集合、也无残留高亮"（验收 4/5）。
 	if (EditingPaths.IsValidIndex(Index) && IsValid(EditingPaths[Index]))
 	{
-		if (IsValid(EditSelectedWaypoint) && EditSelectedWaypoint->PathActor == EditingPaths[Index])
+		ADronePathActor* FrozenPath = EditingPaths[Index];
+
+		const bool bPrimaryFrozen = IsValid(EditSelectedWaypoint) && EditSelectedWaypoint->PathActor == FrozenPath;
+		if (bPrimaryFrozen)
 		{
+			// 正拖拽的主航点被冻结：先结束拖拽交互，避免继续操作已冻结路径。
 			HandleEditModeReleased();
-			SetEditSelectedWaypoint(nullptr);
 		}
+
+		for (int32 i = EditSelectedWaypoints.Num() - 1; i >= 0; --i)
+		{
+			ADroneWaypointActor* Waypoint = EditSelectedWaypoints[i].Get();
+			if (!IsValid(Waypoint) || Waypoint->PathActor == FrozenPath)
+			{
+				if (IsValid(Waypoint))
+				{
+					Waypoint->SetSelected(false);
+					Waypoint->SetActiveGizmoAxis(EGizmoAxis::None);
+				}
+				EditSelectedWaypoints.RemoveAt(i);
+			}
+		}
+
+		// 主航点若被移出，迁移到剩余集合末项（或置空），并刷新 Gizmo 归属。
+		if (!EditSelectedWaypoints.Contains(EditSelectedWaypoint))
+		{
+			EditSelectedWaypoint = EditSelectedWaypoints.Num() > 0 ? EditSelectedWaypoints.Last().Get() : nullptr;
+			EditActiveAxis = EGizmoAxis::None;
+		}
+		RefreshSelectionGizmoVisual();
 	}
 
 	// 同步选中集合与高亮（移出选中，但不动路径数组）
@@ -3703,6 +4044,8 @@ void ADroneOpsPlayerController::HandleUndoWaypointKey()
 
 void ADroneOpsPlayerController::RemoveSelectedEditWaypoint()
 {
+	// 本期不做批量删除：仅删除主操作航点，保持既有单点删除行为。
+	// 删除后 SetEditSelectedWaypoint(nullptr) 会清空整个多选集合，避免残留高亮/悬空引用。
 	if (!IsValid(EditSelectedWaypoint) || !CanInteractWithEditWaypoint(EditSelectedWaypoint))
 	{
 		return;
@@ -3711,7 +4054,7 @@ void ADroneOpsPlayerController::RemoveSelectedEditWaypoint()
 	ADronePathActor* OwningPath = EditSelectedWaypoint->PathActor;
 	const int32 WpIndex = EditSelectedWaypoint->WaypointIndex;
 
-	// 首航点（影子机起点）禁止删除
+	// 首航点（影子机起点）禁止删除（CanInteract 已拦截 index==0，此处再防御一次）
 	if (WpIndex <= 0)
 	{
 		if (GEngine)
@@ -3719,6 +4062,12 @@ void ADroneOpsPlayerController::RemoveSelectedEditWaypoint()
 			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, TEXT("首航点（起点）不可删除"));
 		}
 		return;
+	}
+
+	// 删除前捕获完整航点数据（本地空间，含速度/等待/扩展），供 Ctrl+Z 还原。
+	if (IsValid(OwningPath) && OwningPath->Waypoints.IsValidIndex(WpIndex))
+	{
+		PushDeleteWaypointUndo(OwningPath, WpIndex, OwningPath->Waypoints[WpIndex]);
 	}
 
 	// 先清选中，避免删除后悬空引用；再从路径移除该航点
@@ -3729,35 +4078,185 @@ void ADroneOpsPlayerController::RemoveSelectedEditWaypoint()
 	}
 }
 
-void ADroneOpsPlayerController::UndoLastEditWaypoint()
+void ADroneOpsPlayerController::PushAddWaypointsUndo(const TArray<ADronePathActor*>& AffectedPaths)
 {
-	// 逐条路径移除各自最后一个航点，但保留首航点；无可撤销时提示
-	bool bRemovedAny = false;
-	for (ADronePathActor* PathActor : EditingPaths)
+	if (AffectedPaths.Num() == 0)
 	{
-		if (!IsValid(PathActor))
+		return;
+	}
+
+	FEditUndoEntry Entry;
+	Entry.Kind = EEditUndoKind::AddWaypoints;
+	for (ADronePathActor* Path : AffectedPaths)
+	{
+		if (!IsValid(Path))
 		{
 			continue;
 		}
+		FEditWaypointUndoItem Item;
+		Item.Path = Path;
+		Item.Index = Path->GetWaypointCount() - 1; // 刚追加的航点在末尾
+		Entry.Items.Add(Item);
+	}
 
-		const int32 Count = PathActor->GetWaypointCount();
-		if (Count > 1)
+	if (Entry.Items.Num() > 0)
+	{
+		EditUndoStack.Add(MoveTemp(Entry));
+	}
+}
+
+void ADroneOpsPlayerController::PushDeleteWaypointUndo(ADronePathActor* Path, int32 Index, const FDroneWaypoint& WaypointData)
+{
+	if (!IsValid(Path))
+	{
+		return;
+	}
+
+	FEditUndoEntry Entry;
+	Entry.Kind = EEditUndoKind::DeleteWaypoint;
+	FEditWaypointUndoItem Item;
+	Item.Path = Path;
+	Item.Index = Index;
+	Item.WaypointData = WaypointData; // 完整本地空间数据，还原时原样插回
+	Entry.Items.Add(Item);
+	EditUndoStack.Add(MoveTemp(Entry));
+}
+
+void ADroneOpsPlayerController::CaptureMoveUndoStart()
+{
+	// 记录本次拖拽将要移动的每个航点（可交互者）的旧世界位置。
+	PendingMoveUndoItems.Reset();
+	for (ADroneWaypointActor* Waypoint : EditSelectedWaypoints)
+	{
+		if (!CanInteractWithEditWaypoint(Waypoint))
 		{
-			// 若选中的航点正好被移除，先清选中
-			if (IsValid(EditSelectedWaypoint)
-				&& EditSelectedWaypoint->PathActor == PathActor
-				&& EditSelectedWaypoint->WaypointIndex == Count - 1)
-			{
-				SetEditSelectedWaypoint(nullptr);
-			}
-			PathActor->RemoveLastWaypoint();
-			bRemovedAny = true;
+			continue;
+		}
+		FEditWaypointUndoItem Item;
+		Item.Path = Waypoint->PathActor;
+		Item.Index = Waypoint->WaypointIndex;
+		Item.OldWorldLocation = Waypoint->GetActorLocation();
+		PendingMoveUndoItems.Add(Item);
+	}
+}
+
+void ADroneOpsPlayerController::CommitMoveUndoIfMoved()
+{
+	if (PendingMoveUndoItems.Num() == 0)
+	{
+		return;
+	}
+
+	// 仅当至少一个航点确实发生位移时才记录一步撤销。
+	bool bAnyMoved = false;
+	for (const FEditWaypointUndoItem& Item : PendingMoveUndoItems)
+	{
+		ADronePathActor* Path = Item.Path.Get();
+		if (!IsValid(Path))
+		{
+			continue;
+		}
+		const FVector NewLoc = Path->GetWaypointWorldLocation(Item.Index);
+		if (!NewLoc.Equals(Item.OldWorldLocation, 0.5f))
+		{
+			bAnyMoved = true;
+			break;
 		}
 	}
 
-	if (!bRemovedAny && GEngine)
+	if (bAnyMoved)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, TEXT("没有可撤销的航点"));
+		FEditUndoEntry Entry;
+		Entry.Kind = EEditUndoKind::MoveWaypoints;
+		Entry.Items = PendingMoveUndoItems; // 保存旧位置，撤销时还原
+		EditUndoStack.Add(MoveTemp(Entry));
+	}
+
+	PendingMoveUndoItems.Reset();
+}
+
+void ADroneOpsPlayerController::ClearEditUndoHistory()
+{
+	EditUndoStack.Reset();
+	PendingMoveUndoItems.Reset();
+}
+
+void ADroneOpsPlayerController::UndoLastEditWaypoint()
+{
+	if (EditUndoStack.Num() == 0)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, TEXT("没有可撤销的操作"));
+		}
+		return;
+	}
+
+	// 撤销会重建航点句柄，先清选中避免悬空引用。
+	SetEditSelectedWaypoint(nullptr);
+
+	FEditUndoEntry Entry = EditUndoStack.Pop(EAllowShrinking::No);
+	const TCHAR* OpDesc = TEXT("操作");
+
+	switch (Entry.Kind)
+	{
+	case EEditUndoKind::AddWaypoints:
+	{
+		// 反向：移除刚追加的航点（每条受影响路径末尾一个）。
+		OpDesc = TEXT("增添");
+		for (const FEditWaypointUndoItem& Item : Entry.Items)
+		{
+			ADronePathActor* Path = Item.Path.Get();
+			if (!IsValid(Path))
+			{
+				continue;
+			}
+			// LIFO 保证这些航点仍在末尾；按记录索引移除，退化时移除最后一个。
+			const int32 LastIndex = Path->GetWaypointCount() - 1;
+			const int32 RemoveIndex = (Item.Index == LastIndex) ? Item.Index : LastIndex;
+			if (RemoveIndex >= 1)
+			{
+				Path->RemoveWaypoint(RemoveIndex);
+			}
+		}
+		break;
+	}
+
+	case EEditUndoKind::DeleteWaypoint:
+	{
+		// 反向：把被删航点原样插回原索引。
+		OpDesc = TEXT("删除");
+		for (const FEditWaypointUndoItem& Item : Entry.Items)
+		{
+			ADronePathActor* Path = Item.Path.Get();
+			if (IsValid(Path))
+			{
+				Path->InsertWaypoint(Item.Index, Item.WaypointData);
+			}
+		}
+		break;
+	}
+
+	case EEditUndoKind::MoveWaypoints:
+	{
+		// 反向：把每个航点移回旧世界位置。
+		OpDesc = TEXT("移动");
+		for (const FEditWaypointUndoItem& Item : Entry.Items)
+		{
+			ADronePathActor* Path = Item.Path.Get();
+			if (IsValid(Path))
+			{
+				Path->UpdateWaypoint(Item.Index, Item.OldWorldLocation);
+			}
+		}
+		break;
+	}
+	}
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
+			FString::Printf(TEXT("已撤销：%s（剩余 %d 步）"), OpDesc, EditUndoStack.Num()));
 	}
 }
 

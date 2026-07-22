@@ -198,6 +198,8 @@ void ADroneWaypointActor::SetSelected(bool bInSelected)
 	if (!bSelected)
 	{
 		ActiveGizmoAxis = EGizmoAxis::None;
+		// 取消选中时复位 Gizmo 交互标志，避免残留"仅高亮"状态影响下次单选。
+		bGizmoInteractable = true;
 	}
 	ApplyVisualState();
 }
@@ -205,6 +207,27 @@ void ADroneWaypointActor::SetSelected(bool bInSelected)
 bool ADroneWaypointActor::IsSelected() const
 {
 	return bSelected;
+}
+
+void ADroneWaypointActor::SetGizmoInteractable(bool bInInteractable)
+{
+	if (bGizmoInteractable == bInInteractable)
+	{
+		ApplyVisualState();
+		return;
+	}
+
+	bGizmoInteractable = bInInteractable;
+	if (!bGizmoInteractable)
+	{
+		ActiveGizmoAxis = EGizmoAxis::None;
+	}
+	ApplyVisualState();
+}
+
+bool ADroneWaypointActor::IsGizmoInteractable() const
+{
+	return bGizmoInteractable;
 }
 
 void ADroneWaypointActor::SetActiveGizmoAxis(EGizmoAxis NewActiveAxis)
@@ -499,7 +522,8 @@ void ADroneWaypointActor::ApplyVisualState()
 
 	ApplyColorToMesh(DisplayColor);
 
-	const bool bShowGizmo = bSelected;
+	// 仅"选中 且 允许交互"（主操作航点）才显示 Gizmo 轴；其余选中航点只保留高亮。
+	const bool bShowGizmo = bSelected && bGizmoInteractable;
 	const float ArrowSize = FMath::Max(GizmoHandleThickness * 20.0f, 0.75f);
 	const float CollisionRadius = FMath::Max(GizmoHandleLength * GizmoHandleThickness, 8.0f);
 	const float CollisionHalfLength = FMath::Max(GizmoHandleLength * 0.5f, 12.0f);

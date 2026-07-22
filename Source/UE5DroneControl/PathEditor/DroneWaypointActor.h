@@ -135,6 +135,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Drone Path|Waypoint")
 	bool IsSelected() const;
 
+	/**
+	 * 是否允许显示可交互 Gizmo 轴（独立于选中高亮）。
+	 * 多选时仅"主操作航点"设为 true，其余选中航点为 false：只保留高亮、隐藏 Gizmo，
+	 * 避免多组 Gizmo 轴重叠造成误拖拽。默认 true，保证单选行为不变。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Drone Path|Waypoint")
+	void SetGizmoInteractable(bool bInInteractable);
+
+	UFUNCTION(BlueprintPure, Category = "Drone Path|Waypoint")
+	bool IsGizmoInteractable() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Drone Path|Waypoint")
 	void SetActiveGizmoAxis(EGizmoAxis NewActiveAxis);
 
@@ -197,6 +208,8 @@ private:
 	bool bConflictHighlighted = false;
 	bool bConflictBlinkVisible = false;
 	bool bSelected = false;
+	// 多选时仅主操作航点为 true；false 时即使 bSelected 也不显示可交互 Gizmo。
+	bool bGizmoInteractable = true;
 	EGizmoAxis ActiveGizmoAxis = EGizmoAxis::None;
 	float DisplaySegmentSpeed = 0.0f;
 	FVector LastObservedWorldLocation = FVector::ZeroVector;

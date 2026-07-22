@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Drone Video Test</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #101418; overflow: hidden; font-family: sans-serif; }
+    /* 即使视频编解码不支持，这个动画背景也一定会动，证明网页被正确加载渲染 */
+    .bg {
+      position: absolute; inset: 0;
+      background: linear-gradient(120deg, #1e3a8a, #9333ea, #059669, #1e3a8a);
+      background-size: 400% 400%;
+      animation: move 6s ease infinite;
+    }
+    @keyframes move { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+    .label { position: absolute; top: 12px; left: 16px; color: #fff; font-size: 22px; text-shadow: 0 1px 3px #000; }
+    .clock { position: absolute; bottom: 12px; right: 16px; color: #fff; font-size: 40px; font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px #000; }
+    video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  </style>
+</head>
+<body>
+  <div class="bg"></div>
+  <!-- 把 test.webm 放在同目录即可播放本地视频；没有则只显示动画背景+时钟 -->
+  <video autoplay muted loop playsinline>
+    <source src="test.webm" type="video/webm" />
+    <source src="test.mp4" type="video/mp4" />
+  </video>
+  <div class="label">视频流测试页 · Drone Video Test</div>
+  <div class="clock" id="clock">--:--:--</div>
+  <script>
+    function tick() {
+      var d = new Date();
+      document.getElementById('clock').textContent =
+        String(d.getHours()).padStart(2,'0') + ':' +
+        String(d.getMinutes()).padStart(2,'0') + ':' +
+        String(d.getSeconds()).padStart(2,'0');
+    }
+    setInterval(tick, 250); tick();
+  </script>
+</body>
+</html>
