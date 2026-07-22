@@ -108,5 +108,9 @@ private:
 
     /** 处理 POST /api/drones/refresh 响应 */
     void HandleRefreshResponse(bool bSuccess, const TArray<int32>& RefreshedIds);
+
+    /** 隔离状态变化回调：Toggle 切换时同步禁用/启用 Refresh 按钮 */
+    UFUNCTION()
+    void OnIsolationStateChanged(bool bIsolated);
 };
 

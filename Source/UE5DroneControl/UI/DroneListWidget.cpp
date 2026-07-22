@@ -241,18 +241,25 @@ void UDroneListWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
-    // ---- 读取严格本地预演模式 ----
+    // ---- 读取严格本地预演模式，并订阅后续变化 ----
     if (UGameInstance* GI = GetGameInstance())
     {
         if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
         {
-            bStrictLocalPreview = NetMgr->bStrictLocalPreview;
+            // 修复：读运行时隔离状态，而非 config 字段 bStrictLocalPreview
+            bStrictLocalPreview = NetMgr->IsStrictLocalPreviewIsolation();
+            // 修复：订阅委托，Toggle 切换后实时同步按钮状态
+            NetMgr->OnIsolationStateChanged.AddDynamic(this, &UDroneListWidget::OnIsolationStateChanged);
         }
     }
 
     // ---- 绑定 Refresh 按钮 ----
     if (RefreshButton)
     {
+        // 始终绑定点击回调，由回调内部的 bStrictLocalPreview 守门；
+        // 否则若 Widget 构造时已处于隔离模式，Toggle 关闭后按钮永远无响应。
+        RefreshButton->OnClicked.AddDynamic(this, &UDroneListWidget::OnRefreshButtonClicked);
+
         if (bStrictLocalPreview)
         {
             RefreshButton->SetIsEnabled(false);
@@ -260,10 +267,6 @@ void UDroneListWidget::NativeConstruct()
             {
                 RefreshStatusText->SetText(FText::FromString(TEXT("纯本地预演模式：已禁止请求后端 refresh")));
             }
-        }
-        else
-        {
-            RefreshButton->OnClicked.AddDynamic(this, &UDroneListWidget::OnRefreshButtonClicked);
         }
     }
 
@@ -282,12 +285,40 @@ void UDroneListWidget::NativeDestruct()
     {
         GetWorld()->GetTimerManager().ClearTimer(RefreshTimerHandle);
     }
+    // 取消隔离状态委托订阅，避免 Widget 销毁后回调野指针
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+        {
+            NetMgr->OnIsolationStateChanged.RemoveDynamic(this, &UDroneListWidget::OnIsolationStateChanged);
+        }
+    }
     Super::NativeDestruct();
 }
 
 void UDroneListWidget::OnRefreshTimer()
 {
     RefreshFromRegistry();
+}
+
+void UDroneListWidget::OnIsolationStateChanged(bool bIsolated)
+{
+    bStrictLocalPreview = bIsolated;
+    if (RefreshButton)
+    {
+        RefreshButton->SetIsEnabled(!bIsolated);
+    }
+    if (RefreshStatusText)
+    {
+        if (bIsolated)
+        {
+            RefreshStatusText->SetText(FText::FromString(TEXT("纯本地预演模式：已禁止请求后端 refresh")));
+        }
+        else
+        {
+            RefreshStatusText->SetText(FText::GetEmpty());
+        }
+    }
 }
 
 void UDroneListWidget::OnRefreshButtonClicked()
