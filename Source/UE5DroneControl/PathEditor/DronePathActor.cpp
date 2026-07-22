@@ -115,6 +115,14 @@ int32 ADronePathActor::AddWaypoint(const FVector& Location, float SegmentSpeed)
 	return NewIndex;
 }
 
+bool ADronePathActor::InsertWaypoint(int32 Index, const FDroneWaypoint& WaypointData)
+{
+	const int32 ClampedIndex = FMath::Clamp(Index, 0, Waypoints.Num());
+	Waypoints.Insert(WaypointData, ClampedIndex);
+	SyncPathState(true); // 重排索引 + 重建句柄/样条
+	return true;
+}
+
 bool ADronePathActor::RemoveWaypoint(int32 Index)
 {
 	if (!IsValidWaypointIndex(Index))
@@ -847,6 +855,15 @@ void ADronePathActor::SyncWaypointHandles(bool bForceRebuild)
 		if (ADroneWaypointActor* HandleActor = WaypointHandleActors[Index])
 		{
 			HandleActor->SetPathBinding(this, Index);
+
+			// 正在拖拽（延迟提交）中的航点，其世界位置由拖拽实时驱动，不能被路径数据回同步覆盖。
+			// 否则多选整体拖拽松手时，先提交的航点触发的同步会把尚未提交的其余航点拉回原位，
+			// 表现为"只有起点动、其余不动"。这些航点会在各自 EndDeferredPathUpdate 时正确提交。
+			if (HandleActor->IsDeferringPathUpdate())
+			{
+				continue;
+			}
+
 			HandleActor->SyncFromWaypointData(Waypoints[Index], LocalToWorldLocation(Waypoints[Index].Location));
 			HandleActor->SetConflictHighlighted(ConflictedWaypointIndices.Contains(Index));
 		}

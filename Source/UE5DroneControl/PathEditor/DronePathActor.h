@@ -149,6 +149,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Drone Path")
 	bool RemoveWaypoint(int32 Index);
 
+	/**
+	 * 在指定索引处插入一个完整航点（Location 为本地空间，与序列化一致）。
+	 * 供编辑模式撤销"删除航点"操作还原用；Index 会被夹到 [0, Waypoints.Num()]。
+	 */
+	bool InsertWaypoint(int32 Index, const FDroneWaypoint& WaypointData);
+
 	UFUNCTION(BlueprintCallable, Category = "Drone Path")
 	bool UpdateWaypoint(int32 Index, const FVector& NewLocation);
 
@@ -182,6 +188,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Drone Path")
 	FVector GetWaypointWorldLocation(int32 Index) const;
+
+	/** 只读访问路径上的航点句柄 Actor（供编辑模式多选/全选枚举）。 */
+	const TArray<TObjectPtr<ADroneWaypointActor>>& GetWaypointHandleActors() const { return WaypointHandleActors; }
 
 	UFUNCTION(BlueprintCallable, Category = "Drone Path|Visualization")
 	void ClearConflictVisualization();

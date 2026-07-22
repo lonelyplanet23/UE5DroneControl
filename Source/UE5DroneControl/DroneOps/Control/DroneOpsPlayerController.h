@@ -21,11 +21,20 @@ class ADroneWaypointActor;
 class AMultiDroneCharacter;
 class UUserWidget;
 class UDroneInfoPanelWidget;
+class UDroneVideoWindowWidget;
+class UDroneVideoWindowManager;
 
 /**
  * Delegate for when drone info panel is requested by middle click.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnOpenDroneInfoPanelRequested, int32, DroneId);
+
+/**
+ * Broadcast when a drone's independent video window is closed via ANY path (native title-bar X,
+ * the in-window UMG close button, an uncheck, or level teardown). The video-stream row binds this
+ * to reset its checkbox so re-opening never needs a double click.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDroneVideoWindowClosed, int32, DroneId);
 
 /**
  * Player controller for drone operations
@@ -273,6 +282,40 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
 	TSubclassOf<UDroneInfoPanelWidget> DroneInfoPanelWidgetClass;
 
+	/** Content widget class for the independent (SWindow) video windows. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "HUD")
+	TSubclassOf<UDroneVideoWindowWidget> DroneVideoWindowWidgetClass;
+
+	// ---- 视频流独立窗口入口（供预演关卡视频流选择 UI 调用）----
+
+	/**
+	 * 任意方式关闭某机的独立视频窗口时广播（原生 X / 窗内关闭按钮 / 取消勾选 / 离开关卡）。
+	 * 视频流行控件绑定它，把复选框弹回未勾，避免再次打开需点两次。
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "DroneOps|Video")
+	FOnDroneVideoWindowClosed OnDroneVideoWindowClosed;
+
+	/**
+	 * 勾选某无人机时调用：为其打开一个独立顶层视频窗口。
+	 * 同机已开则只置前；video_url 为空 / 超过 4 路上限时拒绝并弹 Toast 提示。
+	 * 只读取进入隔离前缓存的无人机注册表，不访问 DroneBackend。
+	 * @return 调用后该机是否有窗口存在（新建或既有置前）。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Video")
+	bool OpenDroneVideoWindow(int32 DroneId);
+
+	/** 取消勾选 / 关闭时调用：关闭该机的独立视频窗口（汇入统一清理路径）。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Video")
+	void CloseDroneVideoWindow(int32 DroneId);
+
+	/** 全局停止：关闭所有独立视频窗口。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Video")
+	void CloseAllDroneVideoWindows();
+
+	/** 该机当前是否已有独立视频窗口。 */
+	UFUNCTION(BlueprintCallable, Category = "DroneOps|Video")
+	bool HasDroneVideoWindow(int32 DroneId) const;
+
 	/** 主菜单关卡名称，B 键跳转目标 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Navigation")
 	FName MainMenuLevelName = FName("MainMenu");
@@ -351,6 +394,60 @@ private:
 	void SetEditActiveAxis(EGizmoAxis NewAxis);
 	bool CanInteractWithEditWaypoint(const ADroneWaypointActor* WaypointActor) const;
 	void AddWaypointToAllEditingPaths(const FVector& WorldLocation);
+
+	// ---- 编辑模式航点多选 ----
+	// EditSelectedWaypoint 为"主操作航点"（唯一显示可交互 Gizmo 轴、拖拽锚点），恒在 EditSelectedWaypoints 内。
+	// SetEditSelectedWaypoint 保持单选语义（清空整个集合再设置一个），兼容既有调用点。
+	bool IsEditWaypointSelected(const ADroneWaypointActor* WaypointActor) const;
+	// Shift/Ctrl+点击：把航点加入/移出多选集合（不进入拖拽）。
+	void ToggleEditWaypointSelection(ADroneWaypointActor* WaypointActor);
+	// 清空多选集合（含视觉状态），并置空主选中。
+	void ClearEditWaypointSelection();
+	// Ctrl+A：选中所有在编路径中可交互的航点（首航点锚点除外）。
+	void SelectAllEditWaypoints();
+	void HandleSelectAllWaypointsKey();
+	// 仅主操作航点显示可交互 Gizmo，其余选中航点只保留高亮，避免多组 Gizmo 重叠误操作。
+	void RefreshSelectionGizmoVisual();
+	// 拖拽时对整个多选集合生效的批量操作（进入/提交 deferred update、按同一位移增量整体平移）。
+	void BeginDeferredUpdateForSelection();
+	void EndDeferredUpdateForSelection(bool bCommit);
+	void MoveSelectionAlongAxis(EGizmoAxis Axis, float DeltaDistance);
+	void PruneInvalidSelection();
+
+	// ---- 编辑模式操作历史（撤销：增添 / 删除 / 移动 路径点）----
+	enum class EEditUndoKind : uint8
+	{
+		AddWaypoints,   // 一次地图点击给所有活跃路径各追加一个航点
+		DeleteWaypoint, // 删除单个航点
+		MoveWaypoints,  // 一次拖拽整体移动一组航点
+	};
+
+	// 单个航点的还原信息。用弱引用记录所属路径，避免路径销毁后悬空。
+	struct FEditWaypointUndoItem
+	{
+		TWeakObjectPtr<ADronePathActor> Path;
+		int32 Index = INDEX_NONE;
+		FVector OldWorldLocation = FVector::ZeroVector; // 移动撤销：还原到的旧世界坐标
+		FDroneWaypoint WaypointData;                    // 删除撤销：完整航点数据（本地空间）
+	};
+
+	struct FEditUndoEntry
+	{
+		EEditUndoKind Kind = EEditUndoKind::AddWaypoints;
+		TArray<FEditWaypointUndoItem> Items;
+	};
+
+	TArray<FEditUndoEntry> EditUndoStack;
+
+	// 拖拽开始时记录的各航点旧位置，松手时若确有位移则压入一条 MoveWaypoints 记录。
+	TArray<FEditWaypointUndoItem> PendingMoveUndoItems;
+
+	// 记录各类操作（在操作实际发生处调用）。
+	void PushAddWaypointsUndo(const TArray<ADronePathActor*>& AffectedPaths);
+	void PushDeleteWaypointUndo(ADronePathActor* Path, int32 Index, const FDroneWaypoint& WaypointData);
+	void CaptureMoveUndoStart();
+	void CommitMoveUndoIfMoved();
+	void ClearEditUndoHistory();
 
 	// 编辑模式下点击无人机：活跃则冻结（保留路径），已冻结/未加入则激活（复活或新建路径）。
 	// 返回 true 表示本次点击已作为增删处理（不应再当作加航点）。
@@ -442,6 +539,10 @@ private:
 	UPROPERTY()
 	TObjectPtr<ADroneWaypointActor> EditSelectedWaypoint = nullptr;
 
+	// 多选集合：编辑模式下当前选中的全部航点。EditSelectedWaypoint 为其中的主选中（末项）。
+	UPROPERTY()
+	TArray<TObjectPtr<ADroneWaypointActor>> EditSelectedWaypoints;
+
 	EGizmoAxis EditActiveAxis = EGizmoAxis::None;
 	bool bEditDraggingWaypoint = false;
 	FVector2D EditLastMouseScreenPos = FVector2D::ZeroVector;
@@ -483,6 +584,16 @@ private:
 	// FR-04: Free camera mouse sensitivity
 	UPROPERTY(EditAnywhere, Category = "FreeCam")
 	float FreeCamMouseSensitivity = 0.05f;
+
+	/** Owns the independent (SWindow) drone video windows. Strong-held so it and its widgets survive GC. */
+	UPROPERTY()
+	TObjectPtr<UDroneVideoWindowManager> VideoWindowManager = nullptr;
+
+	/** Lazily create (and configure) the video window manager. */
+	UDroneVideoWindowManager* EnsureVideoWindowManager();
+
+	/** Bridges the manager's native close event to the BlueprintAssignable OnDroneVideoWindowClosed. */
+	void HandleVideoWindowClosed(int32 DroneId);
 
 	/** Current open info panel, if any */
 	UPROPERTY()
