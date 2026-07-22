@@ -110,6 +110,12 @@ public:
     bool IsCollapsed() const { return bIsCollapsed; }
     void SetCollapsed(bool bCollapsed) { bIsCollapsed = bCollapsed; ApplyCollapseState(); }
 
+    /**
+     * 同步无人机的顶部标签颜色到面板名称颜色显示。
+     * 由 DroneListWidget 在收到 OnDroneLabelSettingsChanged 广播后调用。
+     */
+    void ApplyLabelSettings(const FDroneLabelSettings& Settings);
+
 protected:
     virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override;
@@ -136,6 +142,13 @@ private:
     UPROPERTY(meta = (BindWidgetOptional))
     class UTextBlock* CollapseButtonText = nullptr;
 
+    /**
+     * 点击"名称"区域弹出标签编辑弹窗。
+     * BuildRuntimeCard 创建为透明按钮覆盖在 DroneNameText 上方。
+     */
+    UPROPERTY(meta = (BindWidgetOptional))
+    class UButton* NameLabelButton = nullptr;
+
     /** 可折叠区域容器（模式行 → TargetIndexText，不含选中按钮） */
     UPROPERTY(meta = (BindWidgetOptional))
     UVerticalBox* CollapsibleContent = nullptr;
@@ -152,6 +165,15 @@ private:
 
     UFUNCTION()
     void OnCollapseButtonClicked();
+
+    /** 点击名称按钮 → 弹出标签编辑弹窗 */
+    UFUNCTION()
+    void OnNameLabelButtonClicked();
+
+    /** 标签编辑弹窗"确认"回调 */
+    UFUNCTION()
+    void OnLabelEditConfirmed(int32 InDroneId, const FString& NewName,
+        FLinearColor NewColor, int32 NewFontSize);
 
     void UpdateModeText();
     void ApplyCollapseState();

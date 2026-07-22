@@ -14,6 +14,7 @@
 class UDroneTelemetryComponent;
 class UDroneSelectionComponent;
 class UDroneGroundProjectionComponent;
+class UWidgetComponent;
 
 /**
  * YAML format telemetry data structure
@@ -95,6 +96,14 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDroneGroundProjectionComponent> GroundProjectionComponent;
 
+	/** Screen-space name label shown above this drone.  Updated via Registry label delegate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> NameLabelWidgetComponent;
+
+	/** Vertical offset (cm) of the name label above the actor origin. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Label UI")
+	FVector NameLabelRelativeLocation = FVector(0.0f, 0.0f, 220.0f);
+
 	// ---- IDroneSelectableInterface ----
 	virtual int32 GetDroneId_Implementation() const override { return DroneId; }
 	virtual void OnPrimarySelected_Implementation() override;
@@ -175,6 +184,10 @@ private:
 
 	// Called when a power_on or reconnect event arrives from the backend
 	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
+
+	/** Refresh the name-label widget when Registry broadcasts a settings change. */
+	UFUNCTION()
+	void OnLabelSettingsChanged(int32 InDroneId, const FDroneLabelSettings& Settings);
 
 	FVector InitialLocation = FVector::ZeroVector;
 	FVector TargetLocation;

@@ -193,8 +193,13 @@ void UDroneListWidget::RefreshFromRegistry()
             {
                 // SetDroneFullState 覆盖：连接状态、GPS、海拔、电量、任务状态、航点、更新时间
                 Item->SetDroneFullState(Desc.DroneId, Snap);
-                // 名称单独设置（FDroneTelemetrySnapshot 不含 name 字段）
-                if (Item->DroneNameText)
+                // 名称 & 颜色：优先读用户已保存的标签设置，避免刷新后颜色恢复默认
+                FDroneLabelSettings LabelSettings;
+                if (Registry->GetDroneLabelSettings(Desc.DroneId, LabelSettings))
+                {
+                    Item->ApplyLabelSettings(LabelSettings);
+                }
+                else if (Item->DroneNameText)
                 {
                     Item->DroneNameText->SetText(FText::FromString(Desc.Name));
                 }
@@ -274,6 +279,15 @@ void UDroneListWidget::NativeConstruct()
     {
         GetWorld()->GetTimerManager().SetTimer(RefreshTimerHandle, this, &UDroneListWidget::OnRefreshTimer, RefreshInterval, true);
     }
+
+    // 订阅标签设置变更，实时同步面板中的名称和颜色（避免全表重建）
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+        {
+            Registry->OnDroneLabelSettingsChanged.AddDynamic(this, &UDroneListWidget::OnLabelSettingsChanged);
+        }
+    }
 }
 
 void UDroneListWidget::NativeDestruct()
@@ -281,6 +295,13 @@ void UDroneListWidget::NativeDestruct()
     if (GetWorld())
     {
         GetWorld()->GetTimerManager().ClearTimer(RefreshTimerHandle);
+    }
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UDroneRegistrySubsystem* Registry = GI->GetSubsystem<UDroneRegistrySubsystem>())
+        {
+            Registry->OnDroneLabelSettingsChanged.RemoveAll(this);
+        }
     }
     Super::NativeDestruct();
 }
@@ -360,4 +381,24 @@ void UDroneListWidget::HandleRefreshResponse(bool bSuccess, const TArray<int32>&
 
     // 立即刷新一次列表，展示注册表最新状态（不会将 refreshed_drone_ids 直接置为 online）
     RefreshFromRegistry();
+}
+
+void UDroneListWidget::OnLabelSettingsChanged(int32 InDroneId, const FDroneLabelSettings& Settings)
+{
+    // 找到对应条目，直接刷新其名称和颜色，避免重建整个列表
+    if (!DroneScrollBox)
+    {
+        return;
+    }
+    for (UWidget* Child : DroneScrollBox->GetAllChildren())
+    {
+        if (UDroneListItemWidget* Item = Cast<UDroneListItemWidget>(Child))
+        {
+            if (Item->GetDroneId() == InDroneId)
+            {
+                Item->ApplyLabelSettings(Settings);
+                break;
+            }
+        }
+    }
 }

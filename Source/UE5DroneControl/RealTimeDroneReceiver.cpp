@@ -6,7 +6,9 @@
 #include "DroneOps/Core/DroneOpsTypes.h"
 #include "DroneOps/Core/ICoordinateService.h"
 #include "DroneOps/Network/DroneNetworkManager.h"
+#include "UI/DroneNameLabelWidget.h"
 #include "Engine/GameInstance.h"
+#include "Components/WidgetComponent.h"
 
 // --- 引入必要的底层头文件 ---
 #include "SocketSubsystem.h"
@@ -14,7 +16,7 @@
 #include "Common/UdpSocketBuilder.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Components/CapsuleComponent.h" 
+#include "Components/CapsuleComponent.h"
 
 ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 {
@@ -31,6 +33,17 @@ ARealTimeDroneReceiver::ARealTimeDroneReceiver()
 	TelemetryComponent = CreateDefaultSubobject<UDroneTelemetryComponent>(TEXT("TelemetryComponent"));
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	GroundProjectionComponent = CreateDefaultSubobject<UDroneGroundProjectionComponent>(TEXT("GroundProjection"));
+
+	// Screen-space name label above the drone
+	NameLabelWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameLabelWidgetComponent"));
+	if (NameLabelWidgetComponent)
+	{
+		NameLabelWidgetComponent->SetupAttachment(RootComponent);
+		NameLabelWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 220.0f));
+		NameLabelWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+		NameLabelWidgetComponent->SetDrawSize(FVector2D(200.0f, 40.0f));
+		NameLabelWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 
 	// === 【关键】禁用重力和物理模拟 ===
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
@@ -169,6 +182,33 @@ void ARealTimeDroneReceiver::BeginPlay()
 		}
 		TelemetryComponent->PushSnapshot(InitSnap);
 	}
+
+	// ---- Name-label widget component ----
+	if (NameLabelWidgetComponent)
+	{
+		NameLabelWidgetComponent->SetRelativeLocation(NameLabelRelativeLocation);
+
+		// UWidgetComponent (Screen space) 自行管理渲染目标，不依赖 widget 创建者身份。
+		// 用 GetWorld() 创建可避免 CreateWidget 对 ULocalPlayer* 的编译期类型检查失败。
+		UDroneNameLabelWidget* LabelWidget = GetWorld()
+			? CreateWidget<UDroneNameLabelWidget>(GetWorld(), UDroneNameLabelWidget::StaticClass())
+			: nullptr;
+		if (LabelWidget)
+		{
+			NameLabelWidgetComponent->SetWidget(LabelWidget);
+
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UDroneRegistrySubsystem* Reg = GI->GetSubsystem<UDroneRegistrySubsystem>())
+				{
+					FDroneLabelSettings InitialSettings;
+					Reg->GetDroneLabelSettings(DroneId, InitialSettings);
+					LabelWidget->ApplyLabelSettings(InitialSettings.DisplayName, InitialSettings.LabelColor, InitialSettings.FontSize);
+					Reg->OnDroneLabelSettingsChanged.AddDynamic(this, &ARealTimeDroneReceiver::OnLabelSettingsChanged);
+				}
+			}
+		}
+	}
 }
 
 void ARealTimeDroneReceiver::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -181,6 +221,10 @@ void ARealTimeDroneReceiver::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 		{
 			NetMgr->OnDroneWsEvent.RemoveAll(this);
+		}
+		if (UDroneRegistrySubsystem* Reg = GI->GetSubsystem<UDroneRegistrySubsystem>())
+		{
+			Reg->OnDroneLabelSettingsChanged.RemoveAll(this);
 		}
 	}
 
@@ -996,4 +1040,20 @@ void ARealTimeDroneReceiver::OnDroneWsEvent(int32 InDroneId, const FString& Even
 
 	UE_LOG(LogTemp, Log, TEXT("RealTimeDroneReceiver [%s]: '%s' event — GPS anchor (%.6f, %.6f, AMSL %.1fm, ellipsoid %.1fm) → UE world %s"),
 		*DroneName, *Event, GpsLat, GpsLon, GpsAlt, EllipsoidAltitudeMeters, *AnchorWorldLocation.ToString());
+}
+
+void ARealTimeDroneReceiver::OnLabelSettingsChanged(int32 InDroneId, const FDroneLabelSettings& Settings)
+{
+	if (InDroneId != DroneId)
+	{
+		return;
+	}
+	if (!NameLabelWidgetComponent)
+	{
+		return;
+	}
+	if (UDroneNameLabelWidget* LabelWidget = Cast<UDroneNameLabelWidget>(NameLabelWidgetComponent->GetWidget()))
+	{
+		LabelWidget->ApplyLabelSettings(Settings.DisplayName, Settings.LabelColor, Settings.FontSize);
+	}
 }

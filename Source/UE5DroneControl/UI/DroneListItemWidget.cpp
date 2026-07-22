@@ -2,6 +2,7 @@
 
 #include "DroneListItemWidget.h"
 #include "DroneOps/Core/DroneRegistrySubsystem.h"
+#include "UI/DroneNameEditPopupWidget.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
@@ -94,6 +95,10 @@ void UDroneListItemWidget::NativeConstruct()
     if (CollapseButton)
     {
         CollapseButton->OnClicked.AddDynamic(this, &UDroneListItemWidget::OnCollapseButtonClicked);
+    }
+    if (NameLabelButton)
+    {
+        NameLabelButton->OnClicked.AddDynamic(this, &UDroneListItemWidget::OnNameLabelButtonClicked);
     }
 }
 
@@ -198,8 +203,23 @@ void UDroneListItemWidget::BuildRuntimeCard()
 
         // ---- Header 行：名称 + 连接状态 + 折叠按钮 ----
         UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HeaderRow"));
+
+        // 名称按钮：透明底色，点击弹出标签编辑弹窗
+        NameLabelButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("NameLabelButton"));
+        {
+            FButtonStyle Style = NameLabelButton->GetStyle();
+            Style.Normal.DrawAs    = ESlateBrushDrawType::NoDrawType;
+            Style.Hovered.DrawAs   = ESlateBrushDrawType::NoDrawType;
+            Style.Pressed.DrawAs   = ESlateBrushDrawType::NoDrawType;
+            NameLabelButton->SetStyle(Style);
+        }
         DroneNameText = MakeText(TEXT("DroneNameText"), TEXT("无人机"), FLinearColor(0.96f, 0.98f, 1.0f, 1.0f));
-        if (UHorizontalBoxSlot* ChildSlot = Header->AddChildToHorizontalBox(DroneNameText)) ChildSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        NameLabelButton->AddChild(DroneNameText);
+        if (UHorizontalBoxSlot* NameSlot = Header->AddChildToHorizontalBox(NameLabelButton))
+        {
+            NameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        }
+
         ConnectionStatusText = MakeText(TEXT("ConnectionStatusText"), TEXT("离线"), FLinearColor(0.95f, 0.38f, 0.34f, 1.0f));
         Header->AddChildToHorizontalBox(ConnectionStatusText);
         StatusText = ConnectionStatusText;
@@ -641,5 +661,72 @@ void UDroneListItemWidget::SetDroneFullState(int32 InDroneId, const FDroneTeleme
             TimeStr = FString::Printf(TEXT("%.0fm 前"), Delta / 60.0);
         }
         UpdateTimeText->SetText(FText::FromString(TimeStr));
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  标签编辑弹窗 — 点击名称按钮
+// ---------------------------------------------------------------------------
+
+void UDroneListItemWidget::OnNameLabelButtonClicked()
+{
+    if (DroneId <= 0)
+    {
+        return;
+    }
+
+    UGameInstance* GI = GetGameInstance();
+    UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+    if (!Registry)
+    {
+        return;
+    }
+
+    // 读取当前标签设置
+    FDroneLabelSettings CurrentSettings;
+    Registry->GetDroneLabelSettings(DroneId, CurrentSettings);
+
+    // 在 viewport 上创建编辑弹窗（ZOrder=100 使其浮在面板上方）
+    UDroneNameEditPopupWidget* Popup = CreateWidget<UDroneNameEditPopupWidget>(
+        GetWorld(), UDroneNameEditPopupWidget::StaticClass());
+    if (!Popup)
+    {
+        return;
+    }
+
+    Popup->InitPopup(DroneId, CurrentSettings.DisplayName, CurrentSettings.LabelColor, CurrentSettings.FontSize);
+
+    // 用户确认后更新 Registry，Registry 广播，所有 actor 的标签自动刷新
+    Popup->OnConfirmed.AddDynamic(this, &UDroneListItemWidget::OnLabelEditConfirmed);
+
+    Popup->AddToViewport(100);
+}
+
+void UDroneListItemWidget::OnLabelEditConfirmed(int32 InDroneId, const FString& NewName,
+    FLinearColor NewColor, int32 NewFontSize)
+{
+    UGameInstance* GI = GetGameInstance();
+    UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+    if (!Registry)
+    {
+        return;
+    }
+
+    FDroneLabelSettings Settings;
+    Settings.DisplayName = NewName;
+    Settings.LabelColor  = NewColor;
+    Settings.FontSize    = NewFontSize;
+    Registry->SetDroneLabelSettings(InDroneId, Settings);
+
+    // 面板上的名称 & 颜色同步
+    ApplyLabelSettings(Settings);
+}
+
+void UDroneListItemWidget::ApplyLabelSettings(const FDroneLabelSettings& Settings)
+{
+    if (DroneNameText)
+    {
+        DroneNameText->SetText(FText::FromString(Settings.DisplayName));
+        DroneNameText->SetColorAndOpacity(Settings.LabelColor);
     }
 }

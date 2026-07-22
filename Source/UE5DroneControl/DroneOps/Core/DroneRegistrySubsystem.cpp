@@ -67,6 +67,7 @@ void UDroneRegistrySubsystem::Deinitialize()
 	TaskStateCache.Empty();
 	ControlLocks.Empty();
 	CommandModes.Empty();
+	LabelSettingsMap.Empty();
 
 	Super::Deinitialize();
 }
@@ -109,6 +110,11 @@ void UDroneRegistrySubsystem::RegisterDrone(const FDroneDescriptor& Descriptor)
 	if (!CommandModes.Contains(Descriptor.DroneId))
 	{
 		CommandModes.Add(Descriptor.DroneId, EDroneCommandMode::Move);
+	}
+	// Seed label settings with the registered name if not yet configured.
+	if (!LabelSettingsMap.Contains(Descriptor.DroneId))
+	{
+		LabelSettingsMap.Add(Descriptor.DroneId, FDroneLabelSettings(Descriptor.Name));
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("Drone registered: %s (ID=%d, BitIndex=%d)"),
@@ -621,5 +627,33 @@ void UDroneRegistrySubsystem::UpdateLocalState(int32 DroneId, EUELocalDroneState
     Snap.LocalState = LocalState;
     Snap.LastUpdateTime = FPlatformTime::Seconds();
     OnTelemetryUpdated.Broadcast(DroneId, Snap);
+}
+
+void UDroneRegistrySubsystem::SetDroneLabelSettings(int32 DroneId, const FDroneLabelSettings& Settings)
+{
+	if (DroneId <= 0)
+	{
+		return;
+	}
+	LabelSettingsMap.Add(DroneId, Settings);
+	OnDroneLabelSettingsChanged.Broadcast(DroneId, Settings);
+}
+
+bool UDroneRegistrySubsystem::GetDroneLabelSettings(int32 DroneId, FDroneLabelSettings& OutSettings) const
+{
+	const FDroneLabelSettings* Found = LabelSettingsMap.Find(DroneId);
+	if (Found)
+	{
+		OutSettings = *Found;
+		return true;
+	}
+	// Fall back to the registered name so a label always shows something sensible.
+	const FDroneDescriptor* Desc = DroneDescriptors.Find(DroneId);
+	if (Desc)
+	{
+		OutSettings = FDroneLabelSettings(Desc->Name);
+		return true;
+	}
+	return false;
 }
 

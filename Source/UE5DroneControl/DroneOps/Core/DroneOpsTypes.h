@@ -354,6 +354,33 @@ struct FMultiDroneControlPacket
 };
 
 /**
+ * Per-drone top-label display settings (name tag above the drone in 3D).
+ * Stored in DroneRegistrySubsystem and propagated to both shadow and mirror actors.
+ */
+USTRUCT(BlueprintType)
+struct FDroneLabelSettings
+{
+	GENERATED_BODY()
+
+	/** Label text shown above the drone.  Starts equal to the drone's registered name. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DroneLabel")
+	FString DisplayName;
+
+	/** Colour of the label text.  Default matches the panel body text (not a connection-status colour). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DroneLabel")
+	FLinearColor LabelColor = FLinearColor(0.86f, 0.91f, 0.97f, 1.0f);
+
+	/** Font size for the 3D label widget only.  Does not affect the sidebar panel. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DroneLabel")
+	int32 FontSize = 16;
+
+	FDroneLabelSettings() = default;
+	explicit FDroneLabelSettings(const FString& InName)
+		: DisplayName(InName)
+	{}
+};
+
+/**
  * Map center configuration
  */
 USTRUCT(BlueprintType)
