@@ -819,7 +819,9 @@ void USequenceDispatchPanelWidget::OnDispatchResponse(bool bSuccess, const FStri
 	}
 	else
 	{
-		SetStatusMessage(FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
+		SetStatusMessage(ResponseBody.Contains(TEXT("assembly already in progress"))
+			? TEXT("派发失败：后端已有阵列任务，请先点击“停止”，待后端停止成功后再派发")
+			: FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
 		PendingRemappedMap.Empty();
 		PendingAutoPathsByPathId.Empty();
 		if (DispatchButton) DispatchButton->SetIsEnabled(true);
@@ -867,18 +869,34 @@ void USequenceDispatchPanelWidget::OnLocalPreviewClicked()
 	StopFormationRotatePreview();
 
 	PendingRemappedMap = PreviewMap;
+	bLocalPreviewPlaybackRequested = true;
 	StartShadowDronePlayback();
+	if (LastLocalPreviewStartedPathCount == 0)
+	{
+		SetStatusMessage(FString::Printf(TEXT("本地预演未启动：%d 条路径不足 2 个航点，%d 条路径未找到影子机"),
+			LastLocalPreviewSkippedInsufficientWaypointCount,
+			LastLocalPreviewSkippedNoShadowCount));
+		return;
+	}
 	BeginLocalPatrolSimulation(PreviewMap);
 
-	SetStatusMessage(IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol
-		? TEXT("本地巡逻模拟已开始：影子机可识别目标（未向后端发送指令）")
-		: TEXT("本地预演已开始（未向后端发送指令）"));
+	if (IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol)
+	{
+		SetStatusMessage(FString::Printf(TEXT("本地巡逻模拟已开始：%d 条路径启动（未向后端发送指令）"),
+			LastLocalPreviewStartedPathCount));
+	}
+	else
+	{
+		SetStatusMessage(FString::Printf(TEXT("本地预演已开始：%d 条路径启动（未向后端发送指令）"),
+			LastLocalPreviewStartedPathCount));
+	}
 	MatchedPairs.Empty();
 	SetPanelState(ESequencePanelState::Collapsed);
 }
 
 void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
 {
+	EndLocalPreviewPlayback();
 	EndLocalPatrolSimulation(true);
 
 	for (ADronePathActor* PathActor : ActiveDispatchPathActors)
@@ -892,6 +910,29 @@ void USequenceDispatchPanelWidget::ClearActiveDispatchPaths()
 	ActiveDispatchPathActors.Empty();
 }
 
+void USequenceDispatchPanelWidget::EndLocalPreviewPlayback()
+{
+	if (LocalPreviewPlaybackDroneIds.IsEmpty())
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UDroneRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UDroneRegistrySubsystem>() : nullptr;
+	if (Registry)
+	{
+		for (int32 DroneId : LocalPreviewPlaybackDroneIds)
+		{
+			if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(Registry->GetSenderPawn(DroneId)))
+			{
+				Shadow->SetLocalPathPreviewActive(false);
+			}
+		}
+	}
+
+	LocalPreviewPlaybackDroneIds.Empty();
+}
+
 void USequenceDispatchPanelWidget::OnGlobalStopClicked()
 {
 	// 1. 全局停止并销毁所有 manager 与路径 Actor（含卡在循环中的 JSON 播放）。
@@ -899,6 +940,7 @@ void USequenceDispatchPanelWidget::OnGlobalStopClicked()
 
 	// 2. 本面板派发路径 Actor 已被上面销毁，仅清引用。
 	ActiveDispatchPathActors.Empty();
+	EndLocalPreviewPlayback();
 	EndLocalPatrolSimulation(true);
 
 	// 3. 若在编辑模式：清理临时路径并复位编辑状态与 UI。
@@ -914,10 +956,42 @@ void USequenceDispatchPanelWidget::OnGlobalStopClicked()
 
 	// 4. 清空待发送缓存与待启动缓存。
 	PendingRemappedMap.Empty();
+	bLocalPreviewPlaybackRequested = false;
 	PendingArrivalPaths.Empty();
 	bAssemblyReleasePending = false;
 
-	SetStatusMessage(TEXT("已全局停止并清除所有路径"));
+	// 5. The backend AssemblyController is independent from local path actors and otherwise
+	// remains busy after an old task. Release it as part of the same explicit global-stop action.
+	UGameInstance* GI = GetGameInstance();
+	UDroneNetworkManager* NetMgr = GI ? GI->GetSubsystem<UDroneNetworkManager>() : nullptr;
+	if (NetMgr && NetMgr->CanSendToBackend())
+	{
+		FOnHttpResponse Callback;
+		Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnBackendArrayStopResponse);
+		NetMgr->StopActiveArrayTask(Callback);
+		SetStatusMessage(TEXT("本地路径已清除，正在停止后端阵列任务..."));
+	}
+	else if (NetMgr)
+	{
+		SetStatusMessage(TEXT("本地路径已清除；严格本地隔离已开启，未向后端发送停止请求"));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("本地路径已清除；网络管理器不可用，无法停止后端阵列任务"));
+	}
+}
+
+void USequenceDispatchPanelWidget::OnBackendArrayStopResponse(bool bSuccess, const FString& ResponseBody)
+{
+	if (bSuccess)
+	{
+		SetStatusMessage(TEXT("已停止后端阵列任务并清除所有本地路径"));
+		return;
+	}
+
+	SetStatusMessage(ResponseBody.IsEmpty()
+		? TEXT("本地路径已清除，但后端阵列停止失败：后端无响应")
+		: FString::Printf(TEXT("本地路径已清除，但后端阵列停止失败：%s"), *ResponseBody));
 }
 
 void USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged(ADronePathActor* PathActor, EDronePathExecutionState NewState)
@@ -934,6 +1008,7 @@ void USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged(ADronePat
 
 	if (ActiveDispatchPathActors.IsEmpty())
 	{
+		EndLocalPreviewPlayback();
 		EndLocalPatrolSimulation();
 	}
 }
@@ -1075,6 +1150,14 @@ void USequenceDispatchPanelWidget::OnAssemblyTimeoutForDispatch(const FString& A
 
 void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 {
+	// Consume the one-shot request flag immediately. Any early return below must not leak a
+	// local-preview state into a later formal-dispatch callback.
+	const bool bThisPlaybackIsLocalPreview = bLocalPreviewPlaybackRequested;
+	bLocalPreviewPlaybackRequested = false;
+	LastLocalPreviewStartedPathCount = 0;
+	LastLocalPreviewSkippedNoShadowCount = 0;
+	LastLocalPreviewSkippedInsufficientWaypointCount = 0;
+
 	ClearActiveDispatchPaths();
 
 	// 清除上一批遗留的待启动项，避免新旧混放（ClearActiveDispatchPaths 已销毁其路径 Actor）。
@@ -1102,20 +1185,48 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 		const int32 DroneId = Pair.Key;
 		const FDronePathSaveData& PathData = Pair.Value;
 
-		if (PathData.Waypoints.IsEmpty()) continue;
+		if (PathData.Waypoints.Num() < 2)
+		{
+			if (bThisPlaybackIsLocalPreview)
+			{
+				++LastLocalPreviewSkippedInsufficientWaypointCount;
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[SequenceDispatch] DroneId=%d path %d skipped: playback requires at least 2 waypoints"),
+				DroneId, PathData.PathId);
+			continue;
+		}
 
 		// 找到对应影子机（SenderPawn）
 		APawn* ShadowPawn = Registry->GetSenderPawn(DroneId);
-		if (!IsValid(ShadowPawn)) continue;
+		if (!IsValid(ShadowPawn))
+		{
+			if (bThisPlaybackIsLocalPreview)
+			{
+				++LastLocalPreviewSkippedNoShadowCount;
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[SequenceDispatch] DroneId=%d path %d skipped: no shadow pawn is registered"),
+				DroneId, PathData.PathId);
+			continue;
+		}
 
-		const bool bWaitForArrival = IsOnlineRealDrone(DroneId);
+		// Local preview is an entirely local execution path. Do not let stale/real-time
+		// Online telemetry put the shadow path into the assembly_complete wait queue.
+		const bool bWaitForArrival = !bThisPlaybackIsLocalPreview && IsOnlineRealDrone(DroneId);
 
 		// 离线 / mock：立即停止跟随镜像机；在线真机：保持跟随，等集结完成再解除。
 		if (!bWaitForArrival)
 		{
 			if (AMultiDroneCharacter* Shadow = Cast<AMultiDroneCharacter>(ShadowPawn))
 			{
-				Shadow->bFollowingMirror = false;
+				if (bThisPlaybackIsLocalPreview)
+				{
+					Shadow->SetLocalPathPreviewActive(true);
+					LocalPreviewPlaybackDroneIds.Add(DroneId);
+				}
+				else
+				{
+					Shadow->bFollowingMirror = false;
+				}
 			}
 		}
 
@@ -1164,6 +1275,10 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 		else
 		{
 			PathActor->StartMovement(ShadowPawn);
+			if (bThisPlaybackIsLocalPreview)
+			{
+				++LastLocalPreviewStartedPathCount;
+			}
 			UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Shadow drone DroneId=%d started playback along path %d"),
 				DroneId, PathData.PathId);
 		}
@@ -1176,6 +1291,19 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 	{
 		StartPendingArrivalPaths();
 		SetStatusMessage(TEXT("集结已完成（事件早到），开始沿路径播放"));
+	}
+
+	if (bThisPlaybackIsLocalPreview)
+	{
+		if (LastLocalPreviewStartedPathCount == 0)
+		{
+			EndLocalPreviewPlayback();
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("[SequenceDispatch] Local preview summary: started=%d, skippedNoShadow=%d, skippedInsufficientWaypoints=%d"),
+			LastLocalPreviewStartedPathCount,
+			LastLocalPreviewSkippedNoShadowCount,
+			LastLocalPreviewSkippedInsufficientWaypointCount);
 	}
 }
 
@@ -1360,11 +1488,26 @@ void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice 
 			break;
 		}
 		PendingRemappedMap = Map;
+		bLocalPreviewPlaybackRequested = true;
 		StartShadowDronePlayback();
+		if (LastLocalPreviewStartedPathCount == 0)
+		{
+			SetStatusMessage(FString::Printf(TEXT("本地预演未启动：%d 条路径不足 2 个航点，%d 条路径未找到影子机"),
+				LastLocalPreviewSkippedInsufficientWaypointCount,
+				LastLocalPreviewSkippedNoShadowCount));
+			break;
+		}
 		BeginLocalPatrolSimulation(Map);
-		SetStatusMessage(IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol
-			? TEXT("本地巡逻模拟已开始：影子机可识别目标（未向后端发送指令，点停止结束）")
-			: TEXT("本地预演已开始（未向后端发送指令，点停止结束）"));
+		if (IsLocalPatrolSimulationEnabled() && DispatchMode == EDroneCommandMode::Patrol)
+		{
+			SetStatusMessage(FString::Printf(TEXT("本地巡逻模拟已开始：%d 条路径启动（未向后端发送指令，点停止结束）"),
+				LastLocalPreviewStartedPathCount));
+		}
+		else
+		{
+			SetStatusMessage(FString::Printf(TEXT("本地预演已开始：%d 条路径启动（未向后端发送指令，点停止结束）"),
+				LastLocalPreviewStartedPathCount));
+		}
 		break;
 	}
 	case EPreviewConfirmChoice::Dispatch:
@@ -1390,12 +1533,26 @@ void USequenceDispatchPanelWidget::OnPreviewConfirmChoice(EPreviewConfirmChoice 
 			break;
 		}
 
-		// 临时路径已是预演世界坐标，直接发送，不做 anchor 重映射。
-		// 保留临时路径与编辑模式，派发成功后回调里再驱动影子机本地预演。
+		// Editing paths stay in Cesium world space for local playback. Convert a separate
+		// wire copy through WGS84 + fresh per-drone local NED so the backend receives
+		// power-on-origin-relative UE offsets, without coupling Cesium world axes into PX4.
+		TMap<int32, FDronePathSaveData> BackendDispatchMap;
+		FString PathConvertError;
+		ADroneOpsPlayerController* OpsController = GetDroneOpsController();
+		if (!OpsController || !OpsController->TryBuildBackendRelativePathData(
+			Map, BackendDispatchMap, PathConvertError))
+		{
+			SetStatusMessage(PathConvertError.IsEmpty()
+				? TEXT("编辑路径坐标转换失败，未发送任何派发请求")
+				: PathConvertError);
+			break;
+		}
+
 		FOnHttpResponse Callback;
 		Callback.BindDynamic(this, &USequenceDispatchPanelWidget::OnEditDispatchResponse);
 		PendingRemappedMap = Map;
-		NetMgr->SendArrayTaskFromData(Map, DispatchMode, Callback, /*bAutoAssign=*/false);
+		bLocalPreviewPlaybackRequested = false;
+		NetMgr->SendArrayTaskFromData(BackendDispatchMap, DispatchMode, Callback, /*bAutoAssign=*/false);
 		SetStatusMessage(FString::Printf(TEXT("正在派发 %d 条路径... mode=%s"),
 			Map.Num(), *DroneCommandModeToProtocolString(DispatchMode)));
 		break;
@@ -1436,7 +1593,9 @@ void USequenceDispatchPanelWidget::OnEditDispatchResponse(bool bSuccess, const F
 	}
 	else
 	{
-		SetStatusMessage(FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
+		SetStatusMessage(ResponseBody.Contains(TEXT("assembly already in progress"))
+			? TEXT("派发失败：后端已有阵列任务，请先点击“停止”，待后端停止成功后再派发")
+			: FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
 		PendingRemappedMap.Empty();
 	}
 }

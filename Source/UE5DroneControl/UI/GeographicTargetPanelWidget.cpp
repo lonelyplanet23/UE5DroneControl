@@ -321,7 +321,7 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 	BatchTitleRow->AddChildToHorizontalBox(EditModeBadge);
 	AddPaddedChild(BatchContent, BatchTitleRow, FMargin(0.0f, 0.0f, 0.0f, 4.0f));
 	UTextBlock* BatchHint = MakeText(WidgetTree, TEXT("BatchCoordinatesHint"),
-		TEXT("每行一个 (经度, 纬度, 海拔)，按输入顺序追加到所有活动路径"));
+		TEXT("每行一个 (经度, 纬度, 海拔)，按输入顺序追加；海拔为平均海平面 MSL，不是离地高度"));
 	StyleText(BatchHint, 11, SecondaryText);
 	BatchHint->SetAutoWrapText(true);
 	AddPaddedChild(BatchContent, BatchHint, FMargin(0.0f, 0.0f, 0.0f, 6.0f));
@@ -332,6 +332,8 @@ void UGeographicTargetPanelWidget::BuildFallbackWidgetTree()
 		UMultiLineEditableTextBox::StaticClass(), TEXT("BatchCoordinatesInput"));
 	BatchCoordinatesInput->SetHintText(FText::FromString(
 		TEXT("(116.397, 39.908, 50)\n(116.398, 39.909, 52)")));
+	BatchCoordinatesInput->SetToolTipText(FText::FromString(
+		TEXT("字段顺序：经度、纬度、海拔；海拔单位为米，基准为平均海平面（MSL），不是距地面高度")));
 	StyleMultiLineInput(BatchCoordinatesInput);
 	BatchInputSize->AddChild(BatchCoordinatesInput);
 	AddPaddedChild(BatchContent, BatchInputSize, FMargin(0.0f, 0.0f, 0.0f, 7.0f));

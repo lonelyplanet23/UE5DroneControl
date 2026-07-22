@@ -1,4 +1,5 @@
 #include "DroneOps/Network/DroneWebSocketClient.h"
+#include "HttpModule.h"
 #include "WebSocketsModule.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -16,7 +17,28 @@ void UDroneWebSocketClient::Connect()
 		World->GetTimerManager().ClearTimer(ReconnectTimer);
 	}
 
-	Socket = FWebSocketsModule::Get().CreateWebSocket(ServerUrl, TEXT("ws"));
+	// UE 5.7 copies FHttpModule's proxy address while the WebSockets module creates
+	// its libwebsockets context, but it ignores HttpNoProxy. Keep the project-wide
+	// proxy enabled for Cesium/Google HTTP requests and initialize this local drone
+	// WebSocket context without it, otherwise ws://127.0.0.1 and private backend
+	// addresses are incorrectly sent through Clash.
+	FHttpModule& HttpModule = FHttpModule::Get();
+	const FString SavedHttpProxyAddress = HttpModule.GetProxyAddress();
+	const bool bTemporarilyClearHttpProxy = !SavedHttpProxyAddress.IsEmpty();
+	if (bTemporarilyClearHttpProxy)
+	{
+		HttpModule.SetProxyAddress(TEXT(""));
+	}
+
+	FWebSocketsModule& WebSocketsModule = FWebSocketsModule::Get();
+
+	if (bTemporarilyClearHttpProxy)
+	{
+		HttpModule.SetProxyAddress(SavedHttpProxyAddress);
+		UE_LOG(LogTemp, Log, TEXT("[DroneWS] Initialized WebSockets without HTTP proxy; keeping %s for Cesium HTTP requests."), *SavedHttpProxyAddress);
+	}
+
+	Socket = WebSocketsModule.CreateWebSocket(ServerUrl, TEXT("ws"));
 	BindSocketEvents();
 	Socket->Connect();
 

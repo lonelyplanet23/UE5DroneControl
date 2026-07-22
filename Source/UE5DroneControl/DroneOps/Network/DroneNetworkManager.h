@@ -170,6 +170,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void SendArrayTaskFromData(const TMap<int32, FDronePathSaveData>& PathDataMap, EDroneCommandMode Mode, FOnHttpResponse OnComplete, bool bAutoAssign = false);
 
+	/**
+	 * Stop the backend's single active array task. UE array submissions currently use the backend's
+	 * default array id "a1". Strict local-preview isolation blocks this write like every other one.
+	 */
+	void StopActiveArrayTask(FOnHttpResponse OnComplete);
+
 	// ---- Events ----
 
 	// Fired when a WebSocket "event" message arrives (power_on / reconnect / lost_connection).
