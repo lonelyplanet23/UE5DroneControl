@@ -2869,6 +2869,121 @@ TMap<int32, FDronePathSaveData> ADroneOpsPlayerController::BuildEditingPathsData
 	return Result;
 }
 
+bool ADroneOpsPlayerController::TryBuildBackendRelativePathData(
+	const TMap<int32, FDronePathSaveData>& WorldPathData,
+	TMap<int32, FDronePathSaveData>& OutBackendPathData,
+	FString& OutError) const
+{
+	OutBackendPathData.Reset();
+	OutError.Reset();
+
+	if (WorldPathData.IsEmpty())
+	{
+		OutError = TEXT("没有可派发的路径");
+		return false;
+	}
+
+	const UGameInstance* GI = GetGameInstance();
+	const UDroneNetworkManager* NetworkManager = GI
+		? GI->GetSubsystem<UDroneNetworkManager>()
+		: nullptr;
+	if (!DroneRegistry || !NetworkManager)
+	{
+		OutError = TEXT("路径坐标转换服务未就绪");
+		return false;
+	}
+
+	const TScriptInterface<ICoordinateService> CoordService = DroneRegistry->GetCoordinateService();
+	UObject* CoordObject = CoordService.GetObject();
+	if (!CoordObject
+		|| !ICoordinateService::Execute_IsCoordinateSystemReady(CoordObject)
+		|| !ICoordinateService::Execute_IsGeographicSupported(CoordObject))
+	{
+		OutError = TEXT("坐标服务未就绪，无法转换编辑路径");
+		return false;
+	}
+
+	for (const TPair<int32, FDronePathSaveData>& Pair : WorldPathData)
+	{
+		const int32 DroneId = Pair.Key;
+		if (!ValidateDispatchDrone(DroneId, OutError))
+		{
+			OutBackendPathData.Reset();
+			return false;
+		}
+
+		const FDronePathSaveData& WorldPath = Pair.Value;
+		if (WorldPath.Waypoints.Num() < 2)
+		{
+			OutError = FString::Printf(
+				TEXT("无人机 %d 的路径只有起点，请至少添加一个目标航点"), DroneId);
+			OutBackendPathData.Reset();
+			return false;
+		}
+
+		FDronePathSaveData BackendPath = WorldPath;
+		for (int32 WaypointIndex = 0; WaypointIndex < BackendPath.Waypoints.Num(); ++WaypointIndex)
+		{
+			FDroneWaypointSaveData& Waypoint = BackendPath.Waypoints[WaypointIndex];
+			const FVector WorldLocation = Waypoint.Location;
+			if (!FMath::IsFinite(WorldLocation.X)
+				|| !FMath::IsFinite(WorldLocation.Y)
+				|| !FMath::IsFinite(WorldLocation.Z))
+			{
+				OutError = FString::Printf(
+					TEXT("无人机 %d 的第 %d 个航点包含无效世界坐标"),
+					DroneId, WaypointIndex + 1);
+				OutBackendPathData.Reset();
+				return false;
+			}
+
+			// ACesiumGeoreference returns (longitude, latitude, ellipsoid height).
+			const FVector LongitudeLatitudeHeight =
+				ICoordinateService::Execute_WorldToGeographic(CoordObject, WorldLocation);
+			FGeographicCoordinate3D TargetCoordinate;
+			TargetCoordinate.Longitude = LongitudeLatitudeHeight.X;
+			TargetCoordinate.Latitude = LongitudeLatitudeHeight.Y;
+			TargetCoordinate.AltitudeMslMeters =
+				LongitudeLatitudeHeight.Z - NetworkManager->GeoidSeparationMeters;
+			if (!FMath::IsFinite(TargetCoordinate.Longitude)
+				|| TargetCoordinate.Longitude < -180.0 || TargetCoordinate.Longitude > 180.0
+				|| !FMath::IsFinite(TargetCoordinate.Latitude)
+				|| TargetCoordinate.Latitude < -90.0 || TargetCoordinate.Latitude > 90.0
+				|| !FMath::IsFinite(TargetCoordinate.AltitudeMslMeters))
+			{
+				OutError = FString::Printf(
+					TEXT("无人机 %d 的第 %d 个航点无法还原为有效 WGS84 坐标"),
+					DroneId, WaypointIndex + 1);
+				OutBackendPathData.Reset();
+				return false;
+			}
+
+			FVector BackendRelativeTarget = FVector::ZeroVector;
+			FString ConvertError;
+			if (!TryBuildGeographicBackendTarget(
+				DroneId,
+				TargetCoordinate,
+				FVector::ZeroVector,
+				NetworkManager,
+				BackendRelativeTarget,
+				ConvertError))
+			{
+				OutError = FString::Printf(
+					TEXT("无人机 %d 的第 %d 个航点转换失败：%s"),
+					DroneId, WaypointIndex + 1, *ConvertError);
+				OutBackendPathData.Reset();
+				return false;
+			}
+
+			Waypoint.Location = BackendRelativeTarget;
+		}
+
+		OutBackendPathData.Add(DroneId, MoveTemp(BackendPath));
+	}
+
+	return OutBackendPathData.Num() == WorldPathData.Num();
+}
+
 void ADroneOpsPlayerController::ClearEditingPaths()
 {
 	SetEditSelectedWaypoint(nullptr);

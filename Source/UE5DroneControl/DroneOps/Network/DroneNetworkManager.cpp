@@ -1058,6 +1058,27 @@ void UDroneNetworkManager::SendArrayTaskFromData(const TMap<int32, FDronePathSav
 	HttpClient->Post(TEXT("/api/arrays"), Body, OnComplete);
 }
 
+void UDroneNetworkManager::StopActiveArrayTask(FOnHttpResponse OnComplete)
+{
+	if (CheckIsolationBlocked(TEXT("StopActiveArrayTask")))
+	{
+		OnComplete.ExecuteIfBound(false, GetIsolationBlockedMessage());
+		return;
+	}
+
+	if (!HttpClient)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DroneNetworkManager] StopActiveArrayTask: HttpClient not ready"));
+		OnComplete.ExecuteIfBound(false, TEXT("HTTP 客户端未就绪"));
+		return;
+	}
+
+	// ApiCreateArray defaults to "a1" when UE omits array_id. The backend currently owns one
+	// AssemblyController, and ApiStopArray releases it even if the supplied id is already idle.
+	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] StopActiveArrayTask: POST /api/arrays/a1/stop"));
+	HttpClient->Post(TEXT("/api/arrays/a1/stop"), TEXT("{}"), OnComplete);
+}
+
 bool UDroneNetworkManager::GetCachedGpsAnchor(int32 DroneId, double& OutLat, double& OutLon, double& OutAlt) const
 {
 	const FGpsAnchorCache* Found = CachedGpsAnchors.Find(DroneId);

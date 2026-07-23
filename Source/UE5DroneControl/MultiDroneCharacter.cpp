@@ -342,6 +342,35 @@ void AMultiDroneCharacter::ExitAssemblyMode()
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Exited assembly mode"), *DroneName);
 }
 
+void AMultiDroneCharacter::SetLocalPathPreviewActive(bool bActive)
+{
+	if (bLocalPathPreviewActive == bActive)
+	{
+		return;
+	}
+
+	bLocalPathPreviewActive = bActive;
+	if (bActive)
+	{
+		// A local preview owns this actor's transform. Clear both remote transform
+		// writers before DronePathActor begins its movement tick.
+		ExitAssemblyMode();
+		bFollowingMirror = false;
+		bSendClickTarget = false;
+		bVerticalMoveActive = false;
+		bOneShot3DMoveActive = false;
+		WsSendTimer = 0.0f;
+		UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Local path preview enabled; remote assembly events suppressed"), *DroneName);
+	}
+	else
+	{
+		// Preview is visual-only. Rejoin authoritative telemetry instead of leaving
+		// an online shadow drone at the simulated endpoint.
+		bFollowingMirror = true;
+		UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Local path preview ended; mirror follow restored"), *DroneName);
+	}
+}
+
 void AMultiDroneCharacter::SubscribeToAssemblyEvents()
 {
 	UGameInstance* GI = GetGameInstance();
@@ -363,16 +392,32 @@ void AMultiDroneCharacter::SubscribeToAssemblyEvents()
 
 void AMultiDroneCharacter::OnAssemblingProgress(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
 {
+	if (bLocalPathPreviewActive)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("MultiDroneCharacter %s: Ignoring backend assembling event during local path preview"), *DroneName);
+		return;
+	}
+
 	EnterAssemblyMode();
 }
 
 void AMultiDroneCharacter::OnAssemblyComplete(const FString& ArrayId)
 {
+	if (bLocalPathPreviewActive)
+	{
+		return;
+	}
+
 	ExitAssemblyMode();
 }
 
 void AMultiDroneCharacter::OnAssemblyTimeout(const FString& ArrayId, int32 ReadyCount, int32 TotalCount)
 {
+	if (bLocalPathPreviewActive)
+	{
+		return;
+	}
+
 	ExitAssemblyMode();
 }
 
@@ -634,6 +679,15 @@ void AMultiDroneCharacter::OnDroneWsEvent(int32 InDroneId, const FString& Event,
 
 	if (Event != TEXT("power_on") && Event != TEXT("reconnect"))
 	{
+		return;
+	}
+
+	// Local-only path preview is an intentionally isolated mode. Ignore anchor events so
+	// existing preview movement is not overwritten by backend connectivity churn.
+	if (bLocalPathPreviewActive)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("MultiDroneCharacter [%s]: ignoring '%s' event during local path preview"),
+			*DroneName, *Event);
 		return;
 	}
 

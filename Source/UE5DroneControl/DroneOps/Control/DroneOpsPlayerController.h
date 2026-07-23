@@ -134,6 +134,17 @@ TArray<int32> GetSelectedDroneIdsForDispatch() const;
 	TMap<int32, FDronePathSaveData> BuildEditingPathsData() const;
 
 	/**
+	 * Atomically converts Cesium world-space edit paths into the per-drone UE offsets consumed by
+	 * POST /api/arrays. Every waypoint is converted back to WGS84/MSL and then resolved against the
+	 * drone's fresh GPS/local-NED telemetry, avoiding Cesium world-axis and earth-curvature leakage.
+	 * No backend request is sent by this method.
+	 */
+	bool TryBuildBackendRelativePathData(
+		const TMap<int32, FDronePathSaveData>& WorldPathData,
+		TMap<int32, FDronePathSaveData>& OutBackendPathData,
+		FString& OutError) const;
+
+	/**
 	 * 编辑模式下把一个 WGS84 经纬高目标点加为所有在编路径的航点（与地图点击加点同样走编队平移）。
 	 * 非编辑模式或无在编路径时返回失败。用于右上角坐标输入面板在编辑模式下的行为。
 	 */

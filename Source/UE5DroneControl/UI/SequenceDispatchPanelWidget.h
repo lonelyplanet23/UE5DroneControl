@@ -164,6 +164,14 @@ private:
 	void BeginLocalPatrolSimulation(const TMap<int32, FDronePathSaveData>& PreviewMap);
 	void EndLocalPatrolSimulation(bool bForceClearAllLocalStates = false);
 	bool IsLocalPatrolSimulationEnabled() const;
+	// Local preview must start shadow playback immediately, even when telemetry still reports Online.
+	// Formal dispatch keeps the existing assembly_complete gate for real drones.
+	bool bLocalPreviewPlaybackRequested = false;
+	TSet<int32> LocalPreviewPlaybackDroneIds;
+	int32 LastLocalPreviewStartedPathCount = 0;
+	int32 LastLocalPreviewSkippedNoShadowCount = 0;
+	int32 LastLocalPreviewSkippedInsufficientWaypointCount = 0;
+	void EndLocalPreviewPlayback();
 
 	// 派发成功后：为每个影子机 spawn DronePathActor 并驱动移动
 	void StartShadowDronePlayback();
@@ -199,6 +207,9 @@ private:
 
 	UFUNCTION()
 	void OnGlobalStopClicked();
+
+	UFUNCTION()
+	void OnBackendArrayStopResponse(bool bSuccess, const FString& ResponseBody);
 
 	UFUNCTION()
 	void OnDispatchClicked();

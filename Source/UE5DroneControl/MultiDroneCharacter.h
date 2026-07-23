@@ -106,6 +106,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Assembly")
 	bool IsInAssemblyMode() const { return bInAssemblyMode; }
 
+	/**
+	 * Isolate this shadow drone from backend assembly events while it is driven by a
+	 * local-only path preview. Enabling it exits assembly immediately; disabling it
+	 * resumes normal mirror following.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Path Preview")
+	void SetLocalPathPreviewActive(bool bActive);
+
+	UFUNCTION(BlueprintPure, Category = "Path Preview")
+	bool IsLocalPathPreviewActive() const { return bLocalPathPreviewActive; }
+
 	/** Pause or resume all local movement (click-target and assembly following). */
 	UFUNCTION(BlueprintCallable, Category = "Assembly")
 	void SetPaused(bool bPause);
@@ -181,6 +192,8 @@ private:
 #endif
 
 	bool bInAssemblyMode = false;
+	// Backend "assembling" events must not overwrite a local-only path preview.
+	bool bLocalPathPreviewActive = false;
 	bool bIsPaused = false;
 	bool bWasMovingBeforePause = false;
 	bool bVerticalMoveActive = false;
