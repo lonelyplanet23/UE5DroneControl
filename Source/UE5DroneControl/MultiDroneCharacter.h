@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UE5DroneControlCharacter.h"
 #include "DroneOps/Interfaces/DroneSelectableInterface.h"
+#include "DroneOps/Core/DroneOpsTypes.h"
 #include "PathEditor/DronePathActor.h"
 #include "MultiDroneCharacter.generated.h"
 
@@ -12,6 +13,7 @@ class UDroneSelectionComponent;
 class UDroneCommandSenderComponent;
 class UDroneGroundProjectionComponent;
 class UWidgetComponent;
+class UDroneNameLabelWidget;
 
 /**
  * Multi-drone sender pawn.
@@ -85,6 +87,14 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Selection UI")
 	FVector SelectionWidgetRelativeLocation = FVector(0.0f, 0.0f, 180.0f);
+
+	/** Screen-space name label shown above this drone.  Updated via Registry label delegate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> NameLabelWidgetComponent;
+
+	/** Vertical offset (cm) of the name label above the actor origin. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Label UI")
+	FVector NameLabelRelativeLocation = FVector(0.0f, 0.0f, 220.0f);
 
 	// ---- Assembly (集结) behavior ----
 
@@ -246,6 +256,10 @@ private:
 
 	// Called on power_on / reconnect to sync shadow drone position to mirror drone
 	void OnDroneWsEvent(int32 InDroneId, const FString& Event, double GpsLat, double GpsLon, double GpsAlt);
+
+	/** Refresh the name-label widget when Registry broadcasts a settings change. */
+	UFUNCTION()
+	void OnLabelSettingsChanged(int32 InDroneId, const FDroneLabelSettings& Settings);
 
 	// Send a WebSocket move command to the backend with anchor subtraction applied.
 	void SendWebSocketMoveCommand();

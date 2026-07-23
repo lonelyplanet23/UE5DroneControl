@@ -10,6 +10,7 @@
 #include "DroneOps/Network/DroneNetworkManager.h"
 #include "DroneOps/Network/DroneHttpClient.h"
 #include "PathEditor/DronePathActor.h"
+#include "UI/DroneNameLabelWidget.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "EngineUtils.h"
@@ -30,6 +31,17 @@ AMultiDroneCharacter::AMultiDroneCharacter()
 	SelectionComponent = CreateDefaultSubobject<UDroneSelectionComponent>(TEXT("SelectionComponent"));
 	CommandSenderComponent = CreateDefaultSubobject<UDroneCommandSenderComponent>(TEXT("CommandSenderComponent"));
 	GroundProjectionComponent = CreateDefaultSubobject<UDroneGroundProjectionComponent>(TEXT("GroundProjection"));
+
+	// Screen-space name label above the drone
+	NameLabelWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameLabelWidgetComponent"));
+	if (NameLabelWidgetComponent)
+	{
+		NameLabelWidgetComponent->SetupAttachment(RootComponent);
+		NameLabelWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 220.0f));
+		NameLabelWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+		NameLabelWidgetComponent->SetDrawSize(FVector2D(200.0f, 40.0f));
+		NameLabelWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 
 	// 确保碰撞设置正确，支持鼠标悬停检测
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
@@ -132,6 +144,30 @@ void AMultiDroneCharacter::BeginPlay()
 	UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter: Registered %s (ID=%d, BitIndex=%d)"),
 		*DroneName, DroneId, BitIndex);
 
+	// ---- Name-label widget component ----
+	if (NameLabelWidgetComponent)
+	{
+		NameLabelWidgetComponent->SetRelativeLocation(NameLabelRelativeLocation);
+
+		// 用 UWorld 创建 widget：UWidgetComponent 在 Screen space 模式下自行管理渲染，
+		// 不依赖 widget 的创建者身份，且 UWorld* 是 CreateWidget 支持的合法类型。
+		UDroneNameLabelWidget* LabelWidget = GetWorld()
+			? CreateWidget<UDroneNameLabelWidget>(GetWorld(), UDroneNameLabelWidget::StaticClass())
+			: nullptr;
+		if (LabelWidget)
+		{
+			NameLabelWidgetComponent->SetWidget(LabelWidget);
+
+			// Apply initial settings from Registry (falls back to DroneName)
+			FDroneLabelSettings InitialSettings;
+			Registry->GetDroneLabelSettings(DroneId, InitialSettings);
+			LabelWidget->ApplyLabelSettings(InitialSettings.DisplayName, InitialSettings.LabelColor, InitialSettings.FontSize);
+		}
+
+		// Subscribe to future changes
+		Registry->OnDroneLabelSettingsChanged.AddDynamic(this, &AMultiDroneCharacter::OnLabelSettingsChanged);
+	}
+
 	// remote: 订阅 assembly 事件
 	// remote: 订阅 assembly 事件
 	SubscribeToAssemblyEvents();
@@ -160,6 +196,10 @@ void AMultiDroneCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 		{
 			NetMgr->OnDroneWsEvent.RemoveAll(this);
+		}
+		if (UDroneRegistrySubsystem* Reg = GI->GetSubsystem<UDroneRegistrySubsystem>())
+		{
+			Reg->OnDroneLabelSettingsChanged.RemoveAll(this);
 		}
 	}
 }
@@ -795,4 +835,20 @@ void AMultiDroneCharacter::ResetLocalAttackState()
 	CachedPathActor = nullptr;
 
 	UE_LOG(LogTemp, Log, TEXT("[MultiDroneCharacter] %s: Reset local attack state"), *DroneName);
+}
+
+void AMultiDroneCharacter::OnLabelSettingsChanged(int32 InDroneId, const FDroneLabelSettings& Settings)
+{
+	if (InDroneId != DroneId)
+	{
+		return;
+	}
+	if (!NameLabelWidgetComponent)
+	{
+		return;
+	}
+	if (UDroneNameLabelWidget* LabelWidget = Cast<UDroneNameLabelWidget>(NameLabelWidgetComponent->GetWidget()))
+	{
+		LabelWidget->ApplyLabelSettings(Settings.DisplayName, Settings.LabelColor, Settings.FontSize);
+	}
 }

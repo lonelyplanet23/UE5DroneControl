@@ -4,9 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Components/ScrollBox.h" //
-#include "DroneListItemWidget.h" //
-#include "DroneListWidget.generated.h" //
+#include "Components/ScrollBox.h"
+#include "DroneListItemWidget.h"
+#include "DroneOps/Core/DroneOpsTypes.h"
+#include "DroneListWidget.generated.h"
 
 // 🌟 1. 在类外面定义文档要求的“真数据结构体”，打通蓝图读取属性的通道
 USTRUCT(BlueprintType)
@@ -112,5 +113,9 @@ private:
     /** 隔离状态变化回调：Toggle 切换时同步禁用/启用 Refresh 按钮 */
     UFUNCTION()
     void OnIsolationStateChanged(bool bIsolated);
+
+    /** 标签设置变更时实时同步面板名称 & 颜色（无需整列表重建） */
+    UFUNCTION()
+    void OnLabelSettingsChanged(int32 InDroneId, const FDroneLabelSettings& Settings);
 };
 

@@ -43,6 +43,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneTaskStateUpdated, int32, Dr
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnMultiSelectionChanged);
 
 /**
+ * Broadcast when a drone's top-label settings are changed via SetDroneLabelSettings().
+ * Consumers: both drone actor types update their WidgetComponent label.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDroneLabelSettingsChanged,
+	int32, DroneId, const FDroneLabelSettings&, Settings);
+
+/**
  * Delegate for task state updates
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnTaskStateUpdated,
@@ -212,8 +219,25 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
 	FOnMultiSelectionChanged OnMultiSelectionChanged;
 
+	/** 标签设置变更时广播（由 SetDroneLabelSettings 触发）。 */
+	UPROPERTY(BlueprintAssignable, Category = "DroneRegistry")
+	FOnDroneLabelSettingsChanged OnDroneLabelSettingsChanged;
+
     UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
     void UpdateLocalState(int32 DroneId, EUELocalDroneState LocalState);
+
+	// ---- Label settings ----
+
+	/**
+	 * Update the top-label settings for a drone and broadcast OnDroneLabelSettingsChanged.
+	 * Called by UDroneNameEditPopupWidget after the user confirms the edit dialog.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	void SetDroneLabelSettings(int32 DroneId, const FDroneLabelSettings& Settings);
+
+	/** Retrieve current label settings.  Returns false if DroneId is unknown. */
+	UFUNCTION(BlueprintCallable, Category = "DroneRegistry")
+	bool GetDroneLabelSettings(int32 DroneId, FDroneLabelSettings& OutSettings) const;
 
 private:
 	// Coordinate service
@@ -251,4 +275,8 @@ private:
 	// Current per-drone command mode used by point dispatch.
 	UPROPERTY()
 	TMap<int32, EDroneCommandMode> CommandModes;
+
+	// Per-drone top-label display settings (name / colour / font size)
+	UPROPERTY()
+	TMap<int32, FDroneLabelSettings> LabelSettingsMap;
 };
