@@ -36,10 +36,12 @@ void ULocalPreviewIsolationToggleWidget::BuildWidgetTree()
 		UVerticalBox::StaticClass(), TEXT("IsolationContainer"));
 	if (UCanvasPanelSlot* ContainerSlot = Root->AddChildToCanvas(Container))
 	{
-		// 锚点：右上角
-		ContainerSlot->SetAnchors(FAnchors(1.0f, 0.0f));
-		ContainerSlot->SetAlignment(FVector2D(1.0f, 0.0f));
-		ContainerSlot->SetPosition(FVector2D(-32.0f, 16.0f));
+		// 锚点：左下角，放在无人机态势面板(DroneListWidget)正上方。
+		// 原本在右上角会盖住派发面板的“编辑模式”开关；左上角是视频流，故移到左下。
+		// 态势面板在 CesiumWorld 为左下锚点、距底 32、高 620，故本控件底边取 32+620+12=664 上移，留 12px 间隙。
+		ContainerSlot->SetAnchors(FAnchors(0.0f, 1.0f));
+		ContainerSlot->SetAlignment(FVector2D(0.0f, 1.0f));
+		ContainerSlot->SetPosition(FVector2D(32.0f, -664.0f));
 		ContainerSlot->SetAutoSize(true);
 	}
 
