@@ -82,4 +82,6 @@ private:
 
 	/** 创建并显示主菜单 Widget */
 	void ShowMainMenuWidget();
+	void StagePreviewIsolationState();
+	void ClearPreviewIsolationForNonPreviewLevel();
 };

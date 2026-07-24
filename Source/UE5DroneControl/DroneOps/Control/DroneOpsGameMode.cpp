@@ -397,6 +397,9 @@ void ADroneOpsGameMode::BeginPlay()
 
 	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: BeginPlay"));
 
+	// Apply the main-menu selection before any receiver/shadow spawning or preview UI setup.
+	ApplyStagedStrictLocalPreviewIsolation();
+
 	ApplyCesiumTileServerConfig();
 
 	// Always (re)load the blueprint receiver class at BeginPlay.
@@ -481,18 +484,36 @@ void ADroneOpsGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			Registry->OnDroneRegistered.RemoveDynamic(this, &ADroneOpsGameMode::HandleDroneRegistered);
 		}
 
-		// 离开 CesiumWorld 时复位纯本地预演隔离开关，避免状态泄漏到其他关卡
-		if (UDroneNetworkManager* NetMgr = GameInstance->GetSubsystem<UDroneNetworkManager>())
-		{
-			if (NetMgr->IsStrictLocalPreviewIsolation())
-			{
-				UE_LOG(LogTemp, Log, TEXT("[DroneOpsGameMode] EndPlay: resetting strict local preview isolation"));
-				NetMgr->SetStrictLocalPreviewIsolation(false);
-			}
-		}
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void ADroneOpsGameMode::ApplyStagedStrictLocalPreviewIsolation()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	UDroneNetworkManager* NetMgr = GameInstance
+		? GameInstance->GetSubsystem<UDroneNetworkManager>()
+		: nullptr;
+	if (!NetMgr)
+	{
+		return;
+	}
+
+	bool bEnabled = false;
+	if (NetMgr->ConsumeStagedStrictLocalPreviewIsolation(bEnabled))
+	{
+		NetMgr->SetStrictLocalPreviewIsolation(bEnabled);
+		UE_LOG(LogTemp, Log,
+			TEXT("[DroneOpsGameMode] Applied staged strict local preview isolation=%d"),
+			bEnabled ? 1 : 0);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log,
+			TEXT("[DroneOpsGameMode] Direct launch keeps strict local preview isolation=%d"),
+			NetMgr->IsStrictLocalPreviewIsolation() ? 1 : 0);
+	}
 }
 
 void ADroneOpsGameMode::HandleDroneRegistered(int32 DroneId)
@@ -924,6 +945,10 @@ void ADroneOpsGameMode::SpawnReceiversFromRegistry()
 		return;
 	}
 
+	const UDroneNetworkManager* NetMgr =
+		GameInstance->GetSubsystem<UDroneNetworkManager>();
+	const bool bStrictIsolation =
+		NetMgr && NetMgr->IsStrictLocalPreviewIsolation();
 	const FVector SpawnBase = ReceiverSpawnOrigin;
 
 	TArray<FDroneDescriptor> Descriptors = Registry->GetAllDroneDescriptors();
@@ -943,6 +968,8 @@ void ADroneOpsGameMode::SpawnReceiversFromRegistry()
 		: TSubclassOf<AMultiDroneCharacter>(AMultiDroneCharacter::StaticClass());
 
 	int32 SpawnIndex = 0;
+	int32 ReceiverCount = 0;
+	int32 ShadowCount = 0;
 	for (const FDroneDescriptor& Desc : Descriptors)
 	{
 		if (Desc.DroneId <= 0)
@@ -961,22 +988,31 @@ void ADroneOpsGameMode::SpawnReceiversFromRegistry()
 		const FTransform SpawnTransform(FRotator::ZeroRotator, SpawnLocation);
 
 		// ---- 镜像机 ----
-		ARealTimeDroneReceiver* Receiver = FindReceiverForDroneId(Desc.DroneId);
-		if (!Receiver)
+		ARealTimeDroneReceiver* Receiver = nullptr;
+		if (ShouldSpawnMirrorDrones(bStrictIsolation))
 		{
-			Receiver = World->SpawnActorDeferred<ARealTimeDroneReceiver>(
-				ReceiverSpawnClass, SpawnTransform, nullptr, nullptr,
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+			Receiver = FindReceiverForDroneId(Desc.DroneId);
+			if (!Receiver)
+			{
+				Receiver = World->SpawnActorDeferred<ARealTimeDroneReceiver>(
+					ReceiverSpawnClass, SpawnTransform, nullptr, nullptr,
+					ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+				if (Receiver)
+				{
+					Receiver->ApplyDescriptor(Desc, InitialAvailability);
+					Receiver->FinishSpawning(SpawnTransform);
+				}
+			}
+			else
+			{
+				Receiver->SetActorLocation(SpawnLocation);
+				Receiver->ApplyDescriptor(Desc, InitialAvailability);
+			}
+
 			if (Receiver)
 			{
-				Receiver->ApplyDescriptor(Desc, InitialAvailability);
-				Receiver->FinishSpawning(SpawnTransform);
+				++ReceiverCount;
 			}
-		}
-		else
-		{
-			Receiver->SetActorLocation(SpawnLocation);
-			Receiver->ApplyDescriptor(Desc, InitialAvailability);
 		}
 
 		// ---- 影子机（与镜像机初始位置相同）----
@@ -1001,22 +1037,24 @@ void ADroneOpsGameMode::SpawnReceiversFromRegistry()
 					Shadow->TopicPrefix     = Desc.TopicPrefix;
 					Shadow->FinishSpawning(SpawnTransform);
 					UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Spawned shadow drone %s (ID=%d)"), *Shadow->DroneName, Desc.DroneId);
+					++ShadowCount;
 				}
 			}
 			else
 			{
 				Shadow->SetActorLocation(SpawnLocation);
 				UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: Shadow drone for ID=%d already exists, moved to spawn location"), Desc.DroneId);
+				++ShadowCount;
 			}
 		}
 
-		if (Receiver)
-		{
-			++SpawnIndex;
-		}
+		// Advance per descriptor so isolated shadow drones retain deterministic spacing.
+		++SpawnIndex;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("DroneOpsGameMode: ensured %d receiver drones from registry"), SpawnIndex);
+	UE_LOG(LogTemp, Log,
+		TEXT("[DroneOpsGameMode] Spawn summary: isolation=%d receivers=%d shadows=%d descriptors=%d"),
+		bStrictIsolation ? 1 : 0, ReceiverCount, ShadowCount, SpawnIndex);
 }
 
 APawn* ADroneOpsGameMode::FindUnpossessedPlacedPawn(bool bLogDiscoveredPawns) const

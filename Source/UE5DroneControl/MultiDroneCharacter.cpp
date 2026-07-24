@@ -139,6 +139,13 @@ void AMultiDroneCharacter::BeginPlay()
 	// local: 订阅 power_on/reconnect 事件，用于上电时位置对齐
 	if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
 	{
+		// Strict local preview owns the shadow transform for the whole level. Never
+		// fall back to a telemetry mirror that is intentionally absent.
+		if (NetMgr->IsStrictLocalPreviewIsolation())
+		{
+			bFollowingMirror = false;
+		}
+
 		NetMgr->OnDroneWsEvent.AddUObject(this, &AMultiDroneCharacter::OnDroneWsEvent);
 
 		// Catch up: if power_on arrived before this actor spawned, apply cached anchor now.
@@ -364,10 +371,16 @@ void AMultiDroneCharacter::SetLocalPathPreviewActive(bool bActive)
 	}
 	else
 	{
-		// Preview is visual-only. Rejoin authoritative telemetry instead of leaving
-		// an online shadow drone at the simulated endpoint.
-		bFollowingMirror = true;
-		UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Local path preview ended; mirror follow restored"), *DroneName);
+		const UGameInstance* GI = GetGameInstance();
+		const UDroneNetworkManager* NetMgr =
+			GI ? GI->GetSubsystem<UDroneNetworkManager>() : nullptr;
+		const bool bStrictIsolation = NetMgr && NetMgr->IsStrictLocalPreviewIsolation();
+
+		// Normal preview rejoins authoritative telemetry. Strict isolation has no
+		// mirror actor, so retain local transform ownership between preview runs.
+		bFollowingMirror = !bStrictIsolation;
+		UE_LOG(LogTemp, Log, TEXT("MultiDroneCharacter %s: Local path preview ended; mirror follow=%d (isolation=%d)"),
+			*DroneName, bFollowingMirror ? 1 : 0, bStrictIsolation ? 1 : 0);
 	}
 }
 
@@ -785,14 +798,28 @@ void AMultiDroneCharacter::ResetLocalAttackState()
 	bIsLocalAttackCompleted = false;
 	AttackTargetLocation = FVector::ZeroVector;
 
-	if (Registry)
+	const bool bResumeLocalPatrol = CachedPathActor.IsValid();
+	if (bResumeLocalPatrol)
 	{
-		Registry->UpdateLocalState(DroneId, EUELocalDroneState::None);
+		CachedPathActor->ResumeMovement();
 	}
 
-	// 恢复跟随镜像机
-	bFollowingMirror = true;
+	if (Registry)
+	{
+		Registry->UpdateLocalState(DroneId,
+			bResumeLocalPatrol ? EUELocalDroneState::LocalPatrolling : EUELocalDroneState::None);
+	}
+
+	const UGameInstance* GI = GetGameInstance();
+	const UDroneNetworkManager* NetMgr =
+		GI ? GI->GetSubsystem<UDroneNetworkManager>() : nullptr;
+	const bool bStrictIsolation = NetMgr && NetMgr->IsStrictLocalPreviewIsolation();
+
+	// A paused local patrol resumes from the same path actor. Only return to mirror
+	// following when no local owner remains and backend telemetry is allowed.
+	bFollowingMirror = !bResumeLocalPatrol && !bLocalPathPreviewActive && !bStrictIsolation;
 	CachedPathActor = nullptr;
 
-	UE_LOG(LogTemp, Log, TEXT("[MultiDroneCharacter] %s: Reset local attack state"), *DroneName);
+	UE_LOG(LogTemp, Log, TEXT("[MultiDroneCharacter] %s: Reset local attack state (resumePatrol=%d, mirrorFollow=%d)"),
+		*DroneName, bResumeLocalPatrol ? 1 : 0, bFollowingMirror ? 1 : 0);
 }

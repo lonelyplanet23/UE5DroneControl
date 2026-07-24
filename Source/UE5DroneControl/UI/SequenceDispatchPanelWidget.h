@@ -164,6 +164,7 @@ private:
 	void BeginLocalPatrolSimulation(const TMap<int32, FDronePathSaveData>& PreviewMap);
 	void EndLocalPatrolSimulation(bool bForceClearAllLocalStates = false);
 	bool IsLocalPatrolSimulationEnabled() const;
+	bool IsStrictLocalPreviewIsolationEnabled() const;
 	// Local preview must start shadow playback immediately, even when telemetry still reports Online.
 	// Formal dispatch keeps the existing assembly_complete gate for real drones.
 	bool bLocalPreviewPlaybackRequested = false;

@@ -67,6 +67,13 @@ void UDroneListWidget::BuildRuntimeWidgetTree()
     Add(Content, MakeText(TEXT("TitleText"), TEXT("无人机态势"), FLinearColor(0.94f, 0.98f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 2.0f));
     Add(Content, MakeText(TEXT("SubtitleText"), TEXT("已注册无人机 · 实时状态同步"), FLinearColor(0.45f, 0.67f, 0.86f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 10.0f));
 
+    IsolationStatusText = MakeText(
+        TEXT("IsolationStatusText"),
+        TEXT("纯本地预演：后端刷新已禁用"),
+        FLinearColor(1.0f, 0.16f, 0.12f, 1.0f));
+    IsolationStatusText->SetVisibility(ESlateVisibility::Collapsed);
+    Add(Content, IsolationStatusText, FMargin(0.0f, 0.0f, 0.0f, 10.0f));
+
     DroneScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("DroneScrollBox"));
     DroneScrollBox->SetScrollBarVisibility(ESlateVisibility::Visible);
     if (UVerticalBoxSlot* ScrollSlot = Content->AddChildToVerticalBox(DroneScrollBox))
@@ -194,6 +201,18 @@ void UDroneListWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        CachedNetworkManager = GI->GetSubsystem<UDroneNetworkManager>();
+        if (CachedNetworkManager)
+        {
+            CachedNetworkManager->OnIsolationStateChanged.AddUniqueDynamic(
+                this, &UDroneListWidget::HandleIsolationStateChanged);
+        }
+    }
+    UpdateIsolationPresentation(
+        CachedNetworkManager && CachedNetworkManager->IsStrictLocalPreviewIsolation());
+
     RefreshFromRegistry();
 
     // 启动刷新定时器
@@ -205,6 +224,13 @@ void UDroneListWidget::NativeConstruct()
 
 void UDroneListWidget::NativeDestruct()
 {
+    if (CachedNetworkManager)
+    {
+        CachedNetworkManager->OnIsolationStateChanged.RemoveDynamic(
+            this, &UDroneListWidget::HandleIsolationStateChanged);
+        CachedNetworkManager = nullptr;
+    }
+
     if (GetWorld())
     {
         GetWorld()->GetTimerManager().ClearTimer(RefreshTimerHandle);
@@ -215,4 +241,19 @@ void UDroneListWidget::NativeDestruct()
 void UDroneListWidget::OnRefreshTimer()
 {
     RefreshFromRegistry();
+}
+
+void UDroneListWidget::HandleIsolationStateChanged(bool bIsolated)
+{
+    UpdateIsolationPresentation(bIsolated);
+    RefreshFromRegistry();
+}
+
+void UDroneListWidget::UpdateIsolationPresentation(bool bIsolated)
+{
+    if (IsolationStatusText)
+    {
+        IsolationStatusText->SetVisibility(
+            bIsolated ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+    }
 }

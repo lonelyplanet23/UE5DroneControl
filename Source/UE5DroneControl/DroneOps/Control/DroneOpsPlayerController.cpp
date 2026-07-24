@@ -26,7 +26,6 @@
 #include "UI/UIManagerBlueprintLibrary.h"
 #include "UI/DroneInfoPanelWidget.h"
 #include "UI/GeographicTargetPanelWidget.h"
-#include "UI/LocalPreviewIsolationToggleWidget.h"
 #include "UI/SequenceDispatchPanelWidget.h"
 #include "UI/DroneInfoPanelWidget.h"
 #include "UI/GeographicTargetPanelWidget.h"
@@ -255,17 +254,6 @@ void ADroneOpsPlayerController::BeginPlay()
 		UE_LOG(LogTemp, Warning, TEXT("DroneOpsPlayerController: BoxSelectWidgetClass is NULL - not assigned in BP"));
 	}
 
-	// 纯本地预演隔离 Toggle（右上角，高 ZOrder 确保不被遮挡）
-	{
-		ULocalPreviewIsolationToggleWidget* IsolationToggle =
-			CreateWidget<ULocalPreviewIsolationToggleWidget>(this, ULocalPreviewIsolationToggleWidget::StaticClass());
-		if (IsolationToggle)
-		{
-			IsolationToggle->AddToViewport(50); // ZOrder 50：高于普通面板，低于弹窗
-			UE_LOG(LogTemp, Log, TEXT("DroneOpsPlayerController: LocalPreviewIsolationToggle created"));
-		}
-	}
-
 	// Create Sequence Dispatch Panel (persistent, bottom-right)
 	UUIManagerBlueprintLibrary::ShowSequenceDispatchPanel(this);
 
@@ -276,9 +264,8 @@ void ADroneOpsPlayerController::BeginPlay()
 	// 根据当前地图决定：CesiumWorld 左下角，MainMenu 右上角。
 	UUIManagerBlueprintLibrary::ShowDroneList(this);
 
-	FTimerHandle InitialFollowViewTimer;
 	GetWorldTimerManager().SetTimer(
-		InitialFollowViewTimer,
+		InitialFollowViewTimerHandle,
 		[this]()
 		{
 			SwitchToNextMultiDroneFollowView(0.0f);
@@ -289,6 +276,10 @@ void ADroneOpsPlayerController::BeginPlay()
 
 void ADroneOpsPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(InitialFollowViewTimerHandle);
+	}
 	StopSelectedDroneVerticalControl(false);
 	CloseCurrentDroneInfoPanel();
 	EndFormationRotatePreview();
@@ -2215,8 +2206,14 @@ void ADroneOpsPlayerController::OnSwitchToTopDown()
 
 void ADroneOpsPlayerController::SwitchToNextMultiDroneFollowView(float BlendTime)
 {
+	UWorld* World = GetWorld();
+	if (!World || World->bIsTearingDown)
+	{
+		return;
+	}
+
 	TArray<AMultiDroneCharacter*> Actors;
-	for (TActorIterator<AMultiDroneCharacter> It(GetWorld()); It; ++It)
+	for (TActorIterator<AMultiDroneCharacter> It(World); It; ++It)
 	{
 		Actors.Add(*It);
 	}
@@ -2732,21 +2729,17 @@ bool ADroneOpsPlayerController::TryBuildBackendRelativePathData(
 			}
 
 			FVector BackendRelativeTarget = FVector::ZeroVector;
-			FString ConvertError;
-			if (!TryBuildGeographicBackendTarget(
-				DroneId,
-				TargetCoordinate,
-				FVector::ZeroVector,
-				NetworkManager,
-				BackendRelativeTarget,
-				ConvertError))
+			const ARealTimeDroneReceiver* Receiver = Cast<ARealTimeDroneReceiver>(
+				DroneRegistry->GetReceiverActor(DroneId));
+			if (!Receiver || !Receiver->bHasGpsAnchor)
 			{
 				OutError = FString::Printf(
-					TEXT("无人机 %d 的第 %d 个航点转换失败：%s"),
-					DroneId, WaypointIndex + 1, *ConvertError);
+					TEXT("无人机 %d 的第 %d 个航点转换失败：GPS 锚点不可用"),
+					DroneId, WaypointIndex + 1);
 				OutBackendPathData.Reset();
 				return false;
 			}
+			BackendRelativeTarget = WorldLocation - Receiver->AnchorWorldLocation;
 
 			Waypoint.Location = BackendRelativeTarget;
 		}

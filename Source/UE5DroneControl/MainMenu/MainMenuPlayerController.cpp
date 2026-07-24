@@ -45,11 +45,13 @@ void AMainMenuPlayerController::ShowMainMenuWidget()
 
 void AMainMenuPlayerController::GoToQueueEditor()
 {
+	ClearPreviewIsolationForNonPreviewLevel();
 	UGameplayStatics::OpenLevel(this, QueueEditorLevelName);
 }
 
 void AMainMenuPlayerController::GoToPreview()
 {
+	StagePreviewIsolationState();
 	UGameplayStatics::OpenLevel(this, PreviewLevelName);
 }
 
@@ -64,6 +66,7 @@ void AMainMenuPlayerController::GoToPreviewWithOrigin(double Latitude, double Lo
 			NetMgr->PendingOriginAltitude  = Altitude;
 		}
 	}
+	StagePreviewIsolationState();
 	UGameplayStatics::OpenLevel(this, PreviewLevelName);
 }
 
@@ -98,5 +101,28 @@ void AMainMenuPlayerController::GoToPreviewFromSavedSettings()
 
 	// 文件不存在或格式无法解析，直接跳转不修改 Georeference
 	UE_LOG(LogTemp, Warning, TEXT("GoToPreviewFromSavedSettings: no valid settings found, skipping Georeference update"));
-	UGameplayStatics::OpenLevel(this, PreviewLevelName);
+	GoToPreview();
+}
+
+void AMainMenuPlayerController::StagePreviewIsolationState()
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			NetMgr->StageStrictLocalPreviewIsolationForNextPreview();
+		}
+	}
+}
+
+void AMainMenuPlayerController::ClearPreviewIsolationForNonPreviewLevel()
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDroneNetworkManager* NetMgr = GI->GetSubsystem<UDroneNetworkManager>())
+		{
+			NetMgr->ClearStagedStrictLocalPreviewIsolation();
+			NetMgr->SetStrictLocalPreviewIsolation(false);
+		}
+	}
 }

@@ -50,6 +50,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PreviewConfirm")
 	void SetMessage(const FString& Message);
 
+	/** Disable formal backend dispatch while strict local isolation is active. */
+	UFUNCTION(BlueprintCallable, Category = "PreviewConfirm")
+	void SetDispatchAvailable(bool bAvailable, const FString& UnavailableReason);
+
 	// ===== 攻击确认模式 =====
 
 	/** 设置为攻击确认模式 */

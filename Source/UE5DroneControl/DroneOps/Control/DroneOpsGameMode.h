@@ -84,6 +84,14 @@ protected:
 	float ReceiverSpawnSpacingCm = 400.0f;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FLocalPreviewIsolationPolicyTest;
+#endif
+	static bool ShouldSpawnMirrorDrones(bool bStrictIsolation)
+	{
+		return !bStrictIsolation;
+	}
+
 	APawn* FindUnpossessedPlacedPawn(bool bLogDiscoveredPawns) const;
 	void PossessPlacedPawn(APlayerController* PlayerController, bool bSilentIfNotFound, bool bLogDiscoveredPawns);
 	void RetryPossessPlacedPawns();
@@ -93,6 +101,7 @@ private:
 
 	/** Read PendingOrigin from DroneNetworkManager and apply to CesiumGeoreference if set. */
 	void ApplyPendingGeoreferenceOrigin();
+	void ApplyStagedStrictLocalPreviewIsolation();
 
 	/** Read [CesiumTileServer] config and switch Cesium URL-based sources to the local tile server when enabled. */
 	void ApplyCesiumTileServerConfig();

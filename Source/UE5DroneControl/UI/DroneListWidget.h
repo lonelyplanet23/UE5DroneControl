@@ -8,6 +8,9 @@
 #include "DroneListItemWidget.h" //
 #include "DroneListWidget.generated.h" //
 
+class UDroneNetworkManager;
+class UTextBlock;
+
 // 🌟 1. 在类外面定义文档要求的“真数据结构体”，打通蓝图读取属性的通道
 USTRUCT(BlueprintType)
 struct FDroneRegistrationViewData
@@ -82,7 +85,17 @@ protected:
 private:
     FTimerHandle RefreshTimerHandle; //
 
+    UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> IsolationStatusText = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UDroneNetworkManager> CachedNetworkManager = nullptr;
+
+    UFUNCTION()
+    void HandleIsolationStateChanged(bool bIsolated);
+
     void OnRefreshTimer(); //
     void BuildRuntimeWidgetTree();
+    void UpdateIsolationPresentation(bool bIsolated);
 };
 

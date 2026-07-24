@@ -9,6 +9,9 @@
 #include "MainMenuWidget.generated.h"
 
 class AMainMenuPlayerController;
+class UBorder;
+class UCheckBox;
+class UDroneNetworkManager;
 
 /**
  * 主菜单 Widget 基类（C++ 骨架）
@@ -46,7 +49,9 @@ public:
 	// -----------------------------------------------------------------------
 	// 生命周期
 	// -----------------------------------------------------------------------
+	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 
 	// -----------------------------------------------------------------------
 	// 无人机注册（供蓝图按钮绑定）
@@ -120,6 +125,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MainMenu|Settings")
 	bool IsGroundProjectionRayEnabled() const;
 
+	/** Set the sole runtime isolation state owned by DroneNetworkManager. */
+	UFUNCTION(BlueprintCallable, Category = "MainMenu|Settings")
+	void SetStrictLocalPreviewIsolation(bool bEnabled);
+
+	/** Read the authoritative runtime isolation state. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MainMenu|Settings")
+	bool IsStrictLocalPreviewIsolationEnabled() const;
+
 	// -----------------------------------------------------------------------
 	// 导航（供蓝图按钮 OnClicked 绑定）
 	// -----------------------------------------------------------------------
@@ -169,4 +182,24 @@ private:
 
 	/** 获取 PlayerController（类型安全） */
 	AMainMenuPlayerController* GetMainMenuPC() const;
+
+	void BuildIsolationControls();
+	void SyncIsolationControls(bool bIsolated);
+
+	UFUNCTION()
+	void HandleIsolationCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void HandleIsolationStateChanged(bool bIsolated);
+
+	UPROPERTY()
+	TObjectPtr<UCheckBox> IsolationCheckBox;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> IsolationStatusBanner;
+
+	UPROPERTY()
+	TObjectPtr<UDroneNetworkManager> CachedNetworkManager;
+
+	bool bSuppressIsolationCallback = false;
 };

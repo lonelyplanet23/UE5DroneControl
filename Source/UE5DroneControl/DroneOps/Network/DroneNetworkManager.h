@@ -94,6 +94,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Network")
 	void ClearPendingGeoreferenceOrigin() { PendingOriginLatitude = 0.0; PendingOriginLongitude = 0.0; PendingOriginAltitude = -1.0; }
 
+	/**
+	 * Capture the current strict-isolation state for the next preview transition.
+	 * This is one-shot transport metadata; bStrictLocalPreviewIsolation remains
+	 * the sole authoritative runtime state.
+	 */
+	void StageStrictLocalPreviewIsolationForNextPreview();
+
+	/** Consume the isolation value staged by MainMenu. False means a direct level launch. */
+	bool ConsumeStagedStrictLocalPreviewIsolation(bool& OutEnabled);
+
+	/** Drop an unconsumed preview transition without changing the authoritative state. */
+	void ClearStagedStrictLocalPreviewIsolation();
+
 	// ---- Strict Local Preview Isolation ----
 
 	/**
@@ -263,6 +276,9 @@ private:
 
 	// ---- Strict Local Preview Isolation ----
 	bool bStrictLocalPreviewIsolation = false;
+	// One-shot transition payload. Never use this as runtime isolation state.
+	bool bHasStagedStrictLocalPreviewIsolation = false;
+	bool bStagedStrictLocalPreviewIsolation = false;
 	// Saved auto-reconnect state before isolation disabled it; restored on isolation off.
 	bool bSavedAutoReconnect = true;
 

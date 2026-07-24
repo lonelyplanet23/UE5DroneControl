@@ -51,6 +51,7 @@ void UDroneNetworkManager::Deinitialize()
 {
 	// 确保隔离状态清理（避免泄漏到下次初始化）
 	bStrictLocalPreviewIsolation = false;
+	ClearStagedStrictLocalPreviewIsolation();
 
 	StopPolling();
 
@@ -60,6 +61,33 @@ void UDroneNetworkManager::Deinitialize()
 	}
 
 	Super::Deinitialize();
+}
+
+void UDroneNetworkManager::StageStrictLocalPreviewIsolationForNextPreview()
+{
+	bStagedStrictLocalPreviewIsolation = bStrictLocalPreviewIsolation;
+	bHasStagedStrictLocalPreviewIsolation = true;
+	UE_LOG(LogTemp, Log,
+		TEXT("[DroneNetworkManager] Staged strict local preview isolation=%d for next preview"),
+		bStagedStrictLocalPreviewIsolation ? 1 : 0);
+}
+
+bool UDroneNetworkManager::ConsumeStagedStrictLocalPreviewIsolation(bool& OutEnabled)
+{
+	if (!bHasStagedStrictLocalPreviewIsolation)
+	{
+		return false;
+	}
+
+	OutEnabled = bStagedStrictLocalPreviewIsolation;
+	ClearStagedStrictLocalPreviewIsolation();
+	return true;
+}
+
+void UDroneNetworkManager::ClearStagedStrictLocalPreviewIsolation()
+{
+	bHasStagedStrictLocalPreviewIsolation = false;
+	bStagedStrictLocalPreviewIsolation = false;
 }
 
 // ---- Strict Local Preview Isolation ----
@@ -134,7 +162,13 @@ void UDroneNetworkManager::SetStrictLocalPreviewIsolation(bool bEnable)
 
 void UDroneNetworkManager::StartPolling()
 {
-	UWorld* World = GetGameInstance()->GetWorld();
+	if (CheckIsolationBlocked(TEXT("StartPolling")))
+	{
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
 	if (!World)
 	{
 		return;
@@ -155,9 +189,8 @@ void UDroneNetworkManager::StopPolling()
 
 void UDroneNetworkManager::PollDroneList()
 {
-	if (bStrictLocalPreviewIsolation)
+	if (CheckIsolationBlocked(TEXT("PollDroneList")))
 	{
-		// 隔离模式下静默跳过轮询（定时器已停止，此为防御性检查）
 		return;
 	}
 
@@ -418,6 +451,11 @@ void UDroneNetworkManager::SyncDroneListToRegistry(const TArray<TSharedPtr<FJson
 
 void UDroneNetworkManager::ConnectWebSocket()
 {
+	if (CheckIsolationBlocked(TEXT("ConnectWebSocket")))
+	{
+		return;
+	}
+
 	if (WsClient)
 	{
 		WsClient->OnConnected.AddDynamic(this, &UDroneNetworkManager::OnWsConnected);
@@ -427,6 +465,15 @@ void UDroneNetworkManager::ConnectWebSocket()
 
 void UDroneNetworkManager::OnWsConnected()
 {
+	if (CheckIsolationBlocked(TEXT("OnWsConnected")))
+	{
+		if (WsClient)
+		{
+			WsClient->Disconnect();
+		}
+		return;
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("[DroneNetworkManager] WS connected, syncing drone list from backend"));
 	PollDroneList();
 }

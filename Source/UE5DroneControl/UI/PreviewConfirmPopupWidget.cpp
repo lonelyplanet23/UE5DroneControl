@@ -86,6 +86,19 @@ void UPreviewConfirmPopupWidget::SetMessage(const FString& Message)
 	}
 }
 
+void UPreviewConfirmPopupWidget::SetDispatchAvailable(
+	bool bAvailable, const FString& UnavailableReason)
+{
+	if (DispatchButton)
+	{
+		DispatchButton->SetIsEnabled(bAvailable);
+	}
+	if (!bAvailable && !UnavailableReason.IsEmpty())
+	{
+		SetMessage(UnavailableReason);
+	}
+}
+
 void UPreviewConfirmPopupWidget::HandleLocalPreviewClicked()
 {
 	if (bIsAttackConfirmMode)

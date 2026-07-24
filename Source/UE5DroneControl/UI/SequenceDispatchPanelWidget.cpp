@@ -115,6 +115,20 @@ void USequenceDispatchPanelWidget::NativeConstruct()
 		}
 	}
 
+	if (IsStrictLocalPreviewIsolationEnabled())
+	{
+		if (AutoAssignCheckBox)
+		{
+			AutoAssignCheckBox->SetIsEnabled(false);
+		}
+		if (LocalPatrolSimulationToggle)
+		{
+			LocalPatrolSimulationToggle->SetIsChecked(true);
+			LocalPatrolSimulationToggle->SetIsEnabled(false);
+		}
+		SetStatusMessage(TEXT("纯本地预演模式：后端派发已禁用"));
+	}
+
 	SetPanelState(ESequencePanelState::Collapsed);
 }
 
@@ -517,6 +531,11 @@ void USequenceDispatchPanelWidget::UpdateMatchVisuals()
 void USequenceDispatchPanelWidget::UpdateDispatchButtonState()
 {
 	if (!DispatchButton) return;
+	if (IsStrictLocalPreviewIsolationEnabled())
+	{
+		DispatchButton->SetIsEnabled(false);
+		return;
+	}
 	const bool bAllMatched = MatchedPairs.Num() == LoadedPathsData.Paths.Num() && !LoadedPathsData.Paths.IsEmpty();
 	const bool bAutoReady = bAutoAssignEnabled && !LoadedPathsData.Paths.IsEmpty();
 	DispatchButton->SetIsEnabled(bAllMatched || bAutoReady);
@@ -824,7 +843,7 @@ void USequenceDispatchPanelWidget::OnDispatchResponse(bool bSuccess, const FStri
 			: FString::Printf(TEXT("派发失败: %s"), *ResponseBody));
 		PendingRemappedMap.Empty();
 		PendingAutoPathsByPathId.Empty();
-		if (DispatchButton) DispatchButton->SetIsEnabled(true);
+		UpdateDispatchButtonState();
 	}
 }
 
@@ -1015,7 +1034,16 @@ void USequenceDispatchPanelWidget::OnDispatchPathExecutionStateChanged(ADronePat
 
 bool USequenceDispatchPanelWidget::IsLocalPatrolSimulationEnabled() const
 {
-	return LocalPatrolSimulationToggle && LocalPatrolSimulationToggle->IsChecked();
+	return IsStrictLocalPreviewIsolationEnabled() ||
+		(LocalPatrolSimulationToggle && LocalPatrolSimulationToggle->IsChecked());
+}
+
+bool USequenceDispatchPanelWidget::IsStrictLocalPreviewIsolationEnabled() const
+{
+	UGameInstance* GI = GetGameInstance();
+	const UDroneNetworkManager* NetMgr =
+		GI ? GI->GetSubsystem<UDroneNetworkManager>() : nullptr;
+	return NetMgr && NetMgr->IsStrictLocalPreviewIsolation();
 }
 
 void USequenceDispatchPanelWidget::BeginLocalPatrolSimulation(const TMap<int32, FDronePathSaveData>& PreviewMap)
@@ -1152,7 +1180,8 @@ void USequenceDispatchPanelWidget::StartShadowDronePlayback()
 {
 	// Consume the one-shot request flag immediately. Any early return below must not leak a
 	// local-preview state into a later formal-dispatch callback.
-	const bool bThisPlaybackIsLocalPreview = bLocalPreviewPlaybackRequested;
+	const bool bThisPlaybackIsLocalPreview =
+		bLocalPreviewPlaybackRequested || IsStrictLocalPreviewIsolationEnabled();
 	bLocalPreviewPlaybackRequested = false;
 	LastLocalPreviewStartedPathCount = 0;
 	LastLocalPreviewSkippedNoShadowCount = 0;
@@ -1470,6 +1499,11 @@ void USequenceDispatchPanelWidget::ShowPreviewConfirmPopup()
 		return;
 	}
 
+	if (IsStrictLocalPreviewIsolationEnabled())
+	{
+		Popup->SetDispatchAvailable(false,
+			TEXT("纯本地预演模式：仅可本地播放，后端指令派发已禁用"));
+	}
 	Popup->OnChoiceMade.AddDynamic(this, &USequenceDispatchPanelWidget::OnPreviewConfirmChoice);
 	Popup->AddToViewport(100);
 }

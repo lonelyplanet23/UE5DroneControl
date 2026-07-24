@@ -545,6 +545,7 @@ bool ValidateDispatchDrone(int32 DroneId, FString& OutError) const;
 	float DroneInfoPanelRefreshIntervalSec = 0.2f;
 
 	FTimerHandle DroneInfoRefreshTimerHandle;
+	FTimerHandle InitialFollowViewTimerHandle;
 
 	void OnDroneInfoPanelClosed();
 

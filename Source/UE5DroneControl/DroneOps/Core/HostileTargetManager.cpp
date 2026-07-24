@@ -260,7 +260,10 @@ void UHostileTargetManager::ResetUndetectedTargets()
 		{
 			if (CachedRegistry)
 			{
-				CachedRegistry->UpdateLocalState(AssignedDroneId, EUELocalDroneState::None);
+				CachedRegistry->UpdateLocalState(AssignedDroneId,
+					Shadow->IsLocalPathPreviewActive()
+						? EUELocalDroneState::LocalPatrolling
+						: EUELocalDroneState::None);
 			}
 			Target->ResetTarget();
 			AssignedMap.Remove(Target->TargetId);
@@ -336,7 +339,17 @@ bool UHostileTargetManager::TryAssignTarget(int32 TargetId, int32 DroneId)
 		return false;
 	}
 
-	AHostileTargetActor* Target = GetTarget(TargetId);
+	// TargetsLock is already held; do not call GetTarget(), which takes the
+	// same non-recursive lock and would deadlock the local detection chain.
+	AHostileTargetActor* Target = nullptr;
+	for (TObjectPtr<AHostileTargetActor> Candidate : RegisteredTargets)
+	{
+		if (IsValid(Candidate) && Candidate->TargetId == TargetId)
+		{
+			Target = Candidate.Get();
+			break;
+		}
+	}
 	if (!IsValid(Target) || Target->bIsDiscovered)
 	{
 		return false;
